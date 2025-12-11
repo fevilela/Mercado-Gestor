@@ -1,0 +1,169 @@
+✅ 1. Cadastro e Catálogos (Base do Sistema)
+✔ Produtos
+
+Cadastro completo (EAN, NCM, CEST, unidade, marca, tipo).
+
+Controle de variações (peso, cor, tamanho, kits).
+
+Fotos e descrição.
+
+Preço de compra, margem, preço de venda e promoções.
+
+✔ Clientes
+
+Dados cadastrais, histórico de compras, limite de crédito, fidelidade.
+
+✔ Fornecedores
+
+Dados, condições de pagamento, prazos, ranking de desempenho.
+
+✅ 2. Gestão de Estoque
+
+Controle de entrada e saída.
+
+Estoque mínimo/máximo.
+
+Inventário e ajuste.
+
+Lote e validade (essencial para mercados).
+
+Rastreamento de perdas, quebras e devoluções.
+
+Curva ABC (produtos mais importantes).
+
+Multilojas ou multidepósitos.
+
+✅ 3. Compras
+
+Sugestão automática de compra com base em giro e estoque mínimo.
+
+Envio de pedidos a fornecedores.
+
+Conferência de notas de entrada (XML).
+
+Comparação de preços entre fornecedores.
+
+Relatório de rupturas (faltas).
+
+✅ 4. Vendas
+✔ Frente de Caixa (PDV)
+
+Leitura de código de barras.
+
+Pesagem integrada (balanças).
+
+Emissão de NFC-e/SAT em poucos segundos.
+
+Taxas e múltiplas formas de pagamento.
+
+Venda com crédito interno.
+
+✔ Vendas internas/atacado
+
+Orçamento, pedidos, pré-vendas, entregas.
+
+✔ E-commerce (opcional)
+
+Sincronização de estoque com loja virtual.
+
+✅ 5. Financeiro
+✔ Contas a pagar / a receber
+
+Parcelas automáticas vindas de compras e vendas.
+
+Gestão de boletos, PIX, carnês, cartões.
+
+✔ Conciliação bancária
+
+Integração com bancos.
+
+✔ Fluxo de caixa
+
+Diário, semanal, mensal, com previsão futura.
+
+✔ DRE gerencial
+
+Lucro/prejuízo por período.
+
+✅ 6. Fiscal e Contábil
+
+Emissão automática de NF-e, NFC-e, NFS-e e SAT.
+
+Importação e leitura de XML.
+
+SPED (quando aplicável).
+
+Integração com o contador.
+
+Tributação por estado: ICMS, PIS/COFINS, IPI, CST/CSOSN, Substituição Tributária.
+
+✅ 7. Relatórios e Inteligência (BI)
+✔ Relatórios essenciais:
+
+Produtos mais vendidos / menos vendidos.
+
+Margem real x planejada.
+
+Giro de estoque.
+
+Ticket médio e comportamento do cliente.
+
+Ranking de vendedores.
+
+Indicadores de perdas e desperdícios.
+
+Tendências de demanda.
+
+✔ Painéis em tempo real (dashboard)
+
+Vendas do dia.
+
+Estoque crítico.
+
+Caixa e financeiro.
+
+✅ 8. Gestão de Promoções e Fidelidade
+
+Promoções por período, categoria, combos, leve 3 pague 2.
+
+Programas de pontos.
+
+Cupom de desconto.
+
+Clubes de vantagens.
+
+✅ 9. Segurança e Controle de Usuários
+
+Permissões por função (estoquista, caixa, gerente).
+
+Logs de operações (quem fez o quê).
+
+Backup automático.
+
+✅ 10. Integrações
+
+Balanças, impressoras fiscais e não fiscais.
+
+TEF (cartões).
+
+Marketplaces (Mercado Livre, Shopee, etc.).
+
+Fornecedores via EDI.
+
+Aplicativos de entrega (iFood, Rappi).
+
+ERP ou contabilidade externa.
+
+✅ 11. Funcionalidades avançadas (para ser realmente completo)
+
+Previsão de compras com IA (evitar ruptura).
+
+Sugestão de preços baseada na concorrência.
+
+Reconhecimento de perdas no PDV.
+
+Etiqueta eletrônica de gôndola (ESL).
+
+Gestão de múltiplas lojas com centro de distribuição.
+
+Controle de produção interna (padaria, açougue, rotisseria).
