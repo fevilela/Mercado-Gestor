@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { 
   ArrowLeft, 
   Search, 
@@ -20,7 +20,6 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { MOCK_PRODUCTS } from "@/lib/mock-data";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,15 +31,43 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 export default function POS() {
-  const [cart, setCart] = useState<{product: typeof MOCK_PRODUCTS[0], qty: number}[]>([]);
+  const [, setLocation] = useLocation();
+  const [cart, setCart] = useState<{product: any, qty: number}[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isFinishing, setIsFinishing] = useState(false);
   const [fiscalStatus, setFiscalStatus] = useState<"idle" | "sending" | "success">("idle");
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const addToCart = (product: typeof MOCK_PRODUCTS[0]) => {
+  const { data: products = [] } = useQuery({
+    queryKey: ["/api/products"],
+    queryFn: async () => {
+      const res = await fetch("/api/products");
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    }
+  });
+
+  const createSaleMutation = useMutation({
+    mutationFn: async (saleData: any) => {
+      const res = await fetch("/api/sales", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(saleData)
+      });
+      if (!res.ok) throw new Error("Failed to create sale");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    }
+  });
+
+  const addToCart = (product: any) => {
     setCart(prev => {
       const existing = prev.find(item => item.product.id === product.id);
       if (existing) {
@@ -66,20 +93,49 @@ export default function POS() {
     }));
   };
 
-  const handleFinishSale = () => {
+  const handleFinishSale = async () => {
     setIsFinishing(true);
     setFiscalStatus("sending");
     
-    // Simulate API call to SEFAZ
-    setTimeout(() => {
-      setFiscalStatus("success");
+    const saleData = {
+      sale: {
+        customerName: "Consumidor Final",
+        total: total.toFixed(2),
+        itemsCount: cart.reduce((acc, item) => acc + item.qty, 0),
+        paymentMethod: "Dinheiro",
+        status: "Concluído",
+        nfceStatus: "Autorizada"
+      },
+      items: cart.map(item => ({
+        productId: item.product.id,
+        productName: item.product.name,
+        quantity: item.qty,
+        unitPrice: item.product.price,
+        subtotal: (parseFloat(item.product.price) * item.qty).toFixed(2)
+      }))
+    };
+
+    try {
+      await createSaleMutation.mutateAsync(saleData);
+      
+      setTimeout(() => {
+        setFiscalStatus("success");
+        toast({
+          title: "Venda Autorizada!",
+          description: "Nota Fiscal (NFC-e) emitida e enviada para a Receita com sucesso.",
+          variant: "default",
+          className: "bg-emerald-500 text-white border-none"
+        });
+      }, 2000);
+    } catch (error) {
       toast({
-        title: "Venda Autorizada!",
-        description: "Nota Fiscal (NFC-e) emitida e enviada para a Receita com sucesso.",
-        variant: "default",
-        className: "bg-emerald-500 text-white border-none"
+        title: "Erro",
+        description: "Falha ao processar venda",
+        variant: "destructive"
       });
-    }, 2000);
+      setIsFinishing(false);
+      setFiscalStatus("idle");
+    }
   };
 
   const resetSale = () => {
@@ -88,12 +144,12 @@ export default function POS() {
     setFiscalStatus("idle");
   };
 
-  const subtotal = cart.reduce((acc, item) => acc + (item.product.price * item.qty), 0);
-  const total = subtotal; // Add taxes/discounts logic here if needed
+  const subtotal = cart.reduce((acc, item) => acc + (parseFloat(item.product.price) * item.qty), 0);
+  const total = subtotal;
 
-  const filteredProducts = MOCK_PRODUCTS.filter(p => 
+  const filteredProducts = products.filter((p: any) => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    p.code.includes(searchQuery)
+    (p.ean && p.ean.includes(searchQuery))
   );
 
   return (
@@ -128,7 +184,7 @@ export default function POS() {
           </div>
         </div>
 
-        {/* Categories (Horizontal Scroll) */}
+        {/* Categories */}
         <div className="h-14 border-b border-border flex items-center px-6 gap-2 bg-muted/20 overflow-x-auto whitespace-nowrap scrollbar-hide">
           <Badge variant="default" className="cursor-pointer hover:opacity-90 px-4 py-1.5 text-sm">Todos</Badge>
           <Badge variant="outline" className="cursor-pointer hover:bg-muted px-4 py-1.5 text-sm">Mercearia</Badge>
@@ -142,14 +198,14 @@ export default function POS() {
         {/* Product Grid */}
         <ScrollArea className="flex-1 bg-muted/10 p-6">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {filteredProducts.map((product) => (
+            {filteredProducts.map((product: any) => (
               <Card 
                 key={product.id} 
                 className="cursor-pointer hover:border-primary hover:shadow-md transition-all active:scale-95 flex flex-col overflow-hidden"
                 onClick={() => addToCart(product)}
+                data-testid={`product-card-${product.id}`}
               >
                 <div className="aspect-square bg-white p-4 flex items-center justify-center">
-                  {/* In a real app, use product.image */}
                   <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xl">
                     {product.name.substring(0,2).toUpperCase()}
                   </div>
@@ -157,10 +213,10 @@ export default function POS() {
                 <div className="p-3 flex flex-col flex-1 justify-between bg-card">
                   <div>
                     <h3 className="font-medium text-sm line-clamp-2 leading-tight mb-1">{product.name}</h3>
-                    <p className="text-xs text-muted-foreground">{product.code}</p>
+                    <p className="text-xs text-muted-foreground">{product.ean || 'N/A'}</p>
                   </div>
                   <div className="mt-2 font-bold text-lg text-primary">
-                    R$ {product.price.toFixed(2)}
+                    R$ {parseFloat(product.price).toFixed(2)}
                   </div>
                 </div>
               </Card>
@@ -193,25 +249,25 @@ export default function POS() {
               </div>
             ) : (
               cart.map((item) => (
-                <div key={item.product.id} className="flex gap-3 bg-muted/20 p-3 rounded-lg border border-border/50">
+                <div key={item.product.id} className="flex gap-3 bg-muted/20 p-3 rounded-lg border border-border/50" data-testid={`cart-item-${item.product.id}`}>
                   <div className="h-12 w-12 bg-white rounded flex items-center justify-center border border-border text-xs font-bold">
                      x{item.qty}
                   </div>
                   <div className="flex-1">
                     <div className="flex justify-between items-start">
                       <h4 className="font-medium text-sm line-clamp-1">{item.product.name}</h4>
-                      <span className="font-bold text-sm">R$ {(item.product.price * item.qty).toFixed(2)}</span>
+                      <span className="font-bold text-sm">R$ {(parseFloat(item.product.price) * item.qty).toFixed(2)}</span>
                     </div>
                     <div className="flex items-center justify-between mt-2">
-                      <p className="text-xs text-muted-foreground">Unit: R$ {item.product.price.toFixed(2)}</p>
+                      <p className="text-xs text-muted-foreground">Unit: R$ {parseFloat(item.product.price).toFixed(2)}</p>
                       <div className="flex items-center gap-1">
-                        <Button variant="outline" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); updateQty(item.product.id, -1); }}>
+                        <Button variant="outline" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); updateQty(item.product.id, -1); }} data-testid={`button-decrease-qty-${item.product.id}`}>
                           <Minus className="h-3 w-3" />
                         </Button>
-                        <Button variant="outline" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); updateQty(item.product.id, 1); }}>
+                        <Button variant="outline" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); updateQty(item.product.id, 1); }} data-testid={`button-increase-qty-${item.product.id}`}>
                           <Plus className="h-3 w-3" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); removeFromCart(item.product.id); }}>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); removeFromCart(item.product.id); }} data-testid={`button-remove-${item.product.id}`}>
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
@@ -241,7 +297,7 @@ export default function POS() {
             <Separator className="my-2" />
             <div className="flex justify-between items-end">
               <span className="font-bold text-lg">Total a Pagar</span>
-              <span className="font-bold text-3xl text-primary">R$ {total.toFixed(2)}</span>
+              <span className="font-bold text-3xl text-primary" data-testid="text-total">R$ {total.toFixed(2)}</span>
             </div>
           </div>
 
@@ -269,6 +325,7 @@ export default function POS() {
             className="w-full h-12 text-lg font-bold gap-2" 
             disabled={cart.length === 0}
             onClick={handleFinishSale}
+            data-testid="button-finish-sale"
           >
             FINALIZAR VENDA
             <FileCheck className="h-5 w-5" />

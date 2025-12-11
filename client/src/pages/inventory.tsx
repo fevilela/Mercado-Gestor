@@ -15,7 +15,8 @@ import {
   Plus, 
   MoreHorizontal, 
   FileDown,
-  ArrowUpDown
+  ArrowUpDown,
+  Package
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { 
@@ -25,10 +26,32 @@ import {
   DropdownMenuLabel, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
-import { MOCK_PRODUCTS } from "@/lib/mock-data";
 import { Progress } from "@/components/ui/progress";
+import { useQuery } from "@tanstack/react-query";
 
 export default function Inventory() {
+  const { data: products = [], isLoading } = useQuery({
+    queryKey: ["/api/products"],
+    queryFn: async () => {
+      const res = await fetch("/api/products");
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    }
+  });
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-96">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Carregando produtos...</p>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
   return (
     <Layout>
       <div className="flex flex-col gap-6">
@@ -83,7 +106,7 @@ export default function Inventory() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {MOCK_PRODUCTS.map((product) => {
+              {products.map((product: any) => {
                 const stockPercentage = Math.min((product.stock / 100) * 100, 100);
                 let statusColor = "bg-emerald-500";
                 let statusText = "Em Estoque";
@@ -100,21 +123,20 @@ export default function Inventory() {
                   <TableRow key={product.id}>
                     <TableCell>
                       <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center overflow-hidden border border-border">
-                        {/* Placeholder for real images */}
                         <Package className="h-6 w-6 text-muted-foreground opacity-50" />
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col">
                         <span className="font-medium">{product.name}</span>
-                        <span className="text-xs text-muted-foreground">EAN: {product.code}</span>
+                        <span className="text-xs text-muted-foreground">EAN: {product.ean || 'N/A'}</span>
                       </div>
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary" className="font-normal">{product.category}</Badge>
                     </TableCell>
                     <TableCell className="font-medium">
-                      R$ {product.price.toFixed(2)}
+                      R$ {parseFloat(product.price).toFixed(2)}
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
@@ -155,27 +177,5 @@ export default function Inventory() {
         </div>
       </div>
     </Layout>
-  );
-}
-
-function Package(props: any) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="m7.5 4.27 9 5.15" />
-      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
-      <path d="m3.3 7 8.7 5 8.7-5" />
-      <path d="M12 22v-10" />
-    </svg>
   );
 }
