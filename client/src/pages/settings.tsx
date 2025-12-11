@@ -6,9 +6,23 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { CreditCard, Smartphone } from "lucide-react";
+import { CreditCard, Smartphone, Loader2, CheckCircle2 } from "lucide-react";
+import { useState } from "react";
 
 export default function Settings() {
+  const [stoneStatus, setStoneStatus] = useState<"idle" | "connecting" | "connected">("idle");
+  const [mpStatus, setMpStatus] = useState<"idle" | "connecting" | "connected">("idle");
+
+  const handleConnectStone = () => {
+    setStoneStatus("connecting");
+    setTimeout(() => setStoneStatus("connected"), 2000);
+  };
+
+  const handleConnectMP = () => {
+    setMpStatus("connecting");
+    setTimeout(() => setMpStatus("connected"), 2000);
+  };
+
   return (
     <Layout>
       <div className="flex flex-col gap-6">
@@ -123,7 +137,26 @@ export default function Settings() {
                       <option>Manual (POS - Digitar valor na máquina)</option>
                     </select>
                   </div>
-                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700">Testar Conexão Stone</Button>
+                  
+                  {stoneStatus === "connected" ? (
+                    <div className="rounded-md bg-emerald-100 p-3 flex items-center gap-3 text-emerald-700">
+                      <CheckCircle2 className="h-5 w-5" />
+                      <div className="text-sm font-medium">Conectado: Terminal S920</div>
+                    </div>
+                  ) : (
+                    <Button 
+                      className="w-full bg-emerald-600 hover:bg-emerald-700"
+                      onClick={handleConnectStone}
+                      disabled={stoneStatus === "connecting"}
+                    >
+                      {stoneStatus === "connecting" ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Conectando...
+                        </>
+                      ) : "Testar Conexão Stone"}
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
 
@@ -150,7 +183,26 @@ export default function Settings() {
                     <Label>ID do Terminal (Point)</Label>
                     <Input placeholder="POINT-123456" />
                   </div>
-                  <Button className="w-full bg-sky-500 hover:bg-sky-600">Vincular Maquininha</Button>
+
+                  {mpStatus === "connected" ? (
+                    <div className="rounded-md bg-sky-100 p-3 flex items-center gap-3 text-sky-700">
+                      <CheckCircle2 className="h-5 w-5" />
+                      <div className="text-sm font-medium">Vinculado: Point Smart</div>
+                    </div>
+                  ) : (
+                    <Button 
+                      className="w-full bg-sky-500 hover:bg-sky-600"
+                      onClick={handleConnectMP}
+                      disabled={mpStatus === "connecting"}
+                    >
+                      {mpStatus === "connecting" ? (
+                         <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Verificando...
+                        </>
+                      ) : "Vincular Maquininha"}
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
 
