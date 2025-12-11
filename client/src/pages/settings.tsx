@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { CreditCard, Smartphone } from "lucide-react";
 
 export default function Settings() {
   return (
@@ -16,12 +17,12 @@ export default function Settings() {
           <p className="text-muted-foreground">Gerencie dados da empresa, fiscal e usuários.</p>
         </div>
 
-        <Tabs defaultValue="company" className="space-y-4">
+        <Tabs defaultValue="payments" className="space-y-4">
           <TabsList>
             <TabsTrigger value="company">Dados da Empresa</TabsTrigger>
             <TabsTrigger value="fiscal">Fiscal & Tributário</TabsTrigger>
+            <TabsTrigger value="payments">Pagamentos & TEF</TabsTrigger>
             <TabsTrigger value="users">Usuários</TabsTrigger>
-            <TabsTrigger value="backup">Backup & Segurança</TabsTrigger>
           </TabsList>
 
           <TabsContent value="company">
@@ -92,6 +93,67 @@ export default function Settings() {
                 <Button>Testar Comunicação SEFAZ</Button>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="payments">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card>
+                <CardHeader className="flex flex-row items-center gap-4 space-y-0">
+                  <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                    <CreditCard className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>Integração Stone</CardTitle>
+                    <CardDescription>Configuração de Maquininha (TEF/POS)</CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between space-x-2">
+                    <Label>Ativar Integração</Label>
+                    <Switch />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Stone Code / ID da Loja</Label>
+                    <Input placeholder="123456789" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Tipo de Conexão</Label>
+                    <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
+                      <option>Integrado (TEF - Valor vai automático)</option>
+                      <option>Manual (POS - Digitar valor na máquina)</option>
+                    </select>
+                  </div>
+                  <Button className="w-full bg-emerald-600 hover:bg-emerald-700">Testar Conexão Stone</Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center gap-4 space-y-0">
+                  <div className="h-10 w-10 rounded-full bg-sky-100 flex items-center justify-center text-sky-600">
+                    <Smartphone className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>Mercado Pago</CardTitle>
+                    <CardDescription>Point Smart & QR Code</CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between space-x-2">
+                    <Label>Ativar Integração</Label>
+                    <Switch />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Access Token (Integração)</Label>
+                    <Input type="password" placeholder="APP_USR-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>ID do Terminal (Point)</Label>
+                    <Input placeholder="POINT-123456" />
+                  </div>
+                  <Button className="w-full bg-sky-500 hover:bg-sky-600">Vincular Maquininha</Button>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
