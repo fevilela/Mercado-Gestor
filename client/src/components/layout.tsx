@@ -1,28 +1,28 @@
-import { 
-  LayoutDashboard, 
-  ShoppingCart, 
-  Package, 
-  Store, 
-  BarChart3, 
-  Wallet, 
-  Settings, 
-  Users, 
-  LogOut, 
+import {
+  LayoutDashboard,
+  ShoppingCart,
+  Package,
+  Store,
+  BarChart3,
+  Wallet,
+  Settings,
+  Users,
+  LogOut,
   Search,
   Bell,
   Menu,
-  ChevronDown
+  ChevronDown,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuLabel, 
-  DropdownMenuSeparator, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -58,15 +58,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {sidebarItems.map((item) => {
             const isActive = location === item.href;
             return (
-              <Link key={item.href} href={item.href}>
-                <a className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
-                  isActive 
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm" 
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
                     : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                }`}>
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </a>
+                }`}
+              >
+                <item.icon className="h-4 w-4" />
+                {item.label}
               </Link>
             );
           })}
@@ -79,8 +81,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <AvatarFallback>JD</AvatarFallback>
           </Avatar>
           <div className="flex flex-col overflow-hidden">
-            <span className="truncate font-semibold text-sidebar-foreground">João Silva</span>
-            <span className="truncate text-xs text-sidebar-foreground/70">Gerente</span>
+            <span className="truncate font-semibold text-sidebar-foreground">
+              João Silva
+            </span>
+            <span className="truncate text-xs text-sidebar-foreground/70">
+              Gerente
+            </span>
           </div>
         </div>
       </div>
@@ -108,7 +114,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <SidebarContent />
             </SheetContent>
           </Sheet>
-          
+
           <div className="flex-1 flex items-center gap-4">
             <div className="relative w-full max-w-sm hidden sm:block">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -125,11 +131,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <Bell className="h-5 w-5 text-muted-foreground" />
               <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-destructive border border-background"></span>
             </Button>
-            
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="gap-2 pl-2">
-                  <span className="hidden sm:inline-block text-sm font-medium">Minha Loja</span>
+                  <span className="hidden sm:inline-block text-sm font-medium">
+                    Minha Loja
+                  </span>
                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
@@ -148,9 +156,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <div className="flex-1 p-6 overflow-auto">
-          {children}
-        </div>
+        <div className="flex-1 p-6 overflow-auto">{children}</div>
       </main>
     </div>
   );
