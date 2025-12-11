@@ -153,6 +153,20 @@ export default function Settings() {
                   <Button className="w-full bg-sky-500 hover:bg-sky-600">Vincular Maquininha</Button>
                 </CardContent>
               </Card>
+
+              <Card className="col-span-2 bg-muted/30 border-dashed">
+                <CardHeader>
+                  <CardTitle className="text-sm">Agente Local (Bridge)</CardTitle>
+                  <CardDescription>Para comunicação USB/Serial com maquininhas via navegador.</CardDescription>
+                </CardHeader>
+                <CardContent className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Status do Integrador: <span className="text-emerald-600">Simulado / Online</span></p>
+                    <p className="text-xs text-muted-foreground">Versão: v2.4.0 (Mock)</p>
+                  </div>
+                  <Button variant="outline" size="sm">Baixar Instalador (.exe)</Button>
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
         </Tabs>
