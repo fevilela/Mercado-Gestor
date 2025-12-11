@@ -8,6 +8,10 @@ import Dashboard from "@/pages/dashboard";
 import Inventory from "@/pages/inventory";
 import POS from "@/pages/pos";
 import Finance from "@/pages/finance";
+import Sales from "@/pages/sales";
+import Contacts from "@/pages/contacts";
+import Reports from "@/pages/reports";
+import Settings from "@/pages/settings";
 
 function Router() {
   return (
@@ -16,6 +20,10 @@ function Router() {
       <Route path="/inventory" component={Inventory} />
       <Route path="/pos" component={POS} />
       <Route path="/finance" component={Finance} />
+      <Route path="/sales" component={Sales} />
+      <Route path="/contacts" component={Contacts} />
+      <Route path="/reports" component={Reports} />
+      <Route path="/settings" component={Settings} />
       {/* Fallback to 404 */}
       <Route component={NotFound} />
     </Switch>

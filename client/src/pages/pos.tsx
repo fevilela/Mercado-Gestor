@@ -10,7 +10,11 @@ import {
   CreditCard,
   Banknote,
   QrCode,
-  User
+  User,
+  FileCheck,
+  CheckCircle2,
+  Loader2,
+  Printer
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -19,10 +23,22 @@ import { Separator } from "@/components/ui/separator";
 import { MOCK_PRODUCTS } from "@/lib/mock-data";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
 
 export default function POS() {
   const [cart, setCart] = useState<{product: typeof MOCK_PRODUCTS[0], qty: number}[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isFinishing, setIsFinishing] = useState(false);
+  const [fiscalStatus, setFiscalStatus] = useState<"idle" | "sending" | "success">("idle");
+  const { toast } = useToast();
 
   const addToCart = (product: typeof MOCK_PRODUCTS[0]) => {
     setCart(prev => {
@@ -48,6 +64,28 @@ export default function POS() {
       }
       return item;
     }));
+  };
+
+  const handleFinishSale = () => {
+    setIsFinishing(true);
+    setFiscalStatus("sending");
+    
+    // Simulate API call to SEFAZ
+    setTimeout(() => {
+      setFiscalStatus("success");
+      toast({
+        title: "Venda Autorizada!",
+        description: "Nota Fiscal (NFC-e) emitida e enviada para a Receita com sucesso.",
+        variant: "default",
+        className: "bg-emerald-500 text-white border-none"
+      });
+    }, 2000);
+  };
+
+  const resetSale = () => {
+    setCart([]);
+    setIsFinishing(false);
+    setFiscalStatus("idle");
   };
 
   const subtotal = cart.reduce((acc, item) => acc + (item.product.price * item.qty), 0);
@@ -79,10 +117,15 @@ export default function POS() {
               autoFocus
             />
           </div>
-          <Button variant="outline" className="gap-2">
-            <ScanBarcode className="h-4 w-4" />
-            Ler Código
-          </Button>
+          <div className="flex items-center gap-2">
+             <Badge variant="outline" className="h-8 gap-2 bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
+                <CheckCircle2 className="h-3 w-3" /> SEFAZ Online
+             </Badge>
+             <Button variant="outline" className="gap-2">
+               <ScanBarcode className="h-4 w-4" />
+               Ler Código
+             </Button>
+          </div>
         </div>
 
         {/* Categories (Horizontal Scroll) */}
@@ -191,6 +234,10 @@ export default function POS() {
               <span>Descontos</span>
               <span>R$ 0,00</span>
             </div>
+            <div className="flex justify-between text-sm text-muted-foreground">
+              <span>Tributos Aprox. (IBPT)</span>
+              <span>R$ {(total * 0.18).toFixed(2)}</span>
+            </div>
             <Separator className="my-2" />
             <div className="flex justify-between items-end">
               <span className="font-bold text-lg">Total a Pagar</span>
@@ -217,11 +264,63 @@ export default function POS() {
             </Button>
           </div>
           
-          <Button size="lg" className="w-full h-12 text-lg font-bold" disabled={cart.length === 0}>
+          <Button 
+            size="lg" 
+            className="w-full h-12 text-lg font-bold gap-2" 
+            disabled={cart.length === 0}
+            onClick={handleFinishSale}
+          >
             FINALIZAR VENDA
+            <FileCheck className="h-5 w-5" />
           </Button>
         </div>
       </div>
+
+      {/* Fiscal Dialog Simulation */}
+      <Dialog open={isFinishing} onOpenChange={(open) => !open && fiscalStatus === 'success' && resetSale()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Processando Venda</DialogTitle>
+            <DialogDescription>
+              Comunicando com a SEFAZ para emissão da NFC-e...
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="flex flex-col items-center justify-center py-8 gap-4">
+            {fiscalStatus === 'sending' && (
+              <>
+                <Loader2 className="h-16 w-16 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Autenticando certificado digital...</p>
+              </>
+            )}
+            
+            {fiscalStatus === 'success' && (
+              <>
+                <div className="h-16 w-16 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 animate-in zoom-in duration-300">
+                  <CheckCircle2 className="h-10 w-10" />
+                </div>
+                <div className="text-center space-y-1">
+                  <h3 className="font-bold text-xl text-emerald-600">Venda Aprovada!</h3>
+                  <p className="text-sm text-muted-foreground">Protocolo: 135230004567890</p>
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="sm:justify-center gap-2">
+            {fiscalStatus === 'success' && (
+              <>
+                <Button variant="outline" onClick={resetSale} className="flex-1">
+                  <Plus className="mr-2 h-4 w-4" /> Nova Venda
+                </Button>
+                <Button onClick={resetSale} className="flex-1">
+                  <Printer className="mr-2 h-4 w-4" /> Imprimir Cupom
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
