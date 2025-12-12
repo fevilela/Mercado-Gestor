@@ -1,10 +1,22 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, timestamp, boolean, serial } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  varchar,
+  integer,
+  decimal,
+  timestamp,
+  boolean,
+  serial,
+  jsonb,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
 });
@@ -21,18 +33,85 @@ export const products = pgTable("products", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   ean: text("ean"),
+  sku: text("sku"),
   category: text("category").notNull(),
-  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
-  stock: integer("stock").notNull().default(0),
-  minStock: integer("min_stock").default(10),
+  unit: text("unit").notNull().default("UN"),
+  brand: text("brand"),
+  type: text("type"),
   ncm: text("ncm"),
   cest: text("cest"),
+  description: text("description"),
+  mainImageUrl: text("main_image_url"),
+  purchasePrice: decimal("purchase_price", { precision: 10, scale: 2 }),
+  margin: decimal("margin", { precision: 5, scale: 2 }),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  promoPrice: decimal("promo_price", { precision: 10, scale: 2 }),
+  promoStart: timestamp("promo_start"),
+  promoEnd: timestamp("promo_end"),
+  stock: integer("stock").notNull().default(0),
+  minStock: integer("min_stock").default(10),
+  maxStock: integer("max_stock").default(100),
+  isKit: boolean("is_kit").default(false),
+  isActive: boolean("is_active").default(true),
+  supplierId: integer("supplier_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertProductSchema = createInsertSchema(products).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertProduct = z.infer<typeof insertProductSchema>;
+export type Product = typeof products.$inferSelect;
+
+export const productVariations = pgTable("product_variations", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").notNull(),
+  sku: text("sku"),
+  name: text("name").notNull(),
+  attributes: jsonb("attributes"),
+  extraPrice: decimal("extra_price", { precision: 10, scale: 2 }).default("0"),
+  stock: integer("stock").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertProductSchema = createInsertSchema(products).omit({ id: true, createdAt: true });
-export type InsertProduct = z.infer<typeof insertProductSchema>;
-export type Product = typeof products.$inferSelect;
+export const insertProductVariationSchema = createInsertSchema(
+  productVariations
+).omit({ id: true, createdAt: true });
+export type InsertProductVariation = z.infer<
+  typeof insertProductVariationSchema
+>;
+export type ProductVariation = typeof productVariations.$inferSelect;
+
+export const productMedia = pgTable("product_media", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").notNull(),
+  url: text("url").notNull(),
+  isPrimary: boolean("is_primary").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertProductMediaSchema = createInsertSchema(productMedia).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertProductMedia = z.infer<typeof insertProductMediaSchema>;
+export type ProductMedia = typeof productMedia.$inferSelect;
+
+export const kitItems = pgTable("kit_items", {
+  id: serial("id").primaryKey(),
+  kitProductId: integer("kit_product_id").notNull(),
+  productId: integer("product_id").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+});
+
+export const insertKitItemSchema = createInsertSchema(kitItems).omit({
+  id: true,
+});
+export type InsertKitItem = z.infer<typeof insertKitItemSchema>;
+export type KitItem = typeof kitItems.$inferSelect;
 
 export const customers = pgTable("customers", {
   id: serial("id").primaryKey(),
@@ -41,10 +120,22 @@ export const customers = pgTable("customers", {
   phone: text("phone"),
   cpfCnpj: text("cpf_cnpj"),
   type: text("type").notNull().default("Regular"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  zipCode: text("zip_code"),
+  creditLimit: decimal("credit_limit", { precision: 10, scale: 2 }).default(
+    "0"
+  ),
+  loyaltyPoints: integer("loyalty_points").default(0),
+  notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true, createdAt: true });
+export const insertCustomerSchema = createInsertSchema(customers).omit({
+  id: true,
+  createdAt: true,
+});
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type Customer = typeof customers.$inferSelect;
 
@@ -55,10 +146,21 @@ export const suppliers = pgTable("suppliers", {
   phone: text("phone"),
   email: text("email"),
   cnpj: text("cnpj"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  zipCode: text("zip_code"),
+  paymentTerms: text("payment_terms"),
+  leadTime: integer("lead_time"),
+  rating: integer("rating").default(0),
+  notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertSupplierSchema = createInsertSchema(suppliers).omit({ id: true, createdAt: true });
+export const insertSupplierSchema = createInsertSchema(suppliers).omit({
+  id: true,
+  createdAt: true,
+});
 export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
 export type Supplier = typeof suppliers.$inferSelect;
 
@@ -76,7 +178,10 @@ export const sales = pgTable("sales", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertSaleSchema = createInsertSchema(sales).omit({ id: true, createdAt: true });
+export const insertSaleSchema = createInsertSchema(sales).omit({
+  id: true,
+  createdAt: true,
+});
 export type InsertSale = z.infer<typeof insertSaleSchema>;
 export type Sale = typeof sales.$inferSelect;
 
@@ -90,9 +195,32 @@ export const saleItems = pgTable("sale_items", {
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
 });
 
-export const insertSaleItemSchema = createInsertSchema(saleItems).omit({ id: true });
+export const insertSaleItemSchema = createInsertSchema(saleItems).omit({
+  id: true,
+});
 export type InsertSaleItem = z.infer<typeof insertSaleItemSchema>;
 export type SaleItem = typeof saleItems.$inferSelect;
+
+export const inventoryMovements = pgTable("inventory_movements", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").notNull(),
+  variationId: integer("variation_id"),
+  type: text("type").notNull(),
+  quantity: integer("quantity").notNull(),
+  reason: text("reason"),
+  referenceId: integer("reference_id"),
+  referenceType: text("reference_type"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertInventoryMovementSchema = createInsertSchema(
+  inventoryMovements
+).omit({ id: true, createdAt: true });
+export type InsertInventoryMovement = z.infer<
+  typeof insertInventoryMovementSchema
+>;
+export type InventoryMovement = typeof inventoryMovements.$inferSelect;
 
 export const companySettings = pgTable("company_settings", {
   id: serial("id").primaryKey(),
@@ -111,6 +239,8 @@ export const companySettings = pgTable("company_settings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const insertCompanySettingsSchema = createInsertSchema(companySettings).omit({ id: true, updatedAt: true });
+export const insertCompanySettingsSchema = createInsertSchema(
+  companySettings
+).omit({ id: true, updatedAt: true });
 export type InsertCompanySettings = z.infer<typeof insertCompanySettingsSchema>;
 export type CompanySettings = typeof companySettings.$inferSelect;
