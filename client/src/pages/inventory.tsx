@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Layout from "@/components/layout";
 import {
   Table,
@@ -15,7 +15,7 @@ import {
   Filter,
   Plus,
   MoreHorizontal,
-  FileDown,
+  FileUp,
   ArrowUpDown,
   Package,
   Pencil,
@@ -70,6 +70,21 @@ interface StockAdjustment {
   currentStock: number;
 }
 
+interface XmlPreviewProduct {
+  tempId: number;
+  name: string;
+  ean: string | null;
+  ncm: string | null;
+  unit: string;
+  quantity: number;
+  price: string;
+  purchasePrice: string;
+  existingProductId: number | null;
+  existingProductName: string | null;
+  existingStock: number;
+  isExisting: boolean;
+}
+
 const adjustmentTypes = [
   {
     value: "entrada",
@@ -104,6 +119,13 @@ export default function Inventory() {
   const [adjustQuantity, setAdjustQuantity] = useState<string>("");
   const [adjustReason, setAdjustReason] = useState<string>("");
   const [adjustNotes, setAdjustNotes] = useState<string>("");
+  const [isImporting, setIsImporting] = useState(false);
+  const [xmlPreviewOpen, setXmlPreviewOpen] = useState(false);
+  const [xmlPreviewProducts, setXmlPreviewProducts] = useState<
+    XmlPreviewProduct[]
+  >([]);
+  const [isConfirmingImport, setIsConfirmingImport] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
   const { data: products = [], isLoading } = useQuery({
@@ -114,6 +136,97 @@ export default function Inventory() {
       return res.json();
     },
   });
+
+  const handleXmlImport = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".xml")) {
+      toast.error("Por favor, selecione um arquivo XML válido");
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const xmlContent = await file.text();
+      const res = await fetch("/api/products/preview-xml", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ xmlContent }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Falha ao processar XML");
+      }
+
+      const result = await res.json();
+      setXmlPreviewProducts(result.products);
+      setXmlPreviewOpen(true);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao processar XML"
+      );
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    setIsConfirmingImport(true);
+    try {
+      const res = await fetch("/api/products/import-confirmed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ products: xmlPreviewProducts }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Falha ao importar produtos");
+      }
+
+      const result = await res.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      setXmlPreviewOpen(false);
+      setXmlPreviewProducts([]);
+
+      if (result.imported > 0 && result.updated > 0) {
+        toast.success(
+          `${result.imported} produto(s) criado(s) e ${result.updated} estoque(s) atualizado(s)!`
+        );
+      } else if (result.imported > 0) {
+        toast.success(
+          `${result.imported} produto(s) importado(s) com sucesso!`
+        );
+      } else if (result.updated > 0) {
+        toast.success(`${result.updated} estoque(s) atualizado(s)!`);
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao importar produtos"
+      );
+    } finally {
+      setIsConfirmingImport(false);
+    }
+  };
+
+  const updatePreviewQuantity = (tempId: number, newQuantity: number) => {
+    setXmlPreviewProducts((prev) =>
+      prev.map((p) =>
+        p.tempId === tempId ? { ...p, quantity: Math.max(0, newQuantity) } : p
+      )
+    );
+  };
+
+  const removeFromPreview = (tempId: number) => {
+    setXmlPreviewProducts((prev) => prev.filter((p) => p.tempId !== tempId));
+  };
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -266,8 +379,24 @@ export default function Inventory() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline">
-              <FileDown className="mr-2 h-4 w-4" /> Importar XML
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".xml"
+              onChange={handleXmlImport}
+              className="hidden"
+            />
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isImporting}
+            >
+              {isImporting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileUp className="mr-2 h-4 w-4" />
+              )}
+              {isImporting ? "Importando..." : "Importar XML"}
             </Button>
             <Button onClick={handleNewProduct}>
               <Plus className="mr-2 h-4 w-4" /> Novo Produto
@@ -647,6 +776,149 @@ export default function Inventory() {
                 </>
               ) : (
                 "Confirmar Ajuste"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={xmlPreviewOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setXmlPreviewOpen(false);
+            setXmlPreviewProducts([]);
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Pré-visualização da Importação XML</DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-auto">
+            {xmlPreviewProducts.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Nenhum produto encontrado no XML
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex gap-4 text-sm">
+                  <Badge variant="outline" className="px-3 py-1">
+                    Total: {xmlPreviewProducts.length} produtos
+                  </Badge>
+                  <Badge variant="secondary" className="px-3 py-1">
+                    Novos:{" "}
+                    {xmlPreviewProducts.filter((p) => !p.isExisting).length}
+                  </Badge>
+                  <Badge className="px-3 py-1 bg-amber-500">
+                    Existentes:{" "}
+                    {xmlPreviewProducts.filter((p) => p.isExisting).length}
+                  </Badge>
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[200px]">Produto</TableHead>
+                      <TableHead>EAN</TableHead>
+                      <TableHead>Unidade</TableHead>
+                      <TableHead>Quantidade</TableHead>
+                      <TableHead>Preço</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {xmlPreviewProducts.map((product) => (
+                      <TableRow key={product.tempId}>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span className="font-medium">{product.name}</span>
+                            {product.ncm && (
+                              <span className="text-xs text-muted-foreground">
+                                NCM: {product.ncm}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs font-mono">
+                            {product.ean || "-"}
+                          </span>
+                        </TableCell>
+                        <TableCell>{product.unit}</TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="0"
+                            className="w-20"
+                            value={product.quantity}
+                            onChange={(e) =>
+                              updatePreviewQuantity(
+                                product.tempId,
+                                parseInt(e.target.value) || 0
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          R$ {parseFloat(product.price).toFixed(2)}
+                        </TableCell>
+                        <TableCell>
+                          {product.isExisting ? (
+                            <div className="flex flex-col gap-1">
+                              <Badge className="bg-amber-500 text-xs">
+                                Existente
+                              </Badge>
+                              <span className="text-xs text-muted-foreground">
+                                Estoque atual: {product.existingStock}
+                              </span>
+                            </div>
+                          ) : (
+                            <Badge variant="secondary" className="text-xs">
+                              Novo
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeFromPreview(product.tempId)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t pt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setXmlPreviewOpen(false);
+                setXmlPreviewProducts([]);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmImport}
+              disabled={isConfirmingImport || xmlPreviewProducts.length === 0}
+            >
+              {isConfirmingImport ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Importando...
+                </>
+              ) : (
+                <>Confirmar Importação ({xmlPreviewProducts.length} produtos)</>
               )}
             </Button>
           </DialogFooter>

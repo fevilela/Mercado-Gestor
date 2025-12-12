@@ -20,6 +20,70 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { lookupEAN } from "./ean-service";
 
+function parseNFeXML(xmlContent: string): Array<{
+  name: string;
+  ean: string | null;
+  ncm: string | null;
+  unit: string;
+  quantity: number;
+  price: string;
+  purchasePrice: string;
+}> {
+  const produtos: Array<{
+    name: string;
+    ean: string | null;
+    ncm: string | null;
+    unit: string;
+    quantity: number;
+    price: string;
+    purchasePrice: string;
+  }> = [];
+
+  const detPattern = /<det[^>]*>([\s\S]*?)<\/det>/gi;
+  let detMatch;
+
+  while ((detMatch = detPattern.exec(xmlContent)) !== null) {
+    const detContent = detMatch[1];
+
+    const prodMatch = /<prod>([\s\S]*?)<\/prod>/i.exec(detContent);
+    if (!prodMatch) continue;
+
+    const prodContent = prodMatch[1];
+
+    const getTagValue = (tag: string, content: string): string | null => {
+      const regex = new RegExp(`<${tag}>([^<]*)</${tag}>`, "i");
+      const match = regex.exec(content);
+      return match ? match[1].trim() : null;
+    };
+
+    const name = getTagValue("xProd", prodContent);
+    if (!name) continue;
+
+    const ean =
+      getTagValue("cEAN", prodContent) || getTagValue("cEANTrib", prodContent);
+    const ncm = getTagValue("NCM", prodContent);
+    const unit = getTagValue("uCom", prodContent) || "UN";
+    const quantityStr = getTagValue("qCom", prodContent);
+    const priceStr =
+      getTagValue("vUnCom", prodContent) || getTagValue("vUnTrib", prodContent);
+
+    const quantity = quantityStr ? parseFloat(quantityStr) : 0;
+    const price = priceStr ? parseFloat(priceStr).toFixed(2) : "0.00";
+
+    produtos.push({
+      name,
+      ean: ean && ean !== "SEM GTIN" ? ean : null,
+      ncm,
+      unit: unit.toUpperCase(),
+      quantity: Math.floor(quantity),
+      price,
+      purchasePrice: price,
+    });
+  }
+
+  return produtos;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -491,6 +555,248 @@ export async function registerRoutes(
       res.json(movements);
     } catch (error) {
       res.status(500).json({ error: "Falha ao buscar movimentações" });
+    }
+  });
+
+  const importXmlSchema = z.object({
+    xmlContent: z.string().min(1),
+  });
+
+  app.post("/api/products/preview-xml", async (req, res) => {
+    try {
+      const { xmlContent } = importXmlSchema.parse(req.body);
+
+      const parsedProducts = parseNFeXML(xmlContent);
+
+      if (parsedProducts.length === 0) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "Nenhum produto encontrado no XML. Verifique se o arquivo é uma NFe válida.",
+          });
+      }
+
+      const existingProducts = await storage.getAllProducts();
+
+      const previewProducts = parsedProducts.map((prod, index) => {
+        const existing = prod.ean
+          ? existingProducts.find((p) => p.ean === prod.ean)
+          : null;
+        return {
+          tempId: index,
+          name: prod.name,
+          ean: prod.ean,
+          ncm: prod.ncm,
+          unit: prod.unit,
+          quantity: prod.quantity,
+          price: prod.price,
+          purchasePrice: prod.purchasePrice,
+          existingProductId: existing?.id || null,
+          existingProductName: existing?.name || null,
+          existingStock: existing?.stock || 0,
+          isExisting: !!existing,
+        };
+      });
+
+      res.json({
+        success: true,
+        totalProducts: previewProducts.length,
+        existingProducts: previewProducts.filter((p) => p.isExisting).length,
+        newProducts: previewProducts.filter((p) => !p.isExisting).length,
+        products: previewProducts,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to preview XML:", error);
+      res.status(500).json({ error: "Falha ao processar XML" });
+    }
+  });
+
+  const importProductsSchema = z.object({
+    products: z.array(
+      z.object({
+        name: z.string(),
+        ean: z.string().nullable(),
+        ncm: z.string().nullable(),
+        unit: z.string(),
+        quantity: z.number(),
+        price: z.union([z.string(), z.number()]).transform((v) => String(v)),
+        purchasePrice: z
+          .union([z.string(), z.number()])
+          .transform((v) => String(v)),
+        existingProductId: z.number().nullable(),
+        isExisting: z.boolean(),
+      })
+    ),
+  });
+
+  app.post("/api/products/import-confirmed", async (req, res) => {
+    try {
+      const { products: productsToImport } = importProductsSchema.parse(
+        req.body
+      );
+
+      const importedProducts = [];
+      const updatedProducts = [];
+
+      for (const prodData of productsToImport) {
+        if (prodData.isExisting && prodData.existingProductId) {
+          await storage.updateProductStock(
+            prodData.existingProductId,
+            prodData.quantity
+          );
+          await storage.createInventoryMovement({
+            productId: prodData.existingProductId,
+            type: "entrada",
+            quantity: prodData.quantity,
+            reason: "Importação XML NFe",
+            notes: null,
+            referenceId: null,
+            referenceType: null,
+            variationId: null,
+          });
+          updatedProducts.push({
+            id: prodData.existingProductId,
+            name: prodData.name,
+            quantityAdded: prodData.quantity,
+          });
+        } else {
+          const [newProduct] = await db
+            .insert(products)
+            .values({
+              name: prodData.name,
+              ean: prodData.ean,
+              ncm: prodData.ncm,
+              unit: prodData.unit,
+              category: "Importado",
+              price: prodData.price,
+              purchasePrice: prodData.purchasePrice,
+              stock: prodData.quantity,
+              isActive: true,
+            })
+            .returning();
+
+          if (prodData.quantity > 0) {
+            await storage.createInventoryMovement({
+              productId: newProduct.id,
+              type: "entrada",
+              quantity: prodData.quantity,
+              reason: "Importação XML NFe - Estoque inicial",
+              notes: null,
+              referenceId: null,
+              referenceType: null,
+              variationId: null,
+            });
+          }
+
+          importedProducts.push(newProduct);
+        }
+      }
+
+      res.json({
+        success: true,
+        imported: importedProducts.length,
+        updated: updatedProducts.length,
+        importedProducts,
+        updatedProducts,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to import products:", error);
+      res.status(500).json({ error: "Falha ao importar produtos" });
+    }
+  });
+
+  app.post("/api/products/import-xml", async (req, res) => {
+    try {
+      const { xmlContent } = importXmlSchema.parse(req.body);
+
+      const parsedProducts = parseNFeXML(xmlContent);
+
+      if (parsedProducts.length === 0) {
+        return res
+          .status(400)
+          .json({ error: "Nenhum produto encontrado no XML" });
+      }
+
+      const importedProducts = [];
+      const skippedProducts = [];
+
+      for (const prodData of parsedProducts) {
+        if (prodData.ean) {
+          const existingProducts = await storage.getAllProducts();
+          const existing = existingProducts.find((p) => p.ean === prodData.ean);
+          if (existing) {
+            const newStock = existing.stock + prodData.quantity;
+            await storage.updateProductStock(existing.id, prodData.quantity);
+            await storage.createInventoryMovement({
+              productId: existing.id,
+              type: "entrada",
+              quantity: prodData.quantity,
+              reason: "Importação XML NFe",
+              notes: null,
+              referenceId: null,
+              referenceType: null,
+              variationId: null,
+            });
+            skippedProducts.push({
+              name: prodData.name,
+              reason: "Estoque atualizado (produto já existente)",
+              newStock,
+            });
+            continue;
+          }
+        }
+
+        const [newProduct] = await db
+          .insert(products)
+          .values({
+            name: prodData.name,
+            ean: prodData.ean,
+            ncm: prodData.ncm,
+            unit: prodData.unit,
+            category: "Importado",
+            price: prodData.price,
+            purchasePrice: prodData.purchasePrice,
+            stock: prodData.quantity,
+            isActive: true,
+          })
+          .returning();
+
+        if (prodData.quantity > 0) {
+          await storage.createInventoryMovement({
+            productId: newProduct.id,
+            type: "entrada",
+            quantity: prodData.quantity,
+            reason: "Importação XML NFe - Estoque inicial",
+            notes: null,
+            referenceId: null,
+            referenceType: null,
+            variationId: null,
+          });
+        }
+
+        importedProducts.push(newProduct);
+      }
+
+      res.json({
+        success: true,
+        imported: importedProducts.length,
+        updated: skippedProducts.length,
+        products: importedProducts,
+        skipped: skippedProducts,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to import XML:", error);
+      res.status(500).json({ error: "Falha ao importar XML" });
     }
   });
 
