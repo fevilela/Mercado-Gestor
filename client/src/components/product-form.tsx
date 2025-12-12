@@ -340,6 +340,14 @@ export default function ProductForm({
     createMutation.mutate(productData);
   };
 
+  const onFormError = (errors: any) => {
+    console.log("Form validation errors:", errors);
+    const errorMessages = Object.entries(errors)
+      .map(([field, error]: [string, any]) => `${field}: ${error?.message}`)
+      .join(", ");
+    toast.error(`Erros de validação: ${errorMessages}`);
+  };
+
   const addVariation = () => {
     setVariations([...variations, { name: "", stock: 0, attributes: {} }]);
   };

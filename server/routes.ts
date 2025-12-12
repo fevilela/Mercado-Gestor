@@ -148,12 +148,23 @@ export async function registerRoutes(
   app.patch("/api/products/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      console.log(
+        "PATCH /api/products/:id - Request body:",
+        JSON.stringify(req.body, null, 2)
+      );
+
+      const parseResult = updateProductRequestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        console.error("Validation error:", parseResult.error.errors);
+        return res.status(400).json({ error: parseResult.error.errors });
+      }
+
       const {
         product,
         variations,
         media,
         kitItems: kitItemsData,
-      } = updateProductRequestSchema.parse(req.body);
+      } = parseResult.data;
 
       const result = await db.transaction(async (tx) => {
         let updatedProduct;
