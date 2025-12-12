@@ -419,5 +419,80 @@ export async function registerRoutes(
     }
   });
 
+  const adjustStockSchema = z.object({
+    productId: z.number(),
+    quantity: z.number(),
+    type: z.enum(["entrada", "saida", "ajuste", "perda", "devolucao"]),
+    reason: z.string().optional(),
+    notes: z.string().optional(),
+  });
+
+  app.post("/api/inventory/adjust", async (req, res) => {
+    try {
+      const { productId, quantity, type, reason, notes } =
+        adjustStockSchema.parse(req.body);
+
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({ error: "Produto não encontrado" });
+      }
+
+      const quantityDelta =
+        type === "saida" || type === "perda"
+          ? -Math.abs(quantity)
+          : Math.abs(quantity);
+
+      const newStock = product.stock + quantityDelta;
+      if (newStock < 0) {
+        return res
+          .status(400)
+          .json({ error: "Estoque não pode ficar negativo" });
+      }
+
+      await storage.createInventoryMovement({
+        productId,
+        type,
+        quantity: quantityDelta,
+        reason: reason || null,
+        notes: notes || null,
+        referenceId: null,
+        referenceType: null,
+        variationId: null,
+      });
+
+      const updatedProduct = await storage.updateProductStock(
+        productId,
+        quantityDelta
+      );
+
+      res.json({
+        product: updatedProduct,
+        movement: {
+          productId,
+          type,
+          quantity: quantityDelta,
+          reason,
+          notes,
+        },
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to adjust stock:", error);
+      res.status(500).json({ error: "Falha ao ajustar estoque" });
+    }
+  });
+
+  app.get("/api/inventory/movements/:productId", async (req, res) => {
+    try {
+      const productId = parseInt(req.params.productId);
+      const movements = await storage.getInventoryMovements(productId);
+      res.json(movements);
+    } catch (error) {
+      res.status(500).json({ error: "Falha ao buscar movimentações" });
+    }
+  });
+
   return httpServer;
 }

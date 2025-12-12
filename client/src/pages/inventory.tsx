@@ -20,6 +20,9 @@ import {
   Package,
   Pencil,
   Trash2,
+  PackagePlus,
+  PackageMinus,
+  Loader2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -44,12 +47,63 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+
+interface StockAdjustment {
+  productId: number;
+  productName: string;
+  currentStock: number;
+}
+
+const adjustmentTypes = [
+  {
+    value: "entrada",
+    label: "Entrada (Compra/Recebimento)",
+    icon: PackagePlus,
+  },
+  { value: "saida", label: "Saída (Uso/Transferência)", icon: PackageMinus },
+  { value: "ajuste", label: "Ajuste de Inventário", icon: Package },
+  { value: "perda", label: "Perda/Avaria", icon: PackageMinus },
+  { value: "devolucao", label: "Devolução", icon: PackagePlus },
+];
+
+const adjustmentReasons = [
+  "Contagem de inventário",
+  "Compra de fornecedor",
+  "Devolução de cliente",
+  "Produto avariado",
+  "Produto vencido",
+  "Transferência entre lojas",
+  "Correção de erro",
+  "Outro",
+];
 
 export default function Inventory() {
   const [formOpen, setFormOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<any>(null);
   const [deleteProductId, setDeleteProductId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [stockAdjustment, setStockAdjustment] =
+    useState<StockAdjustment | null>(null);
+  const [adjustType, setAdjustType] = useState<string>("entrada");
+  const [adjustQuantity, setAdjustQuantity] = useState<string>("");
+  const [adjustReason, setAdjustReason] = useState<string>("");
+  const [adjustNotes, setAdjustNotes] = useState<string>("");
   const queryClient = useQueryClient();
 
   const { data: products = [], isLoading } = useQuery({
@@ -76,6 +130,40 @@ export default function Inventory() {
     },
   });
 
+  const adjustStockMutation = useMutation({
+    mutationFn: async (data: {
+      productId: number;
+      quantity: number;
+      type: string;
+      reason?: string;
+      notes?: string;
+    }) => {
+      const res = await fetch("/api/inventory/adjust", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Falha ao ajustar estoque");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      const typeLabel =
+        adjustmentTypes.find((t) => t.value === adjustType)?.label ||
+        adjustType;
+      toast.success(
+        `Estoque ajustado com sucesso! ${typeLabel}: ${adjustQuantity} unidades`
+      );
+      closeAdjustDialog();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
   const handleEdit = async (product: any) => {
     const res = await fetch(`/api/products/${product.id}`);
     if (res.ok) {
@@ -88,6 +176,58 @@ export default function Inventory() {
   const handleNewProduct = () => {
     setEditProduct(null);
     setFormOpen(true);
+  };
+
+  const handleAdjustStock = (product: any) => {
+    setStockAdjustment({
+      productId: product.id,
+      productName: product.name,
+      currentStock: product.stock,
+    });
+    setAdjustType("entrada");
+    setAdjustQuantity("");
+    setAdjustReason("");
+    setAdjustNotes("");
+  };
+
+  const closeAdjustDialog = () => {
+    setStockAdjustment(null);
+    setAdjustType("entrada");
+    setAdjustQuantity("");
+    setAdjustReason("");
+    setAdjustNotes("");
+  };
+
+  const handleSubmitAdjustment = () => {
+    if (!stockAdjustment) return;
+
+    const quantity = parseInt(adjustQuantity);
+    if (isNaN(quantity) || quantity <= 0) {
+      toast.error("Quantidade deve ser um número positivo");
+      return;
+    }
+
+    if (!adjustReason) {
+      toast.error("Selecione um motivo para o ajuste");
+      return;
+    }
+
+    adjustStockMutation.mutate({
+      productId: stockAdjustment.productId,
+      quantity,
+      type: adjustType,
+      reason: adjustReason,
+      notes: adjustNotes || undefined,
+    });
+  };
+
+  const getNewStockPreview = () => {
+    if (!stockAdjustment) return 0;
+    const quantity = parseInt(adjustQuantity) || 0;
+    if (adjustType === "saida" || adjustType === "perda") {
+      return stockAdjustment.currentStock - quantity;
+    }
+    return stockAdjustment.currentStock + quantity;
   };
 
   const filteredProducts = products.filter((product: any) => {
@@ -210,7 +350,10 @@ export default function Inventory() {
                   }
 
                   return (
-                    <TableRow key={product.id}>
+                    <TableRow
+                      key={product.id}
+                      data-testid={`row-product-${product.id}`}
+                    >
                       <TableCell>
                         <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center overflow-hidden border border-border">
                           {product.mainImageUrl ? (
@@ -294,7 +437,11 @@ export default function Inventory() {
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0">
+                            <Button
+                              variant="ghost"
+                              className="h-8 w-8 p-0"
+                              data-testid={`button-actions-${product.id}`}
+                            >
                               <span className="sr-only">Open menu</span>
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
@@ -303,10 +450,17 @@ export default function Inventory() {
                             <DropdownMenuLabel>Ações</DropdownMenuLabel>
                             <DropdownMenuItem
                               onClick={() => handleEdit(product)}
+                              data-testid={`button-edit-${product.id}`}
                             >
                               <Pencil className="mr-2 h-4 w-4" /> Editar Produto
                             </DropdownMenuItem>
-                            <DropdownMenuItem>Ajustar Estoque</DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleAdjustStock(product)}
+                              data-testid={`button-adjust-stock-${product.id}`}
+                            >
+                              <PackagePlus className="mr-2 h-4 w-4" /> Ajustar
+                              Estoque
+                            </DropdownMenuItem>
                             <DropdownMenuItem>
                               Imprimir Etiqueta
                             </DropdownMenuItem>
@@ -314,6 +468,7 @@ export default function Inventory() {
                             <DropdownMenuItem
                               className="text-destructive"
                               onClick={() => setDeleteProductId(product.id)}
+                              data-testid={`button-delete-${product.id}`}
                             >
                               <Trash2 className="mr-2 h-4 w-4" /> Excluir
                             </DropdownMenuItem>
@@ -360,6 +515,143 @@ export default function Inventory() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={stockAdjustment !== null}
+        onOpenChange={() => closeAdjustDialog()}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Ajustar Estoque</DialogTitle>
+          </DialogHeader>
+
+          {stockAdjustment && (
+            <div className="space-y-4">
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="font-medium">{stockAdjustment.productName}</p>
+                <p className="text-sm text-muted-foreground">
+                  Estoque atual:{" "}
+                  <span className="font-semibold text-foreground">
+                    {stockAdjustment.currentStock}
+                  </span>{" "}
+                  unidades
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="adjustType">Tipo de Movimentação *</Label>
+                <Select value={adjustType} onValueChange={setAdjustType}>
+                  <SelectTrigger
+                    id="adjustType"
+                    data-testid="select-adjust-type"
+                  >
+                    <SelectValue placeholder="Selecione o tipo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {adjustmentTypes.map((type) => (
+                      <SelectItem key={type.value} value={type.value}>
+                        <div className="flex items-center gap-2">
+                          <type.icon className="h-4 w-4" />
+                          {type.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="adjustQuantity">Quantidade *</Label>
+                <Input
+                  id="adjustQuantity"
+                  type="number"
+                  min="1"
+                  placeholder="Ex: 10"
+                  value={adjustQuantity}
+                  onChange={(e) => setAdjustQuantity(e.target.value)}
+                  data-testid="input-adjust-quantity"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="adjustReason">Motivo *</Label>
+                <Select value={adjustReason} onValueChange={setAdjustReason}>
+                  <SelectTrigger
+                    id="adjustReason"
+                    data-testid="select-adjust-reason"
+                  >
+                    <SelectValue placeholder="Selecione o motivo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {adjustmentReasons.map((reason) => (
+                      <SelectItem key={reason} value={reason}>
+                        {reason}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="adjustNotes">Observações (opcional)</Label>
+                <Textarea
+                  id="adjustNotes"
+                  placeholder="Detalhes adicionais sobre o ajuste..."
+                  value={adjustNotes}
+                  onChange={(e) => setAdjustNotes(e.target.value)}
+                  data-testid="textarea-adjust-notes"
+                />
+              </div>
+
+              {adjustQuantity && (
+                <div className="p-3 bg-muted rounded-lg border">
+                  <p className="text-sm">
+                    <span className="text-muted-foreground">
+                      Novo estoque:{" "}
+                    </span>
+                    <span
+                      className={`font-semibold ${
+                        getNewStockPreview() < 0
+                          ? "text-destructive"
+                          : "text-emerald-600"
+                      }`}
+                    >
+                      {getNewStockPreview()} unidades
+                    </span>
+                  </p>
+                  {getNewStockPreview() < 0 && (
+                    <p className="text-xs text-destructive mt-1">
+                      Atenção: O estoque não pode ficar negativo
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeAdjustDialog}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSubmitAdjustment}
+              disabled={
+                adjustStockMutation.isPending || getNewStockPreview() < 0
+              }
+              data-testid="button-confirm-adjustment"
+            >
+              {adjustStockMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Salvando...
+                </>
+              ) : (
+                "Confirmar Ajuste"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }

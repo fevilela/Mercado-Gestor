@@ -1,5 +1,11 @@
 import Layout from "@/components/layout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -7,11 +13,103 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { CreditCard, Smartphone, Loader2, CheckCircle2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useToast } from "@/hooks/use-toast";
+
+interface CompanySettings {
+  id?: number;
+  cnpj?: string;
+  ie?: string;
+  razaoSocial?: string;
+  nomeFantasia?: string;
+  fiscalEnabled?: boolean;
+  cscToken?: string;
+  cscId?: string;
+  stoneCode?: string;
+  stoneEnabled?: boolean;
+  mpAccessToken?: string;
+  mpTerminalId?: string;
+  mpEnabled?: boolean;
+}
 
 export default function Settings() {
-  const [stoneStatus, setStoneStatus] = useState<"idle" | "connecting" | "connected">("idle");
-  const [mpStatus, setMpStatus] = useState<"idle" | "connecting" | "connected">("idle");
+  const { toast } = useToast();
+  const [stoneStatus, setStoneStatus] = useState<
+    "idle" | "connecting" | "connected"
+  >("idle");
+  const [mpStatus, setMpStatus] = useState<"idle" | "connecting" | "connected">(
+    "idle"
+  );
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<CompanySettings>({
+    cnpj: "",
+    ie: "",
+    razaoSocial: "",
+    nomeFantasia: "",
+    fiscalEnabled: false,
+    cscToken: "",
+    cscId: "",
+    stoneCode: "",
+    stoneEnabled: false,
+    mpAccessToken: "",
+    mpTerminalId: "",
+    mpEnabled: false,
+  });
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/settings");
+      if (response.ok) {
+        const data = await response.json();
+        if (data && Object.keys(data).length > 0) {
+          setSettings((prev) => ({ ...prev, ...data }));
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch settings:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setSaving(true);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(settings),
+      });
+
+      if (response.ok) {
+        const updatedSettings = await response.json();
+        setSettings(updatedSettings);
+        toast({
+          title: "Sucesso!",
+          description: "Configurações salvas com sucesso.",
+        });
+      } else {
+        throw new Error("Failed to save settings");
+      }
+    } catch (error) {
+      console.error("Failed to save settings:", error);
+      toast({
+        title: "Erro",
+        description: "Não foi possível salvar as configurações.",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleConnectStone = () => {
     setStoneStatus("connecting");
@@ -23,12 +121,33 @@ export default function Settings() {
     setTimeout(() => setMpStatus("connected"), 2000);
   };
 
+  const updateSetting = (
+    key: keyof CompanySettings,
+    value: string | boolean
+  ) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  if (loading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      </Layout>
+    );
+  }
+
   return (
     <Layout>
       <div className="flex flex-col gap-6">
         <div>
-          <h1 className="text-3xl font-heading font-bold tracking-tight text-foreground">Configurações</h1>
-          <p className="text-muted-foreground">Gerencie dados da empresa, fiscal e usuários.</p>
+          <h1 className="text-3xl font-heading font-bold tracking-tight text-foreground">
+            Configurações
+          </h1>
+          <p className="text-muted-foreground">
+            Gerencie dados da empresa, fiscal e usuários.
+          </p>
         </div>
 
         <Tabs defaultValue="payments" className="space-y-4">
@@ -43,28 +162,63 @@ export default function Settings() {
             <Card>
               <CardHeader>
                 <CardTitle>Informações do Estabelecimento</CardTitle>
-                <CardDescription>Dados que aparecerão nos relatórios e cupons.</CardDescription>
+                <CardDescription>
+                  Dados que aparecerão nos relatórios e cupons.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="cnpj">CNPJ</Label>
-                    <Input id="cnpj" placeholder="00.000.000/0000-00" />
+                    <Input
+                      id="cnpj"
+                      placeholder="00.000.000/0000-00"
+                      value={settings.cnpj || ""}
+                      onChange={(e) => updateSetting("cnpj", e.target.value)}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="ie">Inscrição Estadual</Label>
-                    <Input id="ie" placeholder="000.000.000.000" />
+                    <Input
+                      id="ie"
+                      placeholder="000.000.000.000"
+                      value={settings.ie || ""}
+                      onChange={(e) => updateSetting("ie", e.target.value)}
+                    />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="name">Razão Social</Label>
-                  <Input id="name" placeholder="Minha Empresa LTDA" />
+                  <Input
+                    id="name"
+                    placeholder="Minha Empresa LTDA"
+                    value={settings.razaoSocial || ""}
+                    onChange={(e) =>
+                      updateSetting("razaoSocial", e.target.value)
+                    }
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="fantasy">Nome Fantasia</Label>
-                  <Input id="fantasy" placeholder="Mercado Modelo" />
+                  <Input
+                    id="fantasy"
+                    placeholder="Mercado Modelo"
+                    value={settings.nomeFantasia || ""}
+                    onChange={(e) =>
+                      updateSetting("nomeFantasia", e.target.value)
+                    }
+                  />
                 </div>
-                <Button>Salvar Alterações</Button>
+                <Button onClick={handleSaveSettings} disabled={saving}>
+                  {saving ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    "Salvar Alterações"
+                  )}
+                </Button>
               </CardContent>
             </Card>
           </TabsContent>
@@ -73,7 +227,9 @@ export default function Settings() {
             <Card>
               <CardHeader>
                 <CardTitle>Configuração Fiscal (NFC-e / SAT)</CardTitle>
-                <CardDescription>Parâmetros para emissão de documentos fiscais.</CardDescription>
+                <CardDescription>
+                  Parâmetros para emissão de documentos fiscais.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="flex items-center justify-between space-x-2">
@@ -83,28 +239,61 @@ export default function Settings() {
                       Ativar emissão real de notas (com valor fiscal).
                     </p>
                   </div>
-                  <Switch />
+                  <Switch
+                    checked={settings.fiscalEnabled || false}
+                    onCheckedChange={(checked) =>
+                      updateSetting("fiscalEnabled", checked)
+                    }
+                  />
                 </div>
                 <Separator />
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label>Token CSC (Código de Segurança do Contribuinte)</Label>
-                    <Input type="password" value="••••••••••••••••" />
+                    <Label>
+                      Token CSC (Código de Segurança do Contribuinte)
+                    </Label>
+                    <Input
+                      type="password"
+                      value={settings.cscToken || ""}
+                      onChange={(e) =>
+                        updateSetting("cscToken", e.target.value)
+                      }
+                      placeholder="Digite o token CSC"
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>ID do Token</Label>
-                    <Input value="000001" className="w-24" />
+                    <Input
+                      value={settings.cscId || ""}
+                      className="w-24"
+                      onChange={(e) => updateSetting("cscId", e.target.value)}
+                      placeholder="000001"
+                    />
                   </div>
                 </div>
                 <div className="space-y-2">
-                   <Label>Certificado Digital (A1)</Label>
-                   <div className="flex gap-2">
-                     <Input type="file" className="cursor-pointer" />
-                     <Button variant="outline">Carregar</Button>
-                   </div>
-                   <p className="text-xs text-muted-foreground">Válido até: 15/08/2026</p>
+                  <Label>Certificado Digital (A1)</Label>
+                  <div className="flex gap-2">
+                    <Input type="file" className="cursor-pointer" />
+                    <Button variant="outline">Carregar</Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Válido até: 15/08/2026
+                  </p>
                 </div>
-                <Button>Testar Comunicação SEFAZ</Button>
+                <div className="flex gap-2">
+                  <Button variant="outline">Testar Comunicação SEFAZ</Button>
+                  <Button onClick={handleSaveSettings} disabled={saving}>
+                    {saving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      "Salvar Alterações"
+                    )}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -118,17 +307,30 @@ export default function Settings() {
                   </div>
                   <div>
                     <CardTitle>Integração Stone</CardTitle>
-                    <CardDescription>Configuração de Maquininha (TEF/POS)</CardDescription>
+                    <CardDescription>
+                      Configuração de Maquininha (TEF/POS)
+                    </CardDescription>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between space-x-2">
                     <Label>Ativar Integração</Label>
-                    <Switch />
+                    <Switch
+                      checked={settings.stoneEnabled || false}
+                      onCheckedChange={(checked) =>
+                        updateSetting("stoneEnabled", checked)
+                      }
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Stone Code / ID da Loja</Label>
-                    <Input placeholder="123456789" />
+                    <Input
+                      placeholder="123456789"
+                      value={settings.stoneCode || ""}
+                      onChange={(e) =>
+                        updateSetting("stoneCode", e.target.value)
+                      }
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Tipo de Conexão</Label>
@@ -137,14 +339,16 @@ export default function Settings() {
                       <option>Manual (POS - Digitar valor na máquina)</option>
                     </select>
                   </div>
-                  
+
                   {stoneStatus === "connected" ? (
                     <div className="rounded-md bg-emerald-100 p-3 flex items-center gap-3 text-emerald-700">
                       <CheckCircle2 className="h-5 w-5" />
-                      <div className="text-sm font-medium">Conectado: Terminal S920</div>
+                      <div className="text-sm font-medium">
+                        Conectado: Terminal S920
+                      </div>
                     </div>
                   ) : (
-                    <Button 
+                    <Button
                       className="w-full bg-emerald-600 hover:bg-emerald-700"
                       onClick={handleConnectStone}
                       disabled={stoneStatus === "connecting"}
@@ -154,9 +358,25 @@ export default function Settings() {
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           Conectando...
                         </>
-                      ) : "Testar Conexão Stone"}
+                      ) : (
+                        "Testar Conexão Stone"
+                      )}
                     </Button>
                   )}
+                  <Button
+                    onClick={handleSaveSettings}
+                    disabled={saving}
+                    className="w-full"
+                  >
+                    {saving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      "Salvar Alterações"
+                    )}
+                  </Button>
                 </CardContent>
               </Card>
 
@@ -173,50 +393,99 @@ export default function Settings() {
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between space-x-2">
                     <Label>Ativar Integração</Label>
-                    <Switch />
+                    <Switch
+                      checked={settings.mpEnabled || false}
+                      onCheckedChange={(checked) =>
+                        updateSetting("mpEnabled", checked)
+                      }
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Access Token (Integração)</Label>
-                    <Input type="password" placeholder="APP_USR-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                    <Input
+                      type="password"
+                      placeholder="APP_USR-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      value={settings.mpAccessToken || ""}
+                      onChange={(e) =>
+                        updateSetting("mpAccessToken", e.target.value)
+                      }
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>ID do Terminal (Point)</Label>
-                    <Input placeholder="POINT-123456" />
+                    <Input
+                      placeholder="POINT-123456"
+                      value={settings.mpTerminalId || ""}
+                      onChange={(e) =>
+                        updateSetting("mpTerminalId", e.target.value)
+                      }
+                    />
                   </div>
 
                   {mpStatus === "connected" ? (
                     <div className="rounded-md bg-sky-100 p-3 flex items-center gap-3 text-sky-700">
                       <CheckCircle2 className="h-5 w-5" />
-                      <div className="text-sm font-medium">Vinculado: Point Smart</div>
+                      <div className="text-sm font-medium">
+                        Vinculado: Point Smart
+                      </div>
                     </div>
                   ) : (
-                    <Button 
+                    <Button
                       className="w-full bg-sky-500 hover:bg-sky-600"
                       onClick={handleConnectMP}
                       disabled={mpStatus === "connecting"}
                     >
                       {mpStatus === "connecting" ? (
-                         <>
+                        <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           Verificando...
                         </>
-                      ) : "Vincular Maquininha"}
+                      ) : (
+                        "Vincular Maquininha"
+                      )}
                     </Button>
                   )}
+                  <Button
+                    onClick={handleSaveSettings}
+                    disabled={saving}
+                    className="w-full"
+                  >
+                    {saving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      "Salvar Alterações"
+                    )}
+                  </Button>
                 </CardContent>
               </Card>
 
               <Card className="col-span-2 bg-muted/30 border-dashed">
                 <CardHeader>
-                  <CardTitle className="text-sm">Agente Local (Bridge)</CardTitle>
-                  <CardDescription>Para comunicação USB/Serial com maquininhas via navegador.</CardDescription>
+                  <CardTitle className="text-sm">
+                    Agente Local (Bridge)
+                  </CardTitle>
+                  <CardDescription>
+                    Para comunicação USB/Serial com maquininhas via navegador.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="flex items-center justify-between">
                   <div className="space-y-1">
-                    <p className="text-sm font-medium">Status do Integrador: <span className="text-emerald-600">Simulado / Online</span></p>
-                    <p className="text-xs text-muted-foreground">Versão: v2.4.0 (Mock)</p>
+                    <p className="text-sm font-medium">
+                      Status do Integrador:{" "}
+                      <span className="text-emerald-600">
+                        Simulado / Online
+                      </span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Versão: v2.4.0 (Mock)
+                    </p>
                   </div>
-                  <Button variant="outline" size="sm">Baixar Instalador (.exe)</Button>
+                  <Button variant="outline" size="sm">
+                    Baixar Instalador (.exe)
+                  </Button>
                 </CardContent>
               </Card>
             </div>

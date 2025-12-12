@@ -51,11 +51,11 @@ const productFormSchema = z.object({
   price: z.string().min(1, "Preço de venda é obrigatório"),
   promoPrice: z.string().optional(),
   stock: z.number().default(0),
-  minStock: z.number().optional(),
-  maxStock: z.number().optional(),
+  minStock: z.number().optional().nullable(),
+  maxStock: z.number().optional().nullable(),
   isKit: z.boolean().default(false),
   isActive: z.boolean().default(true),
-  supplierId: z.number().optional(),
+  supplierId: z.number().optional().nullable(),
 });
 
 type ProductFormData = z.infer<typeof productFormSchema>;
@@ -453,7 +453,10 @@ export default function ProductForm({
           </DialogTitle>
         </DialogHeader>
         <ScrollArea className="max-h-[75vh] pr-4">
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          <form
+            onSubmit={form.handleSubmit(onSubmit, onFormError)}
+            className="space-y-6"
+          >
             <Tabs defaultValue="basic" className="w-full">
               <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="basic">Dados Básicos</TabsTrigger>
@@ -737,15 +740,21 @@ export default function ProductForm({
                       Controle de Estoque
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="space-y-4">
                     <div className="grid grid-cols-3 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="stock">Estoque Atual</Label>
+                        <Label htmlFor="stock">Estoque Inicial</Label>
                         <Input
                           id="stock"
                           type="number"
                           {...form.register("stock", { valueAsNumber: true })}
+                          disabled={!!editProduct}
                         />
+                        {editProduct && (
+                          <p className="text-xs text-muted-foreground">
+                            Estoque atual: {editProduct.stock} un
+                          </p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="minStock">Estoque Mínimo</Label>
@@ -768,6 +777,14 @@ export default function ProductForm({
                         />
                       </div>
                     </div>
+                    {editProduct && (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
+                        <strong>Nota:</strong> Para alterar o estoque, use a
+                        função "Ajustar Estoque" no menu de ações do produto.
+                        Isso garante o registro correto das movimentações para
+                        fins fiscais e de auditoria.
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>
