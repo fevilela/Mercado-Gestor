@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -24,7 +24,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
-import { Plus, Trash2, ImagePlus, Package } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  ImagePlus,
+  Package,
+  Search,
+  Loader2,
+} from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 const productFormSchema = z.object({
@@ -116,6 +123,8 @@ export default function ProductForm({
   const [newImageUrl, setNewImageUrl] = useState("");
   const [selectedKitProduct, setSelectedKitProduct] = useState<string>("");
   const [kitQuantity, setKitQuantity] = useState(1);
+  const [isLookingUpEan, setIsLookingUpEan] = useState(false);
+  const [eanLookupError, setEanLookupError] = useState<string | null>(null);
 
   const { data: suppliers = [] } = useQuery({
     queryKey: ["/api/suppliers"],
@@ -165,6 +174,47 @@ export default function ProductForm({
   const watchMargin = form.watch("margin");
   const watchPrice = form.watch("price");
   const watchIsKit = form.watch("isKit");
+
+  const lookupEanProduct = useCallback(
+    async (ean: string) => {
+      if (!ean || ean.length < 8) return;
+
+      setIsLookingUpEan(true);
+      setEanLookupError(null);
+
+      try {
+        const res = await fetch(`/api/ean/${ean}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.name && !form.getValues("name")) {
+            form.setValue("name", data.name);
+          }
+          if (data.brand && !form.getValues("brand")) {
+            form.setValue("brand", data.brand);
+          }
+          if (data.description && !form.getValues("description")) {
+            form.setValue("description", data.description);
+          }
+          if (data.ncm && !form.getValues("ncm")) {
+            form.setValue("ncm", data.ncm);
+          }
+          if (data.thumbnail && !form.getValues("mainImageUrl")) {
+            form.setValue("mainImageUrl", data.thumbnail);
+          }
+          toast.success("Produto encontrado!");
+        } else if (res.status === 404) {
+          setEanLookupError("Produto não encontrado na base de dados");
+        } else {
+          setEanLookupError("Erro ao buscar produto");
+        }
+      } catch (error) {
+        setEanLookupError("Erro de conexão");
+      } finally {
+        setIsLookingUpEan(false);
+      }
+    },
+    [form]
+  );
 
   useEffect(() => {
     if (watchPurchasePrice && watchMargin) {
@@ -452,11 +502,39 @@ export default function ProductForm({
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="ean">Código de Barras (EAN)</Label>
-                    <Input
-                      id="ean"
-                      {...form.register("ean")}
-                      placeholder="7891234567890"
-                    />
+                    <div className="flex gap-2">
+                      <Input
+                        id="ean"
+                        {...form.register("ean")}
+                        placeholder="7891234567890"
+                        data-testid="input-ean"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            lookupEanProduct(form.getValues("ean") || "");
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() =>
+                          lookupEanProduct(form.getValues("ean") || "")
+                        }
+                        disabled={isLookingUpEan}
+                        data-testid="button-ean-lookup"
+                      >
+                        {isLookingUpEan ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Search className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                    {eanLookupError && (
+                      <p className="text-sm text-amber-600">{eanLookupError}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="sku">SKU</Label>

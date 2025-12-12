@@ -18,6 +18,7 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
+import { lookupEAN } from "./ean-service";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -381,6 +382,22 @@ export async function registerRoutes(
         return res.status(400).json({ error: error.errors });
       }
       res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+
+  app.get("/api/ean/:code", async (req, res) => {
+    try {
+      const { code } = req.params;
+      const result = await lookupEAN(code);
+      if (!result) {
+        return res.status(404).json({ error: "Produto não encontrado" });
+      }
+      res.json(result);
+    } catch (error) {
+      if (error instanceof Error) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: "Falha ao buscar produto" });
     }
   });
 
