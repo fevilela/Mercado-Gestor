@@ -77,6 +77,13 @@ export async function registerRoutes(
     kitItems: z.array(kitItemSchema).optional(),
   });
 
+  const updateProductRequestSchema = z.object({
+    product: insertProductSchema.partial(),
+    variations: z.array(variationSchema).optional(),
+    media: z.array(mediaSchema).optional(),
+    kitItems: z.array(kitItemSchema).optional(),
+  });
+
   app.post("/api/products", async (req, res) => {
     try {
       const {
@@ -146,7 +153,7 @@ export async function registerRoutes(
         variations,
         media,
         kitItems: kitItemsData,
-      } = createProductRequestSchema.partial().parse(req.body);
+      } = updateProductRequestSchema.parse(req.body);
 
       const result = await db.transaction(async (tx) => {
         let updatedProduct;
