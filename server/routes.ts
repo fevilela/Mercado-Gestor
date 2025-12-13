@@ -7,6 +7,8 @@ import {
   productVariations,
   productMedia,
   kitItems,
+  customers,
+  suppliers,
 } from "@shared/schema";
 import {
   insertProductSchema,
@@ -339,6 +341,33 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/customers/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const validated = insertCustomerSchema.partial().parse(req.body);
+      const customer = await storage.updateCustomer(id, validated);
+      if (!customer) {
+        return res.status(404).json({ error: "Customer not found" });
+      }
+      res.json(customer);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      res.status(500).json({ error: "Failed to update customer" });
+    }
+  });
+
+  app.delete("/api/customers/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await db.delete(customers).where(eq(customers.id, id));
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete customer" });
+    }
+  });
+
   app.get("/api/suppliers", async (req, res) => {
     try {
       const suppliers = await storage.getAllSuppliers();
@@ -359,6 +388,33 @@ export async function registerRoutes(
         return res.status(400).json({ error: error.errors });
       }
       res.status(500).json({ error: "Failed to create supplier" });
+    }
+  });
+
+  app.patch("/api/suppliers/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const validated = insertSupplierSchema.partial().parse(req.body);
+      const supplier = await storage.updateSupplier(id, validated);
+      if (!supplier) {
+        return res.status(404).json({ error: "Supplier not found" });
+      }
+      res.json(supplier);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      res.status(500).json({ error: "Failed to update supplier" });
+    }
+  });
+
+  app.delete("/api/suppliers/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await db.delete(suppliers).where(eq(suppliers.id, id));
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete supplier" });
     }
   });
 

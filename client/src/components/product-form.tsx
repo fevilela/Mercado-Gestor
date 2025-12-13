@@ -311,9 +311,11 @@ export default function ProductForm({
   });
 
   const onSubmit = (data: ProductFormData) => {
+    const primaryMedia = mediaItems.find((m) => m.isPrimary);
     const productData = {
       product: {
         ...data,
+        mainImageUrl: primaryMedia?.url || data.mainImageUrl || null,
         purchasePrice: data.purchasePrice || null,
         margin: data.margin || null,
         promoPrice: data.promoPrice || null,

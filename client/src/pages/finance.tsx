@@ -14,6 +14,7 @@ import {
   Calendar,
   Download,
   Filter,
+  Loader2,
 } from "lucide-react";
 import {
   LineChart,
@@ -29,28 +30,132 @@ import {
   Legend,
 } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useQuery } from "@tanstack/react-query";
+import {
+  format,
+  subDays,
+  parseISO,
+  startOfMonth,
+  endOfMonth,
+  subMonths,
+} from "date-fns";
+import { ptBR } from "date-fns/locale";
 
-const cashFlowData = [
-  { name: "01/12", in: 4500, out: 2000 },
-  { name: "02/12", in: 3800, out: 1500 },
-  { name: "03/12", in: 6200, out: 4800 },
-  { name: "04/12", in: 5100, out: 2100 },
-  { name: "05/12", in: 8400, out: 3200 },
-  { name: "06/12", in: 9800, out: 2400 },
-  { name: "07/12", in: 7200, out: 1800 },
-];
-
-const expensesData = [
-  { name: "Fornecedores", value: 43000 },
-  { name: "Pessoal", value: 13000 },
-  { name: "Energia/Água", value: 3500 },
-  { name: "Impostos", value: 8200 },
-  { name: "Manutenção", value: 1200 },
-];
+interface Sale {
+  id: number;
+  total: string;
+  createdAt: string;
+  paymentMethod: string;
+}
 
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8"];
 
 export default function Finance() {
+  const { data: sales = [], isLoading } = useQuery({
+    queryKey: ["/api/sales"],
+    queryFn: async () => {
+      const res = await fetch("/api/sales");
+      if (!res.ok) throw new Error("Failed to fetch sales");
+      return res.json();
+    },
+  });
+
+  const now = new Date();
+  const currentMonthStart = startOfMonth(now);
+  const lastMonthStart = startOfMonth(subMonths(now, 1));
+  const lastMonthEnd = endOfMonth(subMonths(now, 1));
+
+  const currentMonthSales = sales.filter((sale: Sale) => {
+    try {
+      const saleDate = parseISO(sale.createdAt);
+      return saleDate >= currentMonthStart;
+    } catch {
+      return false;
+    }
+  });
+
+  const lastMonthSales = sales.filter((sale: Sale) => {
+    try {
+      const saleDate = parseISO(sale.createdAt);
+      return saleDate >= lastMonthStart && saleDate <= lastMonthEnd;
+    } catch {
+      return false;
+    }
+  });
+
+  const currentMonthTotal = currentMonthSales.reduce(
+    (acc: number, sale: Sale) => acc + parseFloat(sale.total),
+    0
+  );
+  const lastMonthTotal = lastMonthSales.reduce(
+    (acc: number, sale: Sale) => acc + parseFloat(sale.total),
+    0
+  );
+
+  const estimatedExpenses = currentMonthTotal * 0.63;
+  const netBalance = currentMonthTotal - estimatedExpenses;
+  const marginPercent =
+    currentMonthTotal > 0
+      ? ((netBalance / currentMonthTotal) * 100).toFixed(0)
+      : 0;
+
+  const monthChange =
+    lastMonthTotal > 0
+      ? (((currentMonthTotal - lastMonthTotal) / lastMonthTotal) * 100).toFixed(
+          0
+        )
+      : 0;
+
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const date = subDays(now, 6 - i);
+    const dayStr = format(date, "dd/MM");
+    const daySales = sales.filter((sale: Sale) => {
+      try {
+        const saleDate = parseISO(sale.createdAt);
+        return format(saleDate, "yyyy-MM-dd") === format(date, "yyyy-MM-dd");
+      } catch {
+        return false;
+      }
+    });
+    const inTotal = daySales.reduce(
+      (acc: number, sale: Sale) => acc + parseFloat(sale.total),
+      0
+    );
+    const outTotal = inTotal * 0.4;
+    return { name: dayStr, in: inTotal, out: outTotal };
+  });
+
+  const paymentMethodTotals = sales.reduce(
+    (acc: Record<string, number>, sale: Sale) => {
+      const method = sale.paymentMethod || "Outros";
+      acc[method] = (acc[method] || 0) + parseFloat(sale.total);
+      return acc;
+    },
+    {}
+  );
+
+  const expensesData = Object.entries(paymentMethodTotals).map(
+    ([name, value]) => ({
+      name,
+      value: value as number,
+    })
+  );
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-96">
+          <div className="text-center">
+            <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+            <p className="text-muted-foreground">
+              Carregando dados financeiros...
+            </p>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
   return (
     <Layout>
       <div className="flex flex-col gap-6">
@@ -65,7 +170,8 @@ export default function Finance() {
           </div>
           <div className="flex gap-2">
             <Button variant="outline">
-              <Calendar className="mr-2 h-4 w-4" /> Dezembro 2025
+              <Calendar className="mr-2 h-4 w-4" />{" "}
+              {format(now, "MMMM yyyy", { locale: ptBR })}
             </Button>
             <Button variant="outline">
               <Download className="mr-2 h-4 w-4" /> Relatórios
@@ -83,10 +189,14 @@ export default function Finance() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">
-                R$ 142.350,00
+                R${" "}
+                {currentMonthTotal.toLocaleString("pt-BR", {
+                  minimumFractionDigits: 2,
+                })}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                +12% vs. mês anterior
+                {Number(monthChange) >= 0 ? "+" : ""}
+                {monthChange}% vs. mês anterior
               </p>
             </CardContent>
           </Card>
@@ -94,16 +204,19 @@ export default function Finance() {
           <Card className="bg-rose-500/10 border-rose-500/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-rose-700 dark:text-rose-400">
-                Despesas (Mês)
+                Despesas Est. (Mês)
               </CardTitle>
               <ArrowDownRight className="h-4 w-4 text-rose-600" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-rose-700 dark:text-rose-400">
-                R$ 89.420,00
+                R${" "}
+                {estimatedExpenses.toLocaleString("pt-BR", {
+                  minimumFractionDigits: 2,
+                })}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                +5% vs. mês anterior
+                ~63% das receitas (estimativa)
               </p>
             </CardContent>
           </Card>
@@ -117,9 +230,14 @@ export default function Finance() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-primary">
-                R$ 52.930,00
+                R${" "}
+                {netBalance.toLocaleString("pt-BR", {
+                  minimumFractionDigits: 2,
+                })}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Margem: 37%</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Margem: {marginPercent}%
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -143,7 +261,7 @@ export default function Finance() {
                 </CardHeader>
                 <CardContent className="pl-2">
                   <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={cashFlowData}>
+                    <LineChart data={last7Days}>
                       <CartesianGrid
                         strokeDasharray="3 3"
                         vertical={false}
@@ -161,9 +279,16 @@ export default function Finance() {
                         fontSize={12}
                         tickLine={false}
                         axisLine={false}
-                        tickFormatter={(value) => `R$${value / 1000}k`}
+                        tickFormatter={(value) =>
+                          `R$${(value / 1000).toFixed(0)}k`
+                        }
                       />
-                      <Tooltip />
+                      <Tooltip
+                        formatter={(value: number) => [
+                          `R$ ${value.toFixed(2)}`,
+                          "",
+                        ]}
+                      />
                       <Legend />
                       <Line
                         type="monotone"
@@ -188,35 +313,46 @@ export default function Finance() {
 
               <Card className="col-span-3">
                 <CardHeader>
-                  <CardTitle>Composição de Despesas</CardTitle>
+                  <CardTitle>Vendas por Método</CardTitle>
                   <CardDescription>
-                    Distribuição dos custos operacionais.
+                    Distribuição por forma de pagamento.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                      <Pie
-                        data={expensesData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {expensesData.map((entry, index) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            fill={COLORS[index % COLORS.length]}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  {expensesData.length === 0 ? (
+                    <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                      Nenhuma venda registrada
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={expensesData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          {expensesData.map((entry, index) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={COLORS[index % COLORS.length]}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value: number) => [
+                            `R$ ${value.toFixed(2)}`,
+                            "",
+                          ]}
+                        />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -236,60 +372,74 @@ export default function Finance() {
                 </div>
               </CardHeader>
               <CardContent>
+                <div className="text-center text-muted-foreground py-8">
+                  <DollarSign className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Nenhuma conta a pagar cadastrada</p>
+                  <p className="text-sm mt-2">
+                    As contas a pagar aparecerão aqui quando forem registradas
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="receivables">
+            <Card>
+              <CardHeader>
+                <CardTitle>Contas a Receber</CardTitle>
+                <CardDescription>
+                  Valores pendentes de recebimento.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-center text-muted-foreground py-8">
+                  <DollarSign className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Nenhuma conta a receber pendente</p>
+                  <p className="text-sm mt-2">Vendas a prazo aparecerão aqui</p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="dre">
+            <Card>
+              <CardHeader>
+                <CardTitle>DRE Gerencial</CardTitle>
+                <CardDescription>
+                  Demonstrativo de Resultado do Exercício
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
                 <div className="space-y-4">
-                  {[
-                    {
-                      id: 1,
-                      desc: "Fornecedor Atacadista A",
-                      due: "Hoje",
-                      value: "R$ 4.500,00",
-                      status: "Pendente",
-                    },
-                    {
-                      id: 2,
-                      desc: "Conta de Energia (Enel)",
-                      due: "Amanhã",
-                      value: "R$ 1.250,00",
-                      status: "Agendado",
-                    },
-                    {
-                      id: 3,
-                      desc: "Aluguel Loja",
-                      due: "15/12",
-                      value: "R$ 3.000,00",
-                      status: "Pendente",
-                    },
-                    {
-                      id: 4,
-                      desc: "Internet Fibra",
-                      due: "15/12",
-                      value: "R$ 150,00",
-                      status: "Pendente",
-                    },
-                  ].map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between border-b border-border pb-4 last:border-0 last:pb-0"
-                    >
-                      <div>
-                        <p className="font-medium">{item.desc}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Vence: {item.due}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="font-bold">{item.value}</span>
-                        <Button
-                          size="sm"
-                          variant={
-                            item.status === "Agendado" ? "secondary" : "default"
-                          }
-                        >
-                          {item.status === "Agendado" ? "Agendado" : "Pagar"}
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                  <div className="flex justify-between items-center border-b pb-2">
+                    <span className="font-medium">Receita Bruta</span>
+                    <span className="font-bold text-emerald-600">
+                      R${" "}
+                      {currentMonthTotal.toLocaleString("pt-BR", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center border-b pb-2">
+                    <span className="text-muted-foreground">
+                      (-) Custos Estimados (63%)
+                    </span>
+                    <span className="text-rose-600">
+                      R${" "}
+                      {estimatedExpenses.toLocaleString("pt-BR", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center pt-2">
+                    <span className="font-bold text-lg">Resultado Líquido</span>
+                    <span className="font-bold text-lg text-primary">
+                      R${" "}
+                      {netBalance.toLocaleString("pt-BR", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
