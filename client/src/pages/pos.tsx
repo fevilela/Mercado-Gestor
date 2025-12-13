@@ -14,6 +14,10 @@ import {
   CheckCircle2,
   Loader2,
   Printer,
+  Package,
+  X,
+  Ban,
+  XCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -42,6 +46,14 @@ export default function POS() {
   const [isFinishing, setIsFinishing] = useState(false);
   const [fiscalStatus, setFiscalStatus] = useState<FiscalStatus>("idle");
   const [selectedPayment, setSelectedPayment] = useState<PaymentMethod>(null);
+  const [showCatalog, setShowCatalog] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>("Todos");
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showCancelReceipt, setShowCancelReceipt] = useState(false);
+  const [cancelledItems, setCancelledItems] = useState<
+    { product: any; qty: number }[]
+  >([]);
+  const [cancelledTotal, setCancelledTotal] = useState(0);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -199,183 +211,219 @@ export default function POS() {
     setSelectedPayment(null);
   };
 
+  const handleCancelSale = () => {
+    setCancelledItems([...cart]);
+    setCancelledTotal(total);
+    setShowCancelDialog(false);
+    setShowCancelReceipt(true);
+    setCart([]);
+    setSelectedPayment(null);
+    toast({
+      title: "Venda Cancelada",
+      description: "A venda foi cancelada com sucesso.",
+      variant: "default",
+      className: "bg-red-500 text-white border-none",
+    });
+  };
+
+  const closeCancelReceipt = () => {
+    setShowCancelReceipt(false);
+    setCancelledItems([]);
+    setCancelledTotal(0);
+  };
+
   const subtotal = cart.reduce(
     (acc, item) => acc + parseFloat(item.product.price) * item.qty,
     0
   );
   const total = subtotal;
 
-  const filteredProducts = products.filter(
-    (p: any) =>
+  const uniqueCategories = products
+    .map((p: any) => String(p.category))
+    .filter((c: string, i: number, arr: string[]) => arr.indexOf(c) === i);
+  const categories: string[] = ["Todos", ...uniqueCategories];
+
+  const filteredProducts = products.filter((p: any) => {
+    const matchesSearch =
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.ean && p.ean.includes(searchQuery))
-  );
+      (p.ean && p.ean.includes(searchQuery));
+    const matchesCategory =
+      selectedCategory === "Todos" || p.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
 
   return (
     <div className="flex h-screen w-full bg-background overflow-hidden">
-      {/* Left Side: Product Selection */}
-      <div className="flex-1 flex flex-col border-r border-border">
-        {/* Header */}
-        <div className="h-16 border-b border-border flex items-center px-6 gap-4 bg-card">
-          <Link href="/">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-5 w-5" />
+      {/* Catalog Panel - Only shown when showCatalog is true */}
+      {showCatalog && (
+        <div className="flex-1 flex flex-col border-r border-border">
+          {/* Header */}
+          <div className="h-16 border-b border-border flex items-center px-6 gap-4 bg-card">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setShowCatalog(false)}
+              data-testid="button-close-catalog"
+            >
+              <X className="h-5 w-5" />
             </Button>
-          </Link>
-          <div className="relative flex-1 max-w-lg">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-9 h-10 bg-background"
-              placeholder="Buscar produto (F2) ou ler código de barras..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              autoFocus
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            {isFiscalConfigured ? (
-              <Badge
-                variant="outline"
-                className="h-8 gap-2 bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-              >
-                <CheckCircle2 className="h-3 w-3" /> SEFAZ Online
-              </Badge>
-            ) : (
-              <Badge
-                variant="outline"
-                className="h-8 gap-2 bg-amber-500/10 text-amber-600 border-amber-500/20"
-              >
-                <FileCheck className="h-3 w-3" /> Modo Offline
-              </Badge>
-            )}
+            <div className="relative flex-1 max-w-lg">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-9 h-10 bg-background"
+                placeholder="Buscar produto (F2) ou ler código de barras..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                autoFocus
+                data-testid="input-search-catalog"
+              />
+            </div>
             <Button variant="outline" className="gap-2">
               <ScanBarcode className="h-4 w-4" />
               Ler Código
             </Button>
           </div>
-        </div>
 
-        {/* Categories */}
-        <div className="h-14 border-b border-border flex items-center px-6 gap-2 bg-muted/20 overflow-x-auto whitespace-nowrap scrollbar-hide">
-          <Badge
-            variant="default"
-            className="cursor-pointer hover:opacity-90 px-4 py-1.5 text-sm"
-          >
-            Todos
-          </Badge>
-          <Badge
-            variant="outline"
-            className="cursor-pointer hover:bg-muted px-4 py-1.5 text-sm"
-          >
-            Mercearia
-          </Badge>
-          <Badge
-            variant="outline"
-            className="cursor-pointer hover:bg-muted px-4 py-1.5 text-sm"
-          >
-            Bebidas
-          </Badge>
-          <Badge
-            variant="outline"
-            className="cursor-pointer hover:bg-muted px-4 py-1.5 text-sm"
-          >
-            Higiene
-          </Badge>
-          <Badge
-            variant="outline"
-            className="cursor-pointer hover:bg-muted px-4 py-1.5 text-sm"
-          >
-            Limpeza
-          </Badge>
-          <Badge
-            variant="outline"
-            className="cursor-pointer hover:bg-muted px-4 py-1.5 text-sm"
-          >
-            Açougue
-          </Badge>
-          <Badge
-            variant="outline"
-            className="cursor-pointer hover:bg-muted px-4 py-1.5 text-sm"
-          >
-            Padaria
-          </Badge>
-        </div>
-
-        {/* Product Grid */}
-        <ScrollArea className="flex-1 bg-muted/10 p-6">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {filteredProducts.map((product: any) => (
-              <Card
-                key={product.id}
-                className="cursor-pointer hover:border-primary hover:shadow-md transition-all active:scale-95 flex flex-col overflow-hidden"
-                onClick={() => addToCart(product)}
-                data-testid={`product-card-${product.id}`}
+          {/* Categories */}
+          <div className="h-14 border-b border-border flex items-center px-6 gap-2 bg-muted/20 overflow-x-auto whitespace-nowrap scrollbar-hide">
+            {categories.map((category) => (
+              <Badge
+                key={category}
+                variant={selectedCategory === category ? "default" : "outline"}
+                className={`cursor-pointer px-4 py-1.5 text-sm ${
+                  selectedCategory === category
+                    ? "hover:opacity-90"
+                    : "hover:bg-muted"
+                }`}
+                onClick={() => setSelectedCategory(category)}
+                data-testid={`filter-category-${category}`}
               >
-                <div className="aspect-square bg-white p-2 flex items-center justify-center overflow-hidden">
-                  {product.mainImageUrl ? (
-                    <img
-                      src={product.mainImageUrl}
-                      alt={product.name}
-                      className="w-full h-full object-contain"
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                        e.currentTarget.nextElementSibling?.classList.remove(
-                          "hidden"
-                        );
-                      }}
-                    />
-                  ) : null}
-                  <div
-                    className={`w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xl ${
-                      product.mainImageUrl ? "hidden" : ""
-                    }`}
-                  >
-                    {product.name.substring(0, 2).toUpperCase()}
-                  </div>
-                </div>
-                <div className="p-3 flex flex-col flex-1 justify-between bg-card">
-                  <div>
-                    <h3 className="font-medium text-sm line-clamp-2 leading-tight mb-1">
-                      {product.name}
-                    </h3>
-                    <p className="text-xs text-muted-foreground">
-                      {product.ean || "N/A"}
-                    </p>
-                  </div>
-                  <div className="mt-2 font-bold text-lg text-primary">
-                    R$ {parseFloat(product.price).toFixed(2)}
-                  </div>
-                </div>
-              </Card>
+                {category}
+              </Badge>
             ))}
           </div>
-        </ScrollArea>
-      </div>
 
-      {/* Right Side: Cart & Checkout */}
-      <div className="w-[400px] flex flex-col bg-card shadow-xl z-10">
+          {/* Product Grid */}
+          <ScrollArea className="flex-1 bg-muted/10 p-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {filteredProducts.map((product: any) => (
+                <Card
+                  key={product.id}
+                  className="cursor-pointer hover:border-primary hover:shadow-md transition-all active:scale-95 flex flex-col overflow-hidden"
+                  onClick={() => addToCart(product)}
+                  data-testid={`product-card-${product.id}`}
+                >
+                  <div className="aspect-square bg-white p-2 flex items-center justify-center overflow-hidden">
+                    {product.mainImageUrl ? (
+                      <img
+                        src={product.mainImageUrl}
+                        alt={product.name}
+                        className="w-full h-full object-contain"
+                        onError={(e) => {
+                          e.currentTarget.style.display = "none";
+                          e.currentTarget.nextElementSibling?.classList.remove(
+                            "hidden"
+                          );
+                        }}
+                      />
+                    ) : null}
+                    <div
+                      className={`w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xl ${
+                        product.mainImageUrl ? "hidden" : ""
+                      }`}
+                    >
+                      {product.name.substring(0, 2).toUpperCase()}
+                    </div>
+                  </div>
+                  <div className="p-3 flex flex-col flex-1 justify-between bg-card">
+                    <div>
+                      <h3 className="font-medium text-sm line-clamp-2 leading-tight mb-1">
+                        {product.name}
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        {product.ean || "N/A"}
+                      </p>
+                    </div>
+                    <div className="mt-2 font-bold text-lg text-primary">
+                      R$ {parseFloat(product.price).toFixed(2)}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </ScrollArea>
+        </div>
+      )}
+
+      {/* Main Cart & Checkout Area */}
+      <div
+        className={`flex flex-col bg-card shadow-xl z-10 ${
+          showCatalog ? "w-[400px]" : "flex-1"
+        }`}
+      >
         {/* Cart Header */}
         <div className="h-16 border-b border-border flex items-center justify-between px-6 bg-primary text-primary-foreground">
-          <div className="flex items-center gap-2 font-bold text-lg">
-            <User className="h-5 w-5" />
-            <span>Consumidor Final</span>
+          <div className="flex items-center gap-4">
+            <Link href="/">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-primary-foreground hover:bg-primary-foreground/20"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+            </Link>
+            <div className="flex items-center gap-2 font-bold text-lg">
+              <User className="h-5 w-5" />
+              <span>Consumidor Final</span>
+            </div>
           </div>
-          <Badge
-            variant="secondary"
-            className="bg-white/20 hover:bg-white/30 text-white border-0"
-          >
-            Caixa 01
-          </Badge>
+          <div className="flex items-center gap-3">
+            {isFiscalConfigured ? (
+              <Badge
+                variant="secondary"
+                className="bg-white/20 hover:bg-white/30 text-white border-0"
+              >
+                <CheckCircle2 className="h-3 w-3 mr-1" /> SEFAZ Online
+              </Badge>
+            ) : (
+              <Badge
+                variant="secondary"
+                className="bg-white/20 hover:bg-white/30 text-white border-0"
+              >
+                <FileCheck className="h-3 w-3 mr-1" /> Modo Offline
+              </Badge>
+            )}
+            <Button
+              variant="secondary"
+              className="gap-2"
+              onClick={() => setShowCatalog(!showCatalog)}
+              data-testid="button-toggle-catalog"
+            >
+              <Package className="h-4 w-4" />
+              Catálogo
+            </Button>
+            <Badge
+              variant="secondary"
+              className="bg-white/20 hover:bg-white/30 text-white border-0"
+            >
+              Caixa 01
+            </Badge>
+          </div>
         </div>
 
         {/* Cart Items */}
         <ScrollArea className="flex-1 p-4">
-          <div className="space-y-3">
+          <div
+            className={`space-y-3 ${!showCatalog ? "max-w-2xl mx-auto" : ""}`}
+          >
             {cart.length === 0 ? (
               <div className="h-64 flex flex-col items-center justify-center text-muted-foreground opacity-50">
                 <ScanBarcode className="h-16 w-16 mb-4" />
                 <p>Carrinho vazio</p>
-                <p className="text-sm">Adicione produtos para começar</p>
+                <p className="text-sm">
+                  Clique em "Catálogo" para adicionar produtos
+                </p>
               </div>
             ) : (
               cart.map((item) => (
@@ -448,7 +496,11 @@ export default function POS() {
         </ScrollArea>
 
         {/* Totals Section */}
-        <div className="border-t border-border bg-muted/30 p-6 space-y-4">
+        <div
+          className={`border-t border-border bg-muted/30 p-6 space-y-4 ${
+            !showCatalog ? "max-w-2xl mx-auto w-full" : ""
+          }`}
+        >
           <div className="space-y-2">
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>Subtotal</span>
@@ -482,6 +534,7 @@ export default function POS() {
                   : "bg-purple-600/70 hover:bg-purple-600"
               }`}
               onClick={() => setSelectedPayment("pix")}
+              data-testid="button-payment-pix"
             >
               <QrCode className="h-5 w-5" />
               <span className="text-xs">PIX</span>
@@ -493,6 +546,7 @@ export default function POS() {
                   : "bg-blue-600/70 hover:bg-blue-600"
               }`}
               onClick={() => setSelectedPayment("credito")}
+              data-testid="button-payment-credit"
             >
               <CreditCard className="h-5 w-5" />
               <span className="text-xs">Crédito</span>
@@ -504,6 +558,7 @@ export default function POS() {
                   : "bg-emerald-600/70 hover:bg-emerald-600"
               }`}
               onClick={() => setSelectedPayment("debito")}
+              data-testid="button-payment-debit"
             >
               <CreditCard className="h-5 w-5" />
               <span className="text-xs">Débito</span>
@@ -519,16 +574,29 @@ export default function POS() {
             </div>
           )}
 
-          <Button
-            size="lg"
-            className="w-full h-12 text-lg font-bold gap-2"
-            disabled={cart.length === 0}
-            onClick={handleFinishSale}
-            data-testid="button-finish-sale"
-          >
-            FINALIZAR VENDA
-            <FileCheck className="h-5 w-5" />
-          </Button>
+          <div className="grid grid-cols-2 gap-3">
+            <Button
+              size="lg"
+              variant="destructive"
+              className="h-12 text-lg font-bold gap-2"
+              disabled={cart.length === 0}
+              onClick={() => setShowCancelDialog(true)}
+              data-testid="button-cancel-sale"
+            >
+              <Ban className="h-5 w-5" />
+              CANCELAR
+            </Button>
+            <Button
+              size="lg"
+              className="h-12 text-lg font-bold gap-2"
+              disabled={cart.length === 0}
+              onClick={handleFinishSale}
+              data-testid="button-finish-sale"
+            >
+              FINALIZAR
+              <FileCheck className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -616,14 +684,138 @@ export default function POS() {
                   variant="outline"
                   onClick={resetSale}
                   className="flex-1"
+                  data-testid="button-new-sale"
                 >
                   <Plus className="mr-2 h-4 w-4" /> Nova Venda
                 </Button>
-                <Button onClick={resetSale} className="flex-1">
+                <Button
+                  onClick={resetSale}
+                  className="flex-1"
+                  data-testid="button-print-receipt"
+                >
                   <Printer className="mr-2 h-4 w-4" /> Imprimir Cupom
                 </Button>
               </>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel Confirmation Dialog */}
+      <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <XCircle className="h-5 w-5" />
+              Cancelar Venda
+            </DialogTitle>
+            <DialogDescription>
+              Tem certeza que deseja cancelar esta venda? Esta ação não pode ser
+              desfeita.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Itens no carrinho:</span>
+                <span className="font-medium">
+                  {cart.reduce((acc, item) => acc + item.qty, 0)}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span>Valor total:</span>
+                <span className="font-bold text-destructive">
+                  R$ {total.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowCancelDialog(false)}
+              className="flex-1"
+            >
+              Voltar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCancelSale}
+              className="flex-1"
+              data-testid="button-confirm-cancel"
+            >
+              <Ban className="mr-2 h-4 w-4" />
+              Confirmar Cancelamento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancellation Receipt Dialog */}
+      <Dialog open={showCancelReceipt} onOpenChange={closeCancelReceipt}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center text-destructive">
+              Cupom de Cancelamento
+            </DialogTitle>
+          </DialogHeader>
+          <div className="border-2 border-dashed border-destructive/30 rounded-lg p-4 bg-red-50/50">
+            <div className="text-center border-b border-destructive/20 pb-3 mb-3">
+              <p className="font-bold text-lg text-destructive">
+                VENDA CANCELADA
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {new Date().toLocaleDateString("pt-BR")} às{" "}
+                {new Date().toLocaleTimeString("pt-BR")}
+              </p>
+            </div>
+
+            <div className="space-y-2 mb-4">
+              <p className="text-xs font-medium text-center text-muted-foreground">
+                ITENS CANCELADOS
+              </p>
+              {cancelledItems.map((item, index) => (
+                <div key={index} className="flex justify-between text-sm">
+                  <span className="line-through text-muted-foreground">
+                    {item.qty}x {item.product.name}
+                  </span>
+                  <span className="line-through text-muted-foreground">
+                    R$ {(parseFloat(item.product.price) * item.qty).toFixed(2)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-destructive/20 pt-3">
+              <div className="flex justify-between font-bold text-destructive">
+                <span>TOTAL CANCELADO:</span>
+                <span>R$ {cancelledTotal.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 text-center text-xs text-muted-foreground">
+              <p>Motivo: Cancelamento solicitado pelo operador</p>
+              <p>Caixa 01 • Operador: Sistema</p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={closeCancelReceipt}
+              className="flex-1"
+            >
+              Fechar
+            </Button>
+            <Button
+              onClick={() => {
+                window.print();
+              }}
+              className="flex-1"
+              data-testid="button-print-cancel-receipt"
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Imprimir
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

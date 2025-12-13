@@ -175,7 +175,49 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline">Exportar</Button>
+            <Button
+              variant="outline"
+              data-testid="button-export"
+              onClick={() => {
+                const csvContent = [
+                  [
+                    "ID",
+                    "Cliente",
+                    "Total",
+                    "Itens",
+                    "Pagamento",
+                    "Status",
+                    "Data",
+                  ].join(","),
+                  ...sales.map((sale: Sale) =>
+                    [
+                      sale.id,
+                      sale.customerName,
+                      sale.total,
+                      sale.itemsCount,
+                      sale.paymentMethod,
+                      sale.status,
+                      sale.createdAt,
+                    ].join(",")
+                  ),
+                ].join("\n");
+
+                const blob = new Blob([csvContent], {
+                  type: "text/csv;charset=utf-8;",
+                });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `vendas_${format(
+                  new Date(),
+                  "yyyy-MM-dd"
+                )}.csv`;
+                link.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              Exportar
+            </Button>
             <Link href="/pos">
               <Button>
                 <ShoppingCart className="mr-2 h-4 w-4" />
