@@ -403,12 +403,29 @@ export async function registerRoutes(
     try {
       const { sale, items } = createSaleRequestSchema.parse(req.body);
 
+      const settings = await storage.getCompanySettings();
+      const isFiscalConfigured = !!(
+        settings &&
+        settings.fiscalEnabled &&
+        settings.cscToken &&
+        settings.cscId
+      );
+
+      const saleData = {
+        ...sale,
+        nfceStatus: isFiscalConfigured ? "Autorizada" : "Pendente Fiscal",
+        status: isFiscalConfigured ? "Concluído" : "Aguardando Emissão",
+      };
+
       for (const item of items) {
         await storage.updateProductStock(item.productId, -item.quantity);
       }
 
-      const newSale = await storage.createSale(sale, items as any);
-      res.status(201).json(newSale);
+      const newSale = await storage.createSale(saleData, items as any);
+      res.status(201).json({
+        sale: newSale,
+        fiscalConfigured: isFiscalConfigured,
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors });
@@ -569,12 +586,10 @@ export async function registerRoutes(
       const parsedProducts = parseNFeXML(xmlContent);
 
       if (parsedProducts.length === 0) {
-        return res
-          .status(400)
-          .json({
-            error:
-              "Nenhum produto encontrado no XML. Verifique se o arquivo é uma NFe válida.",
-          });
+        return res.status(400).json({
+          error:
+            "Nenhum produto encontrado no XML. Verifique se o arquivo é uma NFe válida.",
+        });
       }
 
       const existingProducts = await storage.getAllProducts();
