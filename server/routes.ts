@@ -871,5 +871,216 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/sales/export/xml", async (req, res) => {
+    try {
+      const monthParam = req.query.month as string | undefined;
+      const yearParam = req.query.year as string | undefined;
+
+      const month = monthParam ? parseInt(monthParam) : null;
+      const year = yearParam ? parseInt(yearParam) : new Date().getFullYear();
+
+      if (monthParam && (isNaN(month!) || month! < 1 || month! > 12)) {
+        return res
+          .status(400)
+          .json({ error: "Mês inválido. Use valores de 1 a 12." });
+      }
+      if (isNaN(year) || year < 2020 || year > 2030) {
+        return res.status(400).json({ error: "Ano inválido." });
+      }
+
+      const sales = await storage.getAllSales();
+      const settings = await storage.getCompanySettings();
+
+      const filteredSales = sales.filter((sale: any) => {
+        const saleDate = new Date(sale.createdAt);
+        if (month) {
+          return (
+            saleDate.getMonth() + 1 === month && saleDate.getFullYear() === year
+          );
+        }
+        return saleDate.getFullYear() === year;
+      });
+
+      const saleIds = filteredSales.map((sale: any) => sale.id);
+      const allSaleItemsMap = await storage.getSaleItemsBatch(saleIds);
+
+      const escapeXml = (str: string | null | undefined): string => {
+        if (!str) return "";
+        return str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      };
+
+      let xmlContent = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+      xmlContent += `<exportacaoVendas>\n`;
+      xmlContent += `  <empresa>\n`;
+      xmlContent += `    <cnpj>${escapeXml(settings?.cnpj)}</cnpj>\n`;
+      xmlContent += `    <razaoSocial>${escapeXml(
+        settings?.razaoSocial
+      )}</razaoSocial>\n`;
+      xmlContent += `    <nomeFantasia>${escapeXml(
+        settings?.nomeFantasia
+      )}</nomeFantasia>\n`;
+      xmlContent += `  </empresa>\n`;
+      xmlContent += `  <periodo>\n`;
+      xmlContent += `    <mes>${month || "todos"}</mes>\n`;
+      xmlContent += `    <ano>${year}</ano>\n`;
+      xmlContent += `  </periodo>\n`;
+      xmlContent += `  <vendas>\n`;
+
+      filteredSales.forEach((sale: any) => {
+        const items = allSaleItemsMap.get(sale.id) || [];
+        xmlContent += `    <venda>\n`;
+        xmlContent += `      <id>${sale.id}</id>\n`;
+        xmlContent += `      <data>${sale.createdAt}</data>\n`;
+        xmlContent += `      <cliente>${escapeXml(
+          sale.customerName
+        )}</cliente>\n`;
+        xmlContent += `      <total>${sale.total}</total>\n`;
+        xmlContent += `      <formaPagamento>${escapeXml(
+          sale.paymentMethod
+        )}</formaPagamento>\n`;
+        xmlContent += `      <status>${escapeXml(sale.status)}</status>\n`;
+        xmlContent += `      <nfceStatus>${escapeXml(
+          sale.nfceStatus
+        )}</nfceStatus>\n`;
+        xmlContent += `      <nfceProtocolo>${escapeXml(
+          sale.nfceProtocol
+        )}</nfceProtocolo>\n`;
+        xmlContent += `      <nfceChave>${escapeXml(
+          sale.nfceKey
+        )}</nfceChave>\n`;
+        xmlContent += `      <itens>\n`;
+        for (const item of items) {
+          xmlContent += `        <item>\n`;
+          xmlContent += `          <produtoId>${item.productId}</produtoId>\n`;
+          xmlContent += `          <nome>${escapeXml(
+            item.productName
+          )}</nome>\n`;
+          xmlContent += `          <quantidade>${item.quantity}</quantidade>\n`;
+          xmlContent += `          <precoUnitario>${item.unitPrice}</precoUnitario>\n`;
+          xmlContent += `          <subtotal>${item.subtotal}</subtotal>\n`;
+          xmlContent += `        </item>\n`;
+        }
+        xmlContent += `      </itens>\n`;
+        xmlContent += `    </venda>\n`;
+      });
+
+      xmlContent += `  </vendas>\n`;
+      xmlContent += `  <resumo>\n`;
+      xmlContent += `    <totalVendas>${filteredSales.length}</totalVendas>\n`;
+      xmlContent += `    <valorTotal>${filteredSales
+        .reduce((acc: number, s: any) => acc + parseFloat(s.total), 0)
+        .toFixed(2)}</valorTotal>\n`;
+      xmlContent += `  </resumo>\n`;
+      xmlContent += `</exportacaoVendas>`;
+
+      const filename = `vendas_${month || "todos"}_${year}.xml`;
+      res.setHeader("Content-Type", "application/xml; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`
+      );
+      res.setHeader("Content-Length", Buffer.byteLength(xmlContent, "utf8"));
+      res.send(xmlContent);
+    } catch (error) {
+      console.error("Failed to export XML:", error);
+      res.status(500).json({ error: "Falha ao exportar XML" });
+    }
+  });
+
+  app.get("/api/sales/report/closing", async (req, res) => {
+    try {
+      const dateParam = req.query.date as string | undefined;
+      let targetDate: Date;
+
+      if (dateParam) {
+        targetDate = new Date(dateParam);
+        if (isNaN(targetDate.getTime())) {
+          return res
+            .status(400)
+            .json({ error: "Data inválida. Use formato YYYY-MM-DD." });
+        }
+      } else {
+        targetDate = new Date();
+      }
+
+      const sales = await storage.getAllSales();
+
+      const daySales = sales.filter((sale: any) => {
+        const saleDate = new Date(sale.createdAt);
+        return saleDate.toDateString() === targetDate.toDateString();
+      });
+
+      const paymentMethods: Record<string, { count: number; total: number }> =
+        {};
+      let totalItems = 0;
+
+      for (const sale of daySales) {
+        const method = sale.paymentMethod;
+        if (!paymentMethods[method]) {
+          paymentMethods[method] = { count: 0, total: 0 };
+        }
+        paymentMethods[method].count += 1;
+        paymentMethods[method].total += parseFloat(sale.total);
+        totalItems += sale.itemsCount;
+      }
+
+      const report = {
+        date: targetDate.toISOString().split("T")[0],
+        totalSales: daySales.length,
+        totalValue: daySales
+          .reduce((acc: number, s: any) => acc + parseFloat(s.total), 0)
+          .toFixed(2),
+        totalItems,
+        averageTicket:
+          daySales.length > 0
+            ? (
+                daySales.reduce(
+                  (acc: number, s: any) => acc + parseFloat(s.total),
+                  0
+                ) / daySales.length
+              ).toFixed(2)
+            : "0.00",
+        paymentMethods: Object.entries(paymentMethods).map(
+          ([method, data]) => ({
+            method,
+            count: data.count,
+            total: data.total.toFixed(2),
+            percentage: ((data.count / daySales.length) * 100).toFixed(1),
+          })
+        ),
+        salesByStatus: {
+          authorized: daySales.filter((s: any) => s.nfceStatus === "Autorizada")
+            .length,
+          pending: daySales.filter(
+            (s: any) =>
+              s.nfceStatus === "Pendente" || s.nfceStatus === "Pendente Fiscal"
+          ).length,
+          contingency: daySales.filter(
+            (s: any) => s.nfceStatus === "Contingência"
+          ).length,
+          cancelled: daySales.filter((s: any) => s.nfceStatus === "Cancelada")
+            .length,
+        },
+        sales: daySales.map((sale: any) => ({
+          id: sale.id,
+          time: new Date(sale.createdAt).toLocaleTimeString("pt-BR"),
+          customer: sale.customerName,
+          total: sale.total,
+          paymentMethod: sale.paymentMethod,
+          status: sale.nfceStatus,
+        })),
+      };
+
+      res.json(report);
+    } catch (error) {
+      console.error("Failed to generate closing report:", error);
+      res.status(500).json({ error: "Falha ao gerar relatório de fechamento" });
+    }
+  });
+
   return httpServer;
 }

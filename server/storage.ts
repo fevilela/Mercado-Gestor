@@ -94,6 +94,7 @@ export interface IStorage {
     key?: string
   ): Promise<Sale | undefined>;
   getSaleItems(saleId: number): Promise<SaleItem[]>;
+  getSaleItemsBatch(saleIds: number[]): Promise<Map<number, SaleItem[]>>;
   getSalesStats(): Promise<{ today: number; week: number; month: number }>;
 
   createInventoryMovement(
@@ -342,6 +343,28 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(saleItems)
       .where(eq(saleItems.saleId, saleId));
+  }
+
+  async getSaleItemsBatch(saleIds: number[]): Promise<Map<number, SaleItem[]>> {
+    if (saleIds.length === 0) {
+      return new Map();
+    }
+    const allItems = await db
+      .select()
+      .from(saleItems)
+      .where(
+        sql`${saleItems.saleId} = ANY(ARRAY[${sql.raw(
+          saleIds.join(",")
+        )}]::int[])`
+      );
+
+    const itemsMap = new Map<number, SaleItem[]>();
+    for (const item of allItems) {
+      const existing = itemsMap.get(item.saleId) || [];
+      existing.push(item);
+      itemsMap.set(item.saleId, existing);
+    }
+    return itemsMap;
   }
 
   async getSalesStats(): Promise<{

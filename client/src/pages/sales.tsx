@@ -36,6 +36,41 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+interface ClosingReport {
+  date: string;
+  totalSales: number;
+  totalValue: string;
+  totalItems: number;
+  averageTicket: string;
+  paymentMethods: Array<{
+    method: string;
+    count: number;
+    total: string;
+    percentage: string;
+  }>;
+  salesByStatus: {
+    authorized: number;
+    pending: number;
+    contingency: number;
+    cancelled: number;
+  };
+  sales: Array<{
+    id: number;
+    time: string;
+    customer: string;
+    total: string;
+    paymentMethod: string;
+    status: string;
+  }>;
+}
 
 interface Sale {
   id: number;
@@ -55,6 +90,18 @@ export default function Sales() {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [exportMonth, setExportMonth] = useState<string>(
+    (new Date().getMonth() + 1).toString()
+  );
+  const [exportYear, setExportYear] = useState<string>(
+    new Date().getFullYear().toString()
+  );
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showClosingDialog, setShowClosingDialog] = useState(false);
+  const [closingReport, setClosingReport] = useState<ClosingReport | null>(
+    null
+  );
+  const [isLoadingReport, setIsLoadingReport] = useState(false);
 
   const { data: sales = [], isLoading } = useQuery({
     queryKey: ["/api/sales"],
@@ -114,6 +161,67 @@ export default function Sales() {
     }, 2000);
   };
 
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportXml = async () => {
+    setIsExporting(true);
+    try {
+      const url = `/api/sales/export/xml?month=${exportMonth}&year=${exportYear}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Falha ao exportar");
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download = `vendas_${exportMonth}_${exportYear}.xml`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(downloadUrl);
+
+      setShowExportDialog(false);
+      toast({
+        title: "Sucesso!",
+        description: `Arquivo XML exportado com sucesso.`,
+        className: "bg-emerald-500 text-white border-none",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error ? error.message : "Falha ao exportar XML.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleClosingReport = async () => {
+    setIsLoadingReport(true);
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const res = await fetch(`/api/sales/report/closing?date=${today}`);
+      if (!res.ok) throw new Error("Failed to fetch report");
+      const report = await res.json();
+      setClosingReport(report);
+      setShowClosingDialog(true);
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "Falha ao gerar relatório de fechamento.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingReport(false);
+    }
+  };
+
   const formatDate = (dateString: string) => {
     try {
       const date = new Date(dateString);
@@ -165,12 +273,286 @@ export default function Sales() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline">
-              <FileCheck className="mr-2 h-4 w-4" /> Exportar XML (Mensal)
-            </Button>
-            <Button>
-              <Printer className="mr-2 h-4 w-4" /> Relatório de Fechamento
-            </Button>
+            <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <FileCheck className="mr-2 h-4 w-4" /> Exportar XML (Mensal)
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Exportar Vendas em XML</DialogTitle>
+                  <DialogDescription>
+                    Selecione o período para exportação
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Mês</label>
+                      <Select
+                        value={exportMonth}
+                        onValueChange={setExportMonth}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Mês" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">Janeiro</SelectItem>
+                          <SelectItem value="2">Fevereiro</SelectItem>
+                          <SelectItem value="3">Março</SelectItem>
+                          <SelectItem value="4">Abril</SelectItem>
+                          <SelectItem value="5">Maio</SelectItem>
+                          <SelectItem value="6">Junho</SelectItem>
+                          <SelectItem value="7">Julho</SelectItem>
+                          <SelectItem value="8">Agosto</SelectItem>
+                          <SelectItem value="9">Setembro</SelectItem>
+                          <SelectItem value="10">Outubro</SelectItem>
+                          <SelectItem value="11">Novembro</SelectItem>
+                          <SelectItem value="12">Dezembro</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Ano</label>
+                      <Select value={exportYear} onValueChange={setExportYear}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Ano" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="2023">2023</SelectItem>
+                          <SelectItem value="2024">2024</SelectItem>
+                          <SelectItem value="2025">2025</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowExportDialog(false)}
+                    disabled={isExporting}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button onClick={handleExportXml} disabled={isExporting}>
+                    {isExporting ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileCheck className="mr-2 h-4 w-4" />
+                    )}
+                    {isExporting ? "Exportando..." : "Exportar XML"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              open={showClosingDialog}
+              onOpenChange={setShowClosingDialog}
+            >
+              <DialogTrigger asChild>
+                <Button
+                  onClick={handleClosingReport}
+                  disabled={isLoadingReport}
+                >
+                  {isLoadingReport ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Printer className="mr-2 h-4 w-4" />
+                  )}
+                  Relatório de Fechamento
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Relatório de Fechamento do Dia</DialogTitle>
+                  <DialogDescription>
+                    {closingReport?.date
+                      ? format(
+                          new Date(closingReport.date),
+                          "dd 'de' MMMM 'de' yyyy",
+                          { locale: ptBR }
+                        )
+                      : "Carregando..."}
+                  </DialogDescription>
+                </DialogHeader>
+                {closingReport && (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-muted p-4 rounded-lg text-center">
+                        <p className="text-2xl font-bold text-primary">
+                          {closingReport.totalSales}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Total de Vendas
+                        </p>
+                      </div>
+                      <div className="bg-muted p-4 rounded-lg text-center">
+                        <p className="text-2xl font-bold text-emerald-600">
+                          R$ {closingReport.totalValue}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Valor Total
+                        </p>
+                      </div>
+                      <div className="bg-muted p-4 rounded-lg text-center">
+                        <p className="text-2xl font-bold">
+                          {closingReport.totalItems}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Itens Vendidos
+                        </p>
+                      </div>
+                      <div className="bg-muted p-4 rounded-lg text-center">
+                        <p className="text-2xl font-bold">
+                          R$ {closingReport.averageTicket}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Ticket Médio
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="font-semibold mb-3">
+                        Formas de Pagamento
+                      </h4>
+                      <div className="space-y-2">
+                        {closingReport.paymentMethods.length > 0 ? (
+                          closingReport.paymentMethods.map((pm) => (
+                            <div
+                              key={pm.method}
+                              className="flex justify-between items-center bg-muted/50 p-3 rounded-lg"
+                            >
+                              <span className="font-medium">{pm.method}</span>
+                              <div className="text-right">
+                                <span className="font-bold">R$ {pm.total}</span>
+                                <span className="text-muted-foreground text-sm ml-2">
+                                  ({pm.count} vendas - {pm.percentage}%)
+                                </span>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-muted-foreground text-center py-4">
+                            Nenhuma venda hoje
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="font-semibold mb-3">
+                        Status das Notas Fiscais
+                      </h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div className="flex items-center gap-2 bg-emerald-50 p-3 rounded-lg">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                          <div>
+                            <p className="font-bold">
+                              {closingReport.salesByStatus.authorized}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Autorizadas
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 bg-amber-50 p-3 rounded-lg">
+                          <AlertCircle className="h-4 w-4 text-amber-500" />
+                          <div>
+                            <p className="font-bold">
+                              {closingReport.salesByStatus.pending}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Pendentes
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 bg-orange-50 p-3 rounded-lg">
+                          <WifiOff className="h-4 w-4 text-orange-500" />
+                          <div>
+                            <p className="font-bold">
+                              {closingReport.salesByStatus.contingency}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Contingência
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 bg-red-50 p-3 rounded-lg">
+                          <AlertCircle className="h-4 w-4 text-red-500" />
+                          <div>
+                            <p className="font-bold">
+                              {closingReport.salesByStatus.cancelled}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Canceladas
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {closingReport.sales.length > 0 && (
+                      <div>
+                        <h4 className="font-semibold mb-3">
+                          Detalhamento das Vendas
+                        </h4>
+                        <div className="border rounded-lg overflow-hidden">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-muted/50">
+                                <TableHead>Hora</TableHead>
+                                <TableHead>Cliente</TableHead>
+                                <TableHead>Pagamento</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead className="text-right">
+                                  Total
+                                </TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {closingReport.sales.map((sale) => (
+                                <TableRow key={sale.id}>
+                                  <TableCell>{sale.time}</TableCell>
+                                  <TableCell>{sale.customer}</TableCell>
+                                  <TableCell>{sale.paymentMethod}</TableCell>
+                                  <TableCell>
+                                    <Badge
+                                      variant={
+                                        sale.status === "Autorizada"
+                                          ? "default"
+                                          : "secondary"
+                                      }
+                                    >
+                                      {sale.status}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-right font-bold">
+                                    R$ {parseFloat(sale.total).toFixed(2)}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex justify-end gap-2 pt-4 border-t">
+                      <Button variant="outline" onClick={() => window.print()}>
+                        <Printer className="mr-2 h-4 w-4" /> Imprimir
+                      </Button>
+                      <Button onClick={() => setShowClosingDialog(false)}>
+                        Fechar
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
 
