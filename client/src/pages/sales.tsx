@@ -365,8 +365,20 @@ export default function Sales() {
                   Relatório de Fechamento
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-                <DialogHeader>
+              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto print-content">
+                <div className="print-header hidden print:block">
+                  <h1>Relatório de Fechamento do Dia</h1>
+                  <p>
+                    {closingReport?.date
+                      ? format(
+                          new Date(closingReport.date),
+                          "dd 'de' MMMM 'de' yyyy",
+                          { locale: ptBR }
+                        )
+                      : ""}
+                  </p>
+                </div>
+                <DialogHeader className="print:hidden">
                   <DialogTitle>Relatório de Fechamento do Dia</DialogTitle>
                   <DialogDescription>
                     {closingReport?.date
@@ -541,7 +553,7 @@ export default function Sales() {
                       </div>
                     )}
 
-                    <div className="flex justify-end gap-2 pt-4 border-t">
+                    <div className="flex justify-end gap-2 pt-4 border-t no-print print:hidden">
                       <Button variant="outline" onClick={() => window.print()}>
                         <Printer className="mr-2 h-4 w-4" /> Imprimir
                       </Button>
