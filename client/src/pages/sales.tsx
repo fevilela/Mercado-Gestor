@@ -222,6 +222,217 @@ export default function Sales() {
     }
   };
 
+  const handlePrintReport = () => {
+    if (!closingReport) return;
+
+    const formattedDate = closingReport.date
+      ? format(new Date(closingReport.date), "dd 'de' MMMM 'de' yyyy", {
+          locale: ptBR,
+        })
+      : "";
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      toast({
+        title: "Erro",
+        description:
+          "Não foi possível abrir a janela de impressão. Verifique se pop-ups estão permitidos.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const salesRows = closingReport.sales
+      .map(
+        (sale) => `
+      <tr>
+        <td>${sale.time}</td>
+        <td>${sale.customer}</td>
+        <td>${sale.paymentMethod}</td>
+        <td>${sale.status}</td>
+        <td style="text-align: right; font-weight: bold;">R$ ${parseFloat(
+          sale.total
+        ).toFixed(2)}</td>
+      </tr>
+    `
+      )
+      .join("");
+
+    const paymentRows = closingReport.paymentMethods
+      .map(
+        (pm) => `
+      <div style="display: flex; justify-content: space-between; padding: 8px; background: #f5f5f5; margin-bottom: 4px; border-radius: 4px;">
+        <span>${pm.method}</span>
+        <span><strong>R$ ${pm.total}</strong> (${pm.count} vendas - ${pm.percentage}%)</span>
+      </div>
+    `
+      )
+      .join("");
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Relatório de Fechamento - ${formattedDate}</title>
+        <meta charset="UTF-8">
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { 
+            font-family: Arial, sans-serif; 
+            padding: 20px; 
+            color: #333;
+            font-size: 12px;
+          }
+          .header { 
+            text-align: center; 
+            margin-bottom: 20px; 
+            padding-bottom: 15px; 
+            border-bottom: 2px solid #333; 
+          }
+          .header h1 { font-size: 20px; margin-bottom: 5px; }
+          .header p { color: #666; font-size: 14px; }
+          .summary { 
+            display: flex; 
+            justify-content: space-between; 
+            margin-bottom: 20px; 
+            gap: 10px;
+          }
+          .summary-item { 
+            flex: 1; 
+            text-align: center; 
+            padding: 12px; 
+            background: #f5f5f5; 
+            border-radius: 6px; 
+          }
+          .summary-item .value { font-size: 18px; font-weight: bold; color: #2563eb; }
+          .summary-item .label { font-size: 11px; color: #666; margin-top: 4px; }
+          .section { margin-bottom: 20px; }
+          .section h3 { font-size: 14px; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+          .status-grid { display: flex; gap: 10px; margin-bottom: 15px; }
+          .status-item { 
+            flex: 1; 
+            padding: 10px; 
+            background: #f5f5f5; 
+            border-radius: 4px; 
+            text-align: center;
+          }
+          .status-item .count { font-size: 16px; font-weight: bold; }
+          .status-item .label { font-size: 10px; color: #666; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background: #f5f5f5; font-weight: bold; }
+          .footer { 
+            margin-top: 30px; 
+            text-align: center; 
+            font-size: 10px; 
+            color: #999; 
+            border-top: 1px solid #ddd; 
+            padding-top: 10px; 
+          }
+          @media print {
+            body { padding: 10px; }
+            @page { margin: 1cm; size: A4; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>Relatório de Fechamento do Dia</h1>
+          <p>${formattedDate}</p>
+        </div>
+
+        <div class="summary">
+          <div class="summary-item">
+            <div class="value">${closingReport.totalSales}</div>
+            <div class="label">Total de Vendas</div>
+          </div>
+          <div class="summary-item">
+            <div class="value" style="color: #16a34a;">R$ ${
+              closingReport.totalValue
+            }</div>
+            <div class="label">Valor Total</div>
+          </div>
+          <div class="summary-item">
+            <div class="value">${closingReport.totalItems}</div>
+            <div class="label">Itens Vendidos</div>
+          </div>
+          <div class="summary-item">
+            <div class="value">R$ ${closingReport.averageTicket}</div>
+            <div class="label">Ticket Médio</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Status das Notas Fiscais</h3>
+          <div class="status-grid">
+            <div class="status-item">
+              <div class="count">${closingReport.salesByStatus.authorized}</div>
+              <div class="label">Autorizadas</div>
+            </div>
+            <div class="status-item">
+              <div class="count">${closingReport.salesByStatus.pending}</div>
+              <div class="label">Pendentes</div>
+            </div>
+            <div class="status-item">
+              <div class="count">${
+                closingReport.salesByStatus.contingency
+              }</div>
+              <div class="label">Contingência</div>
+            </div>
+            <div class="status-item">
+              <div class="count">${closingReport.salesByStatus.cancelled}</div>
+              <div class="label">Canceladas</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>Formas de Pagamento</h3>
+          ${paymentRows || "<p>Nenhuma venda hoje</p>"}
+        </div>
+
+        ${
+          closingReport.sales.length > 0
+            ? `
+        <div class="section">
+          <h3>Detalhamento das Vendas</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Hora</th>
+                <th>Cliente</th>
+                <th>Pagamento</th>
+                <th>Status</th>
+                <th style="text-align: right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${salesRows}
+            </tbody>
+          </table>
+        </div>
+        `
+            : ""
+        }
+
+        <div class="footer">
+          Relatório gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", {
+            locale: ptBR,
+          })}
+        </div>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    printWindow.focus();
+
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
+  };
+
   const formatDate = (dateString: string) => {
     try {
       const date = new Date(dateString);
@@ -553,8 +764,8 @@ export default function Sales() {
                       </div>
                     )}
 
-                    <div className="flex justify-end gap-2 pt-4 border-t no-print print:hidden">
-                      <Button variant="outline" onClick={() => window.print()}>
+                    <div className="flex justify-end gap-2 pt-4 border-t">
+                      <Button variant="outline" onClick={handlePrintReport}>
                         <Printer className="mr-2 h-4 w-4" /> Imprimir
                       </Button>
                       <Button onClick={() => setShowClosingDialog(false)}>

@@ -174,7 +174,17 @@
 
 @media print {
   body * {
-    visibility: hidden;
+    visibility: hidden !important;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  [data-radix-dialog-overlay],
+  [data-state="open"][role="dialog"]::before {
+    display: none !important;
+    background: transparent !important;
   }
 
   .print-content,
@@ -183,17 +193,34 @@
   }
 
   .print-content {
-    position: absolute !important;
+    position: fixed !important;
     left: 0 !important;
     top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
     width: 100% !important;
+    height: auto !important;
+    max-width: 100% !important;
+    max-height: none !important;
     padding: 20px !important;
+    margin: 0 !important;
     background: white !important;
     color: black !important;
+    overflow: visible !important;
+    transform: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    z-index: 999999 !important;
   }
 
-  .print-content .no-print {
+  .print-content .no-print,
+  .print-content .print\\:hidden,
+  .print-content button {
     display: none !important;
+  }
+
+  .print-content .print\\:block {
+    display: block !important;
   }
 
   .print-content table {
@@ -206,6 +233,7 @@
     border: 1px solid #ddd !important;
     padding: 8px !important;
     text-align: left !important;
+    color: black !important;
   }
 
   .print-content table th {
@@ -214,31 +242,50 @@
   }
 
   .print-content .bg-muted,
-  .print-content .bg-muted\/50 {
+  .print-content .bg-muted\/50,
+  .print-content [class*="bg-emerald"],
+  .print-content [class*="bg-amber"],
+  .print-content [class*="bg-orange"],
+  .print-content [class*="bg-red"] {
     background-color: #f5f5f5 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   .print-content .text-primary,
-  .print-content .text-emerald-600 {
+  .print-content .text-emerald-600,
+  .print-content [class*="text-"] {
     color: black !important;
   }
 
+  .print-content .grid {
+    display: block !important;
+  }
+
+  .print-content .grid>* {
+    display: inline-block !important;
+    width: 48% !important;
+    margin-bottom: 10px !important;
+    vertical-align: top !important;
+  }
+
   .print-header {
-    text-align: center;
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 2px solid #333;
+    display: block !important;
+    text-align: center !important;
+    margin-bottom: 20px !important;
+    padding-bottom: 10px !important;
+    border-bottom: 2px solid #333 !important;
   }
 
   .print-header h1 {
-    font-size: 24px;
-    font-weight: bold;
-    margin-bottom: 5px;
+    font-size: 24px !important;
+    font-weight: bold !important;
+    margin-bottom: 5px !important;
   }
 
   .print-header p {
-    font-size: 14px;
-    color: #666;
+    font-size: 14px !important;
+    color: #666 !important;
   }
 
   @page {

@@ -7,14 +7,43 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import {
   ArrowUpRight,
   ArrowDownRight,
   DollarSign,
   Calendar,
   Download,
-  Filter,
+  Plus,
   Loader2,
+  Check,
+  Trash2,
 } from "lucide-react";
 import {
   LineChart,
@@ -30,7 +59,7 @@ import {
   Legend,
 } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   format,
   subDays,
@@ -38,8 +67,13 @@ import {
   startOfMonth,
   endOfMonth,
   subMonths,
+  addMonths,
+  isSameMonth,
+  isSameYear,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 interface Sale {
   id: number;
@@ -48,10 +82,60 @@ interface Sale {
   paymentMethod: string;
 }
 
+interface Payable {
+  id: number;
+  description: string;
+  supplierId: number | null;
+  supplierName: string | null;
+  category: string;
+  amount: string;
+  dueDate: string;
+  paidDate: string | null;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+}
+
+interface Receivable {
+  id: number;
+  description: string;
+  customerId: number | null;
+  customerName: string | null;
+  saleId: number | null;
+  category: string;
+  amount: string;
+  dueDate: string;
+  receivedDate: string | null;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+}
+
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8"];
 
+const PAYABLE_CATEGORIES = [
+  "Fornecedores",
+  "Aluguel",
+  "Energia",
+  "Água",
+  "Internet",
+  "Impostos",
+  "Salários",
+  "Marketing",
+  "Manutenção",
+  "Outros",
+];
+
+const RECEIVABLE_CATEGORIES = ["Vendas", "Serviços", "Empréstimos", "Outros"];
+
 export default function Finance() {
-  const { data: sales = [], isLoading } = useQuery({
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const [payableDialogOpen, setPayableDialogOpen] = useState(false);
+  const [receivableDialogOpen, setReceivableDialogOpen] = useState(false);
+
+  const { data: sales = [], isLoading: salesLoading } = useQuery({
     queryKey: ["/api/sales"],
     queryFn: async () => {
       const res = await fetch("/api/sales");
@@ -60,10 +144,176 @@ export default function Finance() {
     },
   });
 
+  const { data: payables = [], isLoading: payablesLoading } = useQuery({
+    queryKey: ["/api/payables"],
+    queryFn: async () => {
+      const res = await fetch("/api/payables");
+      if (!res.ok) throw new Error("Failed to fetch payables");
+      return res.json();
+    },
+  });
+
+  const { data: receivables = [], isLoading: receivablesLoading } = useQuery({
+    queryKey: ["/api/receivables"],
+    queryFn: async () => {
+      const res = await fetch("/api/receivables");
+      if (!res.ok) throw new Error("Failed to fetch receivables");
+      return res.json();
+    },
+  });
+
+  const createPayableMutation = useMutation({
+    mutationFn: async (data: {
+      description: string;
+      category: string;
+      amount: string;
+      dueDate: string;
+      supplierName?: string;
+      notes?: string;
+    }) => {
+      const res = await fetch("/api/payables", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...data,
+          amount: data.amount,
+          dueDate: new Date(data.dueDate).toISOString(),
+          status: "Pendente",
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to create payable");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payables"] });
+      setPayableDialogOpen(false);
+      toast({ title: "Conta a pagar criada com sucesso" });
+    },
+    onError: () => {
+      toast({ title: "Erro ao criar conta a pagar", variant: "destructive" });
+    },
+  });
+
+  const createReceivableMutation = useMutation({
+    mutationFn: async (data: {
+      description: string;
+      category: string;
+      amount: string;
+      dueDate: string;
+      customerName?: string;
+      notes?: string;
+    }) => {
+      const res = await fetch("/api/receivables", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...data,
+          amount: data.amount,
+          dueDate: new Date(data.dueDate).toISOString(),
+          status: "Pendente",
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to create receivable");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/receivables"] });
+      setReceivableDialogOpen(false);
+      toast({ title: "Conta a receber criada com sucesso" });
+    },
+    onError: () => {
+      toast({ title: "Erro ao criar conta a receber", variant: "destructive" });
+    },
+  });
+
+  const markPayablePaidMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/payables/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "Pago",
+          paidDate: new Date().toISOString(),
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to update payable");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payables"] });
+      toast({ title: "Conta marcada como paga" });
+    },
+  });
+
+  const markReceivableReceivedMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/receivables/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "Recebido",
+          receivedDate: new Date().toISOString(),
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to update receivable");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/receivables"] });
+      toast({ title: "Conta marcada como recebida" });
+    },
+  });
+
+  const deletePayableMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/payables/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete payable");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payables"] });
+      toast({ title: "Conta a pagar excluída" });
+    },
+  });
+
+  const deleteReceivableMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/receivables/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete receivable");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/receivables"] });
+      toast({ title: "Conta a receber excluída" });
+    },
+  });
+
   const now = new Date();
   const currentMonthStart = startOfMonth(now);
   const lastMonthStart = startOfMonth(subMonths(now, 1));
   const lastMonthEnd = endOfMonth(subMonths(now, 1));
+
+  const filteredPayables = payables.filter((p: Payable) => {
+    try {
+      const dueDate = parseISO(p.dueDate);
+      return (
+        isSameMonth(dueDate, selectedMonth) &&
+        isSameYear(dueDate, selectedMonth)
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  const filteredReceivables = receivables.filter((r: Receivable) => {
+    try {
+      const dueDate = parseISO(r.dueDate);
+      return (
+        isSameMonth(dueDate, selectedMonth) &&
+        isSameYear(dueDate, selectedMonth)
+      );
+    } catch {
+      return false;
+    }
+  });
 
   const currentMonthSales = sales.filter((sale: Sale) => {
     try {
@@ -92,8 +342,15 @@ export default function Finance() {
     0
   );
 
-  const estimatedExpenses = currentMonthTotal * 0.63;
-  const netBalance = currentMonthTotal - estimatedExpenses;
+  const totalPayables = payables
+    .filter((p: Payable) => p.status === "Pendente")
+    .reduce((acc: number, p: Payable) => acc + parseFloat(p.amount), 0);
+
+  const totalReceivables = receivables
+    .filter((r: Receivable) => r.status === "Pendente")
+    .reduce((acc: number, r: Receivable) => acc + parseFloat(r.amount), 0);
+
+  const netBalance = currentMonthTotal + totalReceivables - totalPayables;
   const marginPercent =
     currentMonthTotal > 0
       ? ((netBalance / currentMonthTotal) * 100).toFixed(0)
@@ -141,6 +398,85 @@ export default function Finance() {
     })
   );
 
+  const handleDownloadReport = () => {
+    const monthLabel = format(selectedMonth, "MMMM yyyy", { locale: ptBR });
+
+    let content = `RELATÓRIO FINANCEIRO - ${monthLabel.toUpperCase()}\n`;
+    content += "=".repeat(50) + "\n\n";
+
+    content += "RESUMO\n";
+    content += "-".repeat(30) + "\n";
+    content += `Receitas do Mês: R$ ${currentMonthTotal.toFixed(2)}\n`;
+    content += `Contas a Pagar Pendentes: R$ ${totalPayables.toFixed(2)}\n`;
+    content += `Contas a Receber Pendentes: R$ ${totalReceivables.toFixed(
+      2
+    )}\n`;
+    content += `Saldo Líquido: R$ ${netBalance.toFixed(2)}\n\n`;
+
+    content += "CONTAS A PAGAR\n";
+    content += "-".repeat(30) + "\n";
+    filteredPayables.forEach((p: Payable) => {
+      content += `${p.description} | ${p.category} | R$ ${parseFloat(
+        p.amount
+      ).toFixed(2)} | Venc: ${format(parseISO(p.dueDate), "dd/MM/yyyy")} | ${
+        p.status
+      }\n`;
+    });
+    content += "\n";
+
+    content += "CONTAS A RECEBER\n";
+    content += "-".repeat(30) + "\n";
+    filteredReceivables.forEach((r: Receivable) => {
+      content += `${r.description} | ${r.category} | R$ ${parseFloat(
+        r.amount
+      ).toFixed(2)} | Venc: ${format(parseISO(r.dueDate), "dd/MM/yyyy")} | ${
+        r.status
+      }\n`;
+    });
+
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `relatorio-financeiro-${format(
+      selectedMonth,
+      "yyyy-MM"
+    )}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast({ title: "Relatório baixado com sucesso" });
+  };
+
+  const handlePayableSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    createPayableMutation.mutate({
+      description: formData.get("description") as string,
+      category: formData.get("category") as string,
+      amount: formData.get("amount") as string,
+      dueDate: formData.get("dueDate") as string,
+      supplierName: formData.get("supplierName") as string,
+      notes: formData.get("notes") as string,
+    });
+  };
+
+  const handleReceivableSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    createReceivableMutation.mutate({
+      description: formData.get("description") as string,
+      category: formData.get("category") as string,
+      amount: formData.get("amount") as string,
+      dueDate: formData.get("dueDate") as string,
+      customerName: formData.get("customerName") as string,
+      notes: formData.get("notes") as string,
+    });
+  };
+
+  const isLoading = salesLoading || payablesLoading || receivablesLoading;
+
   if (isLoading) {
     return (
       <Layout>
@@ -169,11 +505,23 @@ export default function Finance() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline">
-              <Calendar className="mr-2 h-4 w-4" />{" "}
-              {format(now, "MMMM yyyy", { locale: ptBR })}
+            <Button
+              variant="outline"
+              onClick={() => setSelectedMonth(subMonths(selectedMonth, 1))}
+            >
+              &lt;
             </Button>
-            <Button variant="outline">
+            <Button variant="outline" className="min-w-[150px]">
+              <Calendar className="mr-2 h-4 w-4" />
+              {format(selectedMonth, "MMMM yyyy", { locale: ptBR })}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))}
+            >
+              &gt;
+            </Button>
+            <Button variant="outline" onClick={handleDownloadReport}>
               <Download className="mr-2 h-4 w-4" /> Relatórios
             </Button>
           </div>
@@ -204,19 +552,23 @@ export default function Finance() {
           <Card className="bg-rose-500/10 border-rose-500/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-rose-700 dark:text-rose-400">
-                Despesas Est. (Mês)
+                A Pagar (Pendente)
               </CardTitle>
               <ArrowDownRight className="h-4 w-4 text-rose-600" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-rose-700 dark:text-rose-400">
                 R${" "}
-                {estimatedExpenses.toLocaleString("pt-BR", {
+                {totalPayables.toLocaleString("pt-BR", {
                   minimumFractionDigits: 2,
                 })}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                ~63% das receitas (estimativa)
+                {
+                  payables.filter((p: Payable) => p.status === "Pendente")
+                    .length
+                }{" "}
+                contas pendentes
               </p>
             </CardContent>
           </Card>
@@ -364,21 +716,180 @@ export default function Finance() {
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle>Contas a Pagar</CardTitle>
-                    <CardDescription>Vencimentos próximos.</CardDescription>
+                    <CardDescription>
+                      {format(selectedMonth, "MMMM yyyy", { locale: ptBR })} -{" "}
+                      {filteredPayables.length} conta(s)
+                    </CardDescription>
                   </div>
-                  <Button variant="outline">
-                    <Filter className="h-4 w-4 mr-2" /> Filtrar
-                  </Button>
+                  <Dialog
+                    open={payableDialogOpen}
+                    onOpenChange={setPayableDialogOpen}
+                  >
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Plus className="h-4 w-4 mr-2" /> Nova Conta
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Nova Conta a Pagar</DialogTitle>
+                        <DialogDescription>
+                          Cadastre uma nova conta a pagar
+                        </DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handlePayableSubmit}>
+                        <div className="grid gap-4 py-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="description">Descrição *</Label>
+                            <Input
+                              id="description"
+                              name="description"
+                              required
+                            />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="category">Categoria *</Label>
+                            <Select
+                              name="category"
+                              required
+                              defaultValue="Outros"
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PAYABLE_CATEGORIES.map((cat) => (
+                                  <SelectItem key={cat} value={cat}>
+                                    {cat}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="amount">Valor *</Label>
+                            <Input
+                              id="amount"
+                              name="amount"
+                              type="number"
+                              step="0.01"
+                              required
+                            />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="dueDate">
+                              Data de Vencimento *
+                            </Label>
+                            <Input
+                              id="dueDate"
+                              name="dueDate"
+                              type="date"
+                              required
+                            />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="supplierName">Fornecedor</Label>
+                            <Input id="supplierName" name="supplierName" />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="notes">Observações</Label>
+                            <Input id="notes" name="notes" />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button
+                            type="submit"
+                            disabled={createPayableMutation.isPending}
+                          >
+                            {createPayableMutation.isPending && (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            )}
+                            Salvar
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="text-center text-muted-foreground py-8">
-                  <DollarSign className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Nenhuma conta a pagar cadastrada</p>
-                  <p className="text-sm mt-2">
-                    As contas a pagar aparecerão aqui quando forem registradas
-                  </p>
-                </div>
+                {filteredPayables.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">
+                    <DollarSign className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>Nenhuma conta a pagar para este mês</p>
+                    <p className="text-sm mt-2">
+                      Clique em "Nova Conta" para adicionar
+                    </p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Descrição</TableHead>
+                        <TableHead>Categoria</TableHead>
+                        <TableHead>Fornecedor</TableHead>
+                        <TableHead>Vencimento</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredPayables.map((payable: Payable) => (
+                        <TableRow key={payable.id}>
+                          <TableCell className="font-medium">
+                            {payable.description}
+                          </TableCell>
+                          <TableCell>{payable.category}</TableCell>
+                          <TableCell>{payable.supplierName || "-"}</TableCell>
+                          <TableCell>
+                            {format(parseISO(payable.dueDate), "dd/MM/yyyy")}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            R$ {parseFloat(payable.amount).toFixed(2)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                payable.status === "Pago"
+                                  ? "default"
+                                  : "secondary"
+                              }
+                            >
+                              {payable.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              {payable.status !== "Pago" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    markPayablePaidMutation.mutate(payable.id)
+                                  }
+                                  disabled={markPayablePaidMutation.isPending}
+                                >
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() =>
+                                  deletePayableMutation.mutate(payable.id)
+                                }
+                                disabled={deletePayableMutation.isPending}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -386,17 +897,189 @@ export default function Finance() {
           <TabsContent value="receivables">
             <Card>
               <CardHeader>
-                <CardTitle>Contas a Receber</CardTitle>
-                <CardDescription>
-                  Valores pendentes de recebimento.
-                </CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Contas a Receber</CardTitle>
+                    <CardDescription>
+                      {format(selectedMonth, "MMMM yyyy", { locale: ptBR })} -{" "}
+                      {filteredReceivables.length} conta(s)
+                    </CardDescription>
+                  </div>
+                  <Dialog
+                    open={receivableDialogOpen}
+                    onOpenChange={setReceivableDialogOpen}
+                  >
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Plus className="h-4 w-4 mr-2" /> Nova Conta
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Nova Conta a Receber</DialogTitle>
+                        <DialogDescription>
+                          Cadastre uma nova conta a receber
+                        </DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handleReceivableSubmit}>
+                        <div className="grid gap-4 py-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="description">Descrição *</Label>
+                            <Input
+                              id="description"
+                              name="description"
+                              required
+                            />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="category">Categoria *</Label>
+                            <Select
+                              name="category"
+                              required
+                              defaultValue="Vendas"
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {RECEIVABLE_CATEGORIES.map((cat) => (
+                                  <SelectItem key={cat} value={cat}>
+                                    {cat}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="amount">Valor *</Label>
+                            <Input
+                              id="amount"
+                              name="amount"
+                              type="number"
+                              step="0.01"
+                              required
+                            />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="dueDate">
+                              Data de Vencimento *
+                            </Label>
+                            <Input
+                              id="dueDate"
+                              name="dueDate"
+                              type="date"
+                              required
+                            />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="customerName">Cliente</Label>
+                            <Input id="customerName" name="customerName" />
+                          </div>
+                          <div className="grid gap-2">
+                            <Label htmlFor="notes">Observações</Label>
+                            <Input id="notes" name="notes" />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button
+                            type="submit"
+                            disabled={createReceivableMutation.isPending}
+                          >
+                            {createReceivableMutation.isPending && (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            )}
+                            Salvar
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="text-center text-muted-foreground py-8">
-                  <DollarSign className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>Nenhuma conta a receber pendente</p>
-                  <p className="text-sm mt-2">Vendas a prazo aparecerão aqui</p>
-                </div>
+                {filteredReceivables.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">
+                    <DollarSign className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>Nenhuma conta a receber para este mês</p>
+                    <p className="text-sm mt-2">
+                      Clique em "Nova Conta" para adicionar
+                    </p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Descrição</TableHead>
+                        <TableHead>Categoria</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Vencimento</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredReceivables.map((receivable: Receivable) => (
+                        <TableRow key={receivable.id}>
+                          <TableCell className="font-medium">
+                            {receivable.description}
+                          </TableCell>
+                          <TableCell>{receivable.category}</TableCell>
+                          <TableCell>
+                            {receivable.customerName || "-"}
+                          </TableCell>
+                          <TableCell>
+                            {format(parseISO(receivable.dueDate), "dd/MM/yyyy")}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            R$ {parseFloat(receivable.amount).toFixed(2)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                receivable.status === "Recebido"
+                                  ? "default"
+                                  : "secondary"
+                              }
+                            >
+                              {receivable.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              {receivable.status !== "Recebido" && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    markReceivableReceivedMutation.mutate(
+                                      receivable.id
+                                    )
+                                  }
+                                  disabled={
+                                    markReceivableReceivedMutation.isPending
+                                  }
+                                >
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() =>
+                                  deleteReceivableMutation.mutate(receivable.id)
+                                }
+                                disabled={deleteReceivableMutation.isPending}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -412,7 +1095,7 @@ export default function Finance() {
               <CardContent>
                 <div className="space-y-4">
                   <div className="flex justify-between items-center border-b pb-2">
-                    <span className="font-medium">Receita Bruta</span>
+                    <span className="font-medium">Receita Bruta (Vendas)</span>
                     <span className="font-bold text-emerald-600">
                       R${" "}
                       {currentMonthTotal.toLocaleString("pt-BR", {
@@ -421,19 +1104,34 @@ export default function Finance() {
                     </span>
                   </div>
                   <div className="flex justify-between items-center border-b pb-2">
+                    <span className="font-medium">
+                      Contas a Receber (Pendentes)
+                    </span>
+                    <span className="font-bold text-emerald-600">
+                      R${" "}
+                      {totalReceivables.toLocaleString("pt-BR", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center border-b pb-2">
                     <span className="text-muted-foreground">
-                      (-) Custos Estimados (63%)
+                      (-) Contas a Pagar (Pendentes)
                     </span>
                     <span className="text-rose-600">
                       R${" "}
-                      {estimatedExpenses.toLocaleString("pt-BR", {
+                      {totalPayables.toLocaleString("pt-BR", {
                         minimumFractionDigits: 2,
                       })}
                     </span>
                   </div>
                   <div className="flex justify-between items-center pt-2">
                     <span className="font-bold text-lg">Resultado Líquido</span>
-                    <span className="font-bold text-lg text-primary">
+                    <span
+                      className={`font-bold text-lg ${
+                        netBalance >= 0 ? "text-emerald-600" : "text-rose-600"
+                      }`}
+                    >
                       R${" "}
                       {netBalance.toLocaleString("pt-BR", {
                         minimumFractionDigits: 2,

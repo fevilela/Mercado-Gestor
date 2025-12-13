@@ -17,6 +17,8 @@ import {
   insertSaleSchema,
   insertSaleItemSchema,
   insertCompanySettingsSchema,
+  insertPayableSchema,
+  insertReceivableSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
@@ -1079,6 +1081,200 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Failed to generate closing report:", error);
       res.status(500).json({ error: "Falha ao gerar relatório de fechamento" });
+    }
+  });
+
+  const createPayableSchema = z.object({
+    description: z.string().min(1),
+    supplierId: z.number().optional().nullable(),
+    supplierName: z.string().optional().nullable(),
+    category: z.string().default("Outros"),
+    amount: z.string(),
+    dueDate: z.string().transform((val) => new Date(val)),
+    paidDate: z
+      .string()
+      .optional()
+      .nullable()
+      .transform((val) => (val ? new Date(val) : null)),
+    status: z.string().default("Pendente"),
+    notes: z.string().optional().nullable(),
+  });
+
+  const updatePayableSchema = z.object({
+    description: z.string().min(1).optional(),
+    supplierId: z.number().optional().nullable(),
+    supplierName: z.string().optional().nullable(),
+    category: z.string().optional(),
+    amount: z.string().optional(),
+    dueDate: z
+      .string()
+      .optional()
+      .transform((val) => (val ? new Date(val) : undefined)),
+    paidDate: z
+      .string()
+      .optional()
+      .nullable()
+      .transform((val) => (val ? new Date(val) : null)),
+    status: z.string().optional(),
+    notes: z.string().optional().nullable(),
+  });
+
+  const createReceivableSchema = z.object({
+    description: z.string().min(1),
+    customerId: z.number().optional().nullable(),
+    customerName: z.string().optional().nullable(),
+    saleId: z.number().optional().nullable(),
+    category: z.string().default("Vendas"),
+    amount: z.string(),
+    dueDate: z.string().transform((val) => new Date(val)),
+    receivedDate: z
+      .string()
+      .optional()
+      .nullable()
+      .transform((val) => (val ? new Date(val) : null)),
+    status: z.string().default("Pendente"),
+    notes: z.string().optional().nullable(),
+  });
+
+  const updateReceivableSchema = z.object({
+    description: z.string().min(1).optional(),
+    customerId: z.number().optional().nullable(),
+    customerName: z.string().optional().nullable(),
+    saleId: z.number().optional().nullable(),
+    category: z.string().optional(),
+    amount: z.string().optional(),
+    dueDate: z
+      .string()
+      .optional()
+      .transform((val) => (val ? new Date(val) : undefined)),
+    receivedDate: z
+      .string()
+      .optional()
+      .nullable()
+      .transform((val) => (val ? new Date(val) : null)),
+    status: z.string().optional(),
+    notes: z.string().optional().nullable(),
+  });
+
+  app.get("/api/payables", async (req, res) => {
+    try {
+      const payables = await storage.getAllPayables();
+      res.json(payables);
+    } catch (error) {
+      console.error("Failed to fetch payables:", error);
+      res.status(500).json({ error: "Failed to fetch payables" });
+    }
+  });
+
+  app.post("/api/payables", async (req, res) => {
+    try {
+      const validated = createPayableSchema.parse(req.body);
+      const payable = await storage.createPayable(validated as any);
+      res.status(201).json(payable);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to create payable:", error);
+      res.status(500).json({ error: "Failed to create payable" });
+    }
+  });
+
+  app.patch("/api/payables/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getPayable(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Payable not found" });
+      }
+      const validated = updatePayableSchema.parse(req.body);
+      const cleanedData = Object.fromEntries(
+        Object.entries(validated).filter(([_, v]) => v !== undefined)
+      );
+      const payable = await storage.updatePayable(id, cleanedData as any);
+      res.json(payable);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to update payable:", error);
+      res.status(500).json({ error: "Failed to update payable" });
+    }
+  });
+
+  app.delete("/api/payables/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getPayable(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Payable not found" });
+      }
+      await storage.deletePayable(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete payable:", error);
+      res.status(500).json({ error: "Failed to delete payable" });
+    }
+  });
+
+  app.get("/api/receivables", async (req, res) => {
+    try {
+      const receivables = await storage.getAllReceivables();
+      res.json(receivables);
+    } catch (error) {
+      console.error("Failed to fetch receivables:", error);
+      res.status(500).json({ error: "Failed to fetch receivables" });
+    }
+  });
+
+  app.post("/api/receivables", async (req, res) => {
+    try {
+      const validated = createReceivableSchema.parse(req.body);
+      const receivable = await storage.createReceivable(validated as any);
+      res.status(201).json(receivable);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to create receivable:", error);
+      res.status(500).json({ error: "Failed to create receivable" });
+    }
+  });
+
+  app.patch("/api/receivables/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getReceivable(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Receivable not found" });
+      }
+      const validated = updateReceivableSchema.parse(req.body);
+      const cleanedData = Object.fromEntries(
+        Object.entries(validated).filter(([_, v]) => v !== undefined)
+      );
+      const receivable = await storage.updateReceivable(id, cleanedData as any);
+      res.json(receivable);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to update receivable:", error);
+      res.status(500).json({ error: "Failed to update receivable" });
+    }
+  });
+
+  app.delete("/api/receivables/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const existing = await storage.getReceivable(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Receivable not found" });
+      }
+      await storage.deleteReceivable(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete receivable:", error);
+      res.status(500).json({ error: "Failed to delete receivable" });
     }
   });
 

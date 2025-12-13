@@ -254,3 +254,46 @@ export const insertCompanySettingsSchema = createInsertSchema(
 ).omit({ id: true, updatedAt: true });
 export type InsertCompanySettings = z.infer<typeof insertCompanySettingsSchema>;
 export type CompanySettings = typeof companySettings.$inferSelect;
+
+export const payables = pgTable("payables", {
+  id: serial("id").primaryKey(),
+  description: text("description").notNull(),
+  supplierId: integer("supplier_id"),
+  supplierName: text("supplier_name"),
+  category: text("category").notNull().default("Outros"),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  dueDate: timestamp("due_date").notNull(),
+  paidDate: timestamp("paid_date"),
+  status: text("status").notNull().default("Pendente"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPayableSchema = createInsertSchema(payables).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertPayable = z.infer<typeof insertPayableSchema>;
+export type Payable = typeof payables.$inferSelect;
+
+export const receivables = pgTable("receivables", {
+  id: serial("id").primaryKey(),
+  description: text("description").notNull(),
+  customerId: integer("customer_id"),
+  customerName: text("customer_name"),
+  saleId: integer("sale_id"),
+  category: text("category").notNull().default("Vendas"),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  dueDate: timestamp("due_date").notNull(),
+  receivedDate: timestamp("received_date"),
+  status: text("status").notNull().default("Pendente"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertReceivableSchema = createInsertSchema(receivables).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertReceivable = z.infer<typeof insertReceivableSchema>;
+export type Receivable = typeof receivables.$inferSelect;
