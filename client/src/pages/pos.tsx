@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import {
   ArrowLeft,
@@ -18,6 +18,7 @@ import {
   X,
   Ban,
   XCircle,
+  Volume2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,23 @@ export default function POS() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  const playBeep = useCallback(() => {
+    const audioContext = new (window.AudioContext ||
+      (window as any).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    oscillator.frequency.value = 1200;
+    oscillator.type = "sine";
+    gainNode.gain.value = 0.3;
+    oscillator.start();
+    setTimeout(() => {
+      oscillator.stop();
+      audioContext.close();
+    }, 100);
+  }, []);
+
   const { data: settings } = useQuery({
     queryKey: ["/api/settings"],
     queryFn: async () => {
@@ -68,6 +86,10 @@ export default function POS() {
 
   const isFiscalConfigured =
     settings?.fiscalEnabled && settings?.cscToken && settings?.cscId;
+
+  const isScannerEnabled = settings?.barcodeScannerEnabled !== false;
+  const isScannerAutoAdd = settings?.barcodeScannerAutoAdd !== false;
+  const isScannerBeep = settings?.barcodeScannerBeep !== false;
 
   const { data: products = [] } = useQuery({
     queryKey: ["/api/products"],
@@ -96,7 +118,7 @@ export default function POS() {
     },
   });
 
-  const addToCart = (product: any) => {
+  const addToCart = useCallback((product: any) => {
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
@@ -106,7 +128,94 @@ export default function POS() {
       }
       return [...prev, { product, qty: 1 }];
     });
-  };
+  }, []);
+
+  const handleBarcodeScanned = useCallback(
+    (barcode: string) => {
+      if (!isScannerEnabled || !barcode) return;
+
+      const product = products.find((p: any) => p.ean === barcode);
+
+      if (product) {
+        if (isScannerBeep) playBeep();
+        if (isScannerAutoAdd) {
+          addToCart(product);
+          toast({
+            title: "Produto Adicionado",
+            description: `${product.name} - R$ ${parseFloat(
+              product.price
+            ).toFixed(2)}`,
+            className: "bg-emerald-500 text-white border-none",
+          });
+        } else {
+          setSearchQuery(barcode);
+          setShowCatalog(true);
+        }
+      } else {
+        toast({
+          title: "Produto Não Encontrado",
+          description: `Código ${barcode} não cadastrado no sistema.`,
+          variant: "destructive",
+        });
+      }
+    },
+    [
+      products,
+      isScannerEnabled,
+      isScannerAutoAdd,
+      isScannerBeep,
+      playBeep,
+      addToCart,
+      toast,
+    ]
+  );
+
+  useEffect(() => {
+    if (!isScannerEnabled) return;
+
+    let buffer = "";
+    let lastKeyTime = 0;
+    let keyTimings: number[] = [];
+    const SCANNER_SPEED_THRESHOLD = 50;
+    const MIN_BARCODE_LENGTH = 8;
+    const BUFFER_TIMEOUT = 300;
+
+    const handleKeyPress = (e: KeyboardEvent) => {
+      const currentTime = Date.now();
+      const timeSinceLastKey = currentTime - lastKeyTime;
+
+      if (timeSinceLastKey > BUFFER_TIMEOUT) {
+        buffer = "";
+        keyTimings = [];
+      }
+
+      if (/^[0-9]$/.test(e.key)) {
+        if (buffer.length > 0) {
+          keyTimings.push(timeSinceLastKey);
+        }
+        buffer += e.key;
+        lastKeyTime = currentTime;
+      }
+
+      if (e.key === "Enter" && buffer.length >= MIN_BARCODE_LENGTH) {
+        const avgTiming =
+          keyTimings.length > 0
+            ? keyTimings.reduce((a, b) => a + b, 0) / keyTimings.length
+            : 0;
+
+        if (avgTiming < SCANNER_SPEED_THRESHOLD && avgTiming > 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          handleBarcodeScanned(buffer);
+        }
+        buffer = "";
+        keyTimings = [];
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyPress, true);
+    return () => window.removeEventListener("keydown", handleKeyPress, true);
+  }, [isScannerEnabled, handleBarcodeScanned]);
 
   const removeFromCart = (id: number) => {
     setCart((prev) => prev.filter((item) => item.product.id !== id));

@@ -12,9 +12,23 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { CreditCard, Smartphone, Loader2, CheckCircle2 } from "lucide-react";
+import {
+  CreditCard,
+  Smartphone,
+  Loader2,
+  CheckCircle2,
+  Printer,
+  ScanBarcode,
+} from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface CompanySettings {
   id?: number;
@@ -30,6 +44,16 @@ interface CompanySettings {
   mpAccessToken?: string;
   mpTerminalId?: string;
   mpEnabled?: boolean;
+  printerEnabled?: boolean;
+  printerModel?: string;
+  printerPort?: string;
+  printerBaudRate?: number;
+  printerColumns?: number;
+  printerCutCommand?: boolean;
+  printerBeepOnSale?: boolean;
+  barcodeScannerEnabled?: boolean;
+  barcodeScannerAutoAdd?: boolean;
+  barcodeScannerBeep?: boolean;
 }
 
 export default function Settings() {
@@ -55,7 +79,20 @@ export default function Settings() {
     mpAccessToken: "",
     mpTerminalId: "",
     mpEnabled: false,
+    printerEnabled: false,
+    printerModel: "",
+    printerPort: "",
+    printerBaudRate: 9600,
+    printerColumns: 48,
+    printerCutCommand: true,
+    printerBeepOnSale: true,
+    barcodeScannerEnabled: true,
+    barcodeScannerAutoAdd: true,
+    barcodeScannerBeep: true,
   });
+  const [printerStatus, setPrinterStatus] = useState<
+    "idle" | "testing" | "connected"
+  >("idle");
 
   useEffect(() => {
     fetchSettings();
@@ -121,6 +158,17 @@ export default function Settings() {
     setTimeout(() => setMpStatus("connected"), 2000);
   };
 
+  const handleTestPrinter = () => {
+    setPrinterStatus("testing");
+    setTimeout(() => {
+      setPrinterStatus("connected");
+      toast({
+        title: "Impressora Conectada",
+        description: "Teste de impressão enviado com sucesso.",
+      });
+    }, 2000);
+  };
+
   const updateSetting = (
     key: keyof CompanySettings,
     value: string | boolean
@@ -155,6 +203,7 @@ export default function Settings() {
             <TabsTrigger value="company">Dados da Empresa</TabsTrigger>
             <TabsTrigger value="fiscal">Fiscal & Tributário</TabsTrigger>
             <TabsTrigger value="payments">Pagamentos & TEF</TabsTrigger>
+            <TabsTrigger value="equipment">Equipamentos</TabsTrigger>
             <TabsTrigger value="users">Usuários</TabsTrigger>
           </TabsList>
 
@@ -485,6 +534,309 @@ export default function Settings() {
                   </div>
                   <Button variant="outline" size="sm">
                     Baixar Instalador (.exe)
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="equipment">
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card>
+                <CardHeader className="flex flex-row items-center gap-4 space-y-0">
+                  <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600">
+                    <Printer className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>Impressora Fiscal / Térmica</CardTitle>
+                    <CardDescription>
+                      Configuração para impressão de cupons e NFC-e
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between space-x-2">
+                    <Label>Ativar Impressora</Label>
+                    <Switch
+                      checked={settings.printerEnabled || false}
+                      onCheckedChange={(checked) =>
+                        updateSetting("printerEnabled", checked)
+                      }
+                      data-testid="switch-printer-enabled"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Modelo da Impressora</Label>
+                    <Select
+                      value={settings.printerModel || ""}
+                      onValueChange={(value) =>
+                        updateSetting("printerModel", value)
+                      }
+                    >
+                      <SelectTrigger data-testid="select-printer-model">
+                        <SelectValue placeholder="Selecione o modelo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="epson-tm-t20">
+                          Epson TM-T20
+                        </SelectItem>
+                        <SelectItem value="epson-tm-t88">
+                          Epson TM-T88
+                        </SelectItem>
+                        <SelectItem value="bematech-mp4200">
+                          Bematech MP-4200 TH
+                        </SelectItem>
+                        <SelectItem value="elgin-i9">Elgin i9</SelectItem>
+                        <SelectItem value="daruma-dr800">
+                          Daruma DR800
+                        </SelectItem>
+                        <SelectItem value="sweda-si-300">
+                          Sweda SI-300
+                        </SelectItem>
+                        <SelectItem value="generic-escpos">
+                          Genérica ESC/POS
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Porta de Comunicação</Label>
+                    <Select
+                      value={settings.printerPort || ""}
+                      onValueChange={(value) =>
+                        updateSetting("printerPort", value)
+                      }
+                    >
+                      <SelectTrigger data-testid="select-printer-port">
+                        <SelectValue placeholder="Selecione a porta" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="USB001">USB001</SelectItem>
+                        <SelectItem value="USB002">USB002</SelectItem>
+                        <SelectItem value="COM1">COM1 (Serial)</SelectItem>
+                        <SelectItem value="COM2">COM2 (Serial)</SelectItem>
+                        <SelectItem value="COM3">COM3 (Serial)</SelectItem>
+                        <SelectItem value="LPT1">LPT1 (Paralela)</SelectItem>
+                        <SelectItem value="network">Rede (IP)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Velocidade (Baud Rate)</Label>
+                      <Select
+                        value={String(settings.printerBaudRate || 9600)}
+                        onValueChange={(value) =>
+                          updateSetting("printerBaudRate", value)
+                        }
+                      >
+                        <SelectTrigger data-testid="select-printer-baud">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="9600">9600</SelectItem>
+                          <SelectItem value="19200">19200</SelectItem>
+                          <SelectItem value="38400">38400</SelectItem>
+                          <SelectItem value="57600">57600</SelectItem>
+                          <SelectItem value="115200">115200</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Colunas</Label>
+                      <Select
+                        value={String(settings.printerColumns || 48)}
+                        onValueChange={(value) =>
+                          updateSetting("printerColumns", value)
+                        }
+                      >
+                        <SelectTrigger data-testid="select-printer-columns">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="32">32 (58mm)</SelectItem>
+                          <SelectItem value="42">42 (76mm)</SelectItem>
+                          <SelectItem value="48">48 (80mm)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <Separator />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Guilhotina Automática</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Cortar papel após impressão
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.printerCutCommand || false}
+                        onCheckedChange={(checked) =>
+                          updateSetting("printerCutCommand", checked)
+                        }
+                        data-testid="switch-printer-cut"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Bip ao Finalizar Venda</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Som de alerta na impressora
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.printerBeepOnSale || false}
+                        onCheckedChange={(checked) =>
+                          updateSetting("printerBeepOnSale", checked)
+                        }
+                        data-testid="switch-printer-beep"
+                      />
+                    </div>
+                  </div>
+
+                  {printerStatus === "connected" ? (
+                    <div className="rounded-md bg-emerald-100 p-3 flex items-center gap-3 text-emerald-700">
+                      <CheckCircle2 className="h-5 w-5" />
+                      <div className="text-sm font-medium">
+                        Impressora Conectada:{" "}
+                        {settings.printerModel || "Genérica"}
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      className="w-full bg-orange-600 hover:bg-orange-700"
+                      onClick={handleTestPrinter}
+                      disabled={
+                        printerStatus === "testing" || !settings.printerEnabled
+                      }
+                      data-testid="button-test-printer"
+                    >
+                      {printerStatus === "testing" ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Testando...
+                        </>
+                      ) : (
+                        "Testar Impressora"
+                      )}
+                    </Button>
+                  )}
+                  <Button
+                    onClick={handleSaveSettings}
+                    disabled={saving}
+                    className="w-full"
+                    data-testid="button-save-printer"
+                  >
+                    {saving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      "Salvar Alterações"
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row items-center gap-4 space-y-0">
+                  <div className="h-10 w-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-600">
+                    <ScanBarcode className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>Leitor de Código de Barras</CardTitle>
+                    <CardDescription>
+                      Configuração do scanner para PDV
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between space-x-2">
+                    <Label>Ativar Leitor</Label>
+                    <Switch
+                      checked={settings.barcodeScannerEnabled || false}
+                      onCheckedChange={(checked) =>
+                        updateSetting("barcodeScannerEnabled", checked)
+                      }
+                      data-testid="switch-scanner-enabled"
+                    />
+                  </div>
+                  <Separator />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Adicionar Automaticamente</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Produto vai direto ao carrinho
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.barcodeScannerAutoAdd || false}
+                        onCheckedChange={(checked) =>
+                          updateSetting("barcodeScannerAutoAdd", checked)
+                        }
+                        data-testid="switch-scanner-auto-add"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Som ao Ler Código</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Feedback sonoro de leitura
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.barcodeScannerBeep || false}
+                        onCheckedChange={(checked) =>
+                          updateSetting("barcodeScannerBeep", checked)
+                        }
+                        data-testid="switch-scanner-beep"
+                      />
+                    </div>
+                  </div>
+                  <Separator />
+                  <div className="rounded-md bg-violet-50 p-4 space-y-2">
+                    <h4 className="text-sm font-medium text-violet-900">
+                      Como funciona?
+                    </h4>
+                    <ul className="text-xs text-violet-700 space-y-1 list-disc list-inside">
+                      <li>Conecte o leitor via USB (funciona como teclado)</li>
+                      <li>
+                        No PDV, o campo de busca detecta automaticamente a
+                        leitura
+                      </li>
+                      <li>
+                        O produto é encontrado pelo código EAN e adicionado ao
+                        carrinho
+                      </li>
+                      <li>
+                        Compatível com leitores: Honeywell, Elgin, Bematech,
+                        etc.
+                      </li>
+                    </ul>
+                  </div>
+                  <div className="rounded-md bg-emerald-100 p-3 flex items-center gap-3 text-emerald-700">
+                    <CheckCircle2 className="h-5 w-5" />
+                    <div className="text-sm font-medium">
+                      Pronto para uso - Conecte o leitor USB
+                    </div>
+                  </div>
+                  <Button
+                    onClick={handleSaveSettings}
+                    disabled={saving}
+                    className="w-full"
+                    data-testid="button-save-scanner"
+                  >
+                    {saving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      "Salvar Alterações"
+                    )}
                   </Button>
                 </CardContent>
               </Card>

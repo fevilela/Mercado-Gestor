@@ -236,6 +236,16 @@ export const companySettings = pgTable("company_settings", {
   mpAccessToken: text("mp_access_token"),
   mpTerminalId: text("mp_terminal_id"),
   mpEnabled: boolean("mp_enabled").default(false),
+  printerEnabled: boolean("printer_enabled").default(false),
+  printerModel: text("printer_model"),
+  printerPort: text("printer_port"),
+  printerBaudRate: integer("printer_baud_rate").default(9600),
+  printerColumns: integer("printer_columns").default(48),
+  printerCutCommand: boolean("printer_cut_command").default(true),
+  printerBeepOnSale: boolean("printer_beep_on_sale").default(true),
+  barcodeScannerEnabled: boolean("barcode_scanner_enabled").default(true),
+  barcodeScannerAutoAdd: boolean("barcode_scanner_auto_add").default(true),
+  barcodeScannerBeep: boolean("barcode_scanner_beep").default(true),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
