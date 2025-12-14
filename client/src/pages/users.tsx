@@ -300,12 +300,10 @@ export default function Users() {
   const canManageUsers = hasPermission("users:manage");
 
   useEffect(() => {
-    if (rolePermissions.length > 0) {
+    if (selectedRole && !isLoadingRolePerms) {
       setSelectedPermissions(rolePermissions);
-    } else if (selectedRole) {
-      setSelectedPermissions([]);
     }
-  }, [rolePermissions, selectedRole]);
+  }, [selectedRole?.id, isLoadingRolePerms]);
 
   const openPermissionDialog = async (role: Role) => {
     setSelectedRole(role);

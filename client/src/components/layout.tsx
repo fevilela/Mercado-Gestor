@@ -33,15 +33,60 @@ import { useAuth } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 
 const sidebarItems = [
-  { icon: LayoutDashboard, label: "Dashboard", href: "/" },
-  { icon: ShoppingCart, label: "PDV (Frente de Caixa)", href: "/pos" },
-  { icon: Package, label: "Produtos & Estoque", href: "/inventory" },
-  { icon: Store, label: "Vendas & Pedidos", href: "/sales" },
-  { icon: Wallet, label: "Financeiro", href: "/finance" },
-  { icon: Users, label: "Clientes & Fornecedores", href: "/contacts" },
-  { icon: BarChart3, label: "Relatórios", href: "/reports" },
-  { icon: User, label: "Usuários", href: "/users" },
-  { icon: Settings, label: "Configurações", href: "/settings" },
+  { icon: LayoutDashboard, label: "Dashboard", href: "/", permissions: [] },
+  {
+    icon: ShoppingCart,
+    label: "PDV (Frente de Caixa)",
+    href: "/pos",
+    permissions: ["pos:view", "pos:sell"],
+  },
+  {
+    icon: Package,
+    label: "Produtos & Estoque",
+    href: "/inventory",
+    permissions: ["inventory:view", "inventory:manage"],
+  },
+  {
+    icon: Store,
+    label: "Vendas & Pedidos",
+    href: "/sales",
+    permissions: ["pos:view", "reports:view"],
+  },
+  {
+    icon: Wallet,
+    label: "Financeiro",
+    href: "/finance",
+    permissions: ["finance:view", "finance:manage"],
+  },
+  {
+    icon: Users,
+    label: "Clientes & Fornecedores",
+    href: "/contacts",
+    permissions: [
+      "customers:view",
+      "customers:manage",
+      "suppliers:view",
+      "suppliers:manage",
+    ],
+  },
+  {
+    icon: BarChart3,
+    label: "Relatórios",
+    href: "/reports",
+    permissions: ["reports:view"],
+  },
+  {
+    icon: User,
+    label: "Usuários",
+    href: "/users",
+    permissions: ["users:view", "users:manage"],
+  },
+  {
+    icon: Settings,
+    label: "Configurações",
+    href: "/settings",
+    permissions: ["settings:view", "settings:manage"],
+  },
 ];
 
 interface Notification {
@@ -56,7 +101,7 @@ interface Notification {
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const { user, company, logout } = useAuth();
+  const { user, company, logout, hasAnyPermission } = useAuth();
 
   const { data: notifications = [] } = useQuery<Notification[]>({
     queryKey: ["/api/notifications"],
@@ -96,23 +141,28 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </div>
       <div className="flex-1 overflow-auto py-4">
         <nav className="grid gap-1 px-2">
-          {sidebarItems.map((item) => {
-            const isActive = location === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
-                  isActive
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                }`}
-              >
-                <item.icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            );
-          })}
+          {sidebarItems
+            .filter((item) => {
+              if (item.permissions.length === 0) return true;
+              return hasAnyPermission(...item.permissions);
+            })
+            .map((item) => {
+              const isActive = location === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
+                    isActive
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  }`}
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.label}
+                </Link>
+              );
+            })}
         </nav>
       </div>
       <div className="border-t border-sidebar-border p-4">

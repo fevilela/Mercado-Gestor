@@ -100,39 +100,51 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  app.get("/api/products", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.get(
+    "/api/products",
+    requireAuth,
+    requirePermission("inventory:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const productsList = await storage.getAllProducts(companyId);
-      res.json(productsList);
-    } catch (error) {
-      console.error("Failed to fetch products:", error);
-      res.status(500).json({ error: "Failed to fetch products" });
-    }
-  });
-
-  app.get("/api/products/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const id = parseInt(req.params.id);
-      const product = await storage.getProduct(id, companyId);
-      if (!product) {
-        return res.status(404).json({ error: "Product not found" });
+        const productsList = await storage.getAllProducts(companyId);
+        res.json(productsList);
+      } catch (error) {
+        console.error("Failed to fetch products:", error);
+        res.status(500).json({ error: "Failed to fetch products" });
       }
-      const variations = await storage.getProductVariations(id);
-      const media = await storage.getProductMedia(id);
-      const productKitItems = product.isKit
-        ? await storage.getKitItems(id)
-        : [];
-      res.json({ ...product, variations, media, kitItems: productKitItems });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch product" });
     }
-  });
+  );
+
+  app.get(
+    "/api/products/:id",
+    requireAuth,
+    requirePermission("inventory:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const id = parseInt(req.params.id);
+        const product = await storage.getProduct(id, companyId);
+        if (!product) {
+          return res.status(404).json({ error: "Product not found" });
+        }
+        const variations = await storage.getProductVariations(id);
+        const media = await storage.getProductMedia(id);
+        const productKitItems = product.isKit
+          ? await storage.getKitItems(id)
+          : [];
+        res.json({ ...product, variations, media, kitItems: productKitItems });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch product" });
+      }
+    }
+  );
 
   const variationSchema = z.object({
     name: z.string(),
@@ -166,399 +178,493 @@ export async function registerRoutes(
     kitItems: z.array(kitItemSchema).optional(),
   });
 
-  app.post("/api/products", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.post(
+    "/api/products",
+    requireAuth,
+    requirePermission("inventory:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const {
-        product,
-        variations,
-        media,
-        kitItems: kitItemsData,
-      } = createProductRequestSchema.parse(req.body);
+        const {
+          product,
+          variations,
+          media,
+          kitItems: kitItemsData,
+        } = createProductRequestSchema.parse(req.body);
 
-      const result = await db.transaction(async (tx) => {
-        const [newProduct] = await tx
-          .insert(products)
-          .values({ ...product, companyId })
-          .returning();
-
-        if (variations && variations.length > 0) {
-          for (const variation of variations) {
-            await tx.insert(productVariations).values({
-              productId: newProduct.id,
-              name: variation.name,
-              sku: variation.sku || null,
-              attributes: variation.attributes || null,
-              extraPrice: variation.extraPrice || "0",
-              stock: variation.stock,
-            });
-          }
-        }
-
-        if (media && media.length > 0) {
-          for (const m of media) {
-            await tx.insert(productMedia).values({
-              productId: newProduct.id,
-              url: m.url,
-              isPrimary: m.isPrimary || false,
-            });
-          }
-        }
-
-        if (kitItemsData && kitItemsData.length > 0 && newProduct.isKit) {
-          for (const item of kitItemsData) {
-            await tx.insert(kitItems).values({
-              kitProductId: newProduct.id,
-              productId: item.productId,
-              quantity: item.quantity,
-            });
-          }
-        }
-
-        return newProduct;
-      });
-
-      res.status(201).json(result);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
-      }
-      console.error("Failed to create product:", error);
-      res.status(500).json({ error: "Failed to create product" });
-    }
-  });
-
-  app.patch("/api/products/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const id = parseInt(req.params.id);
-
-      const parseResult = updateProductRequestSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        console.error("Validation error:", parseResult.error.errors);
-        return res.status(400).json({ error: parseResult.error.errors });
-      }
-
-      const {
-        product,
-        variations,
-        media,
-        kitItems: kitItemsData,
-      } = parseResult.data;
-
-      const result = await db.transaction(async (tx) => {
-        let updatedProduct;
-        if (product) {
-          const [updated] = await tx
-            .update(products)
-            .set({ ...product, updatedAt: new Date() })
-            .where(and(eq(products.id, id), eq(products.companyId, companyId)))
+        const result = await db.transaction(async (tx) => {
+          const [newProduct] = await tx
+            .insert(products)
+            .values({ ...product, companyId })
             .returning();
-          if (!updated) {
-            throw new Error("Product not found");
+
+          if (variations && variations.length > 0) {
+            for (const variation of variations) {
+              await tx.insert(productVariations).values({
+                productId: newProduct.id,
+                name: variation.name,
+                sku: variation.sku || null,
+                attributes: variation.attributes || null,
+                extraPrice: variation.extraPrice || "0",
+                stock: variation.stock,
+              });
+            }
           }
-          updatedProduct = updated;
-        } else {
-          const [existing] = await tx
-            .select()
-            .from(products)
-            .where(and(eq(products.id, id), eq(products.companyId, companyId)));
-          if (!existing) {
-            throw new Error("Product not found");
+
+          if (media && media.length > 0) {
+            for (const m of media) {
+              await tx.insert(productMedia).values({
+                productId: newProduct.id,
+                url: m.url,
+                isPrimary: m.isPrimary || false,
+              });
+            }
           }
-          updatedProduct = existing;
+
+          if (kitItemsData && kitItemsData.length > 0 && newProduct.isKit) {
+            for (const item of kitItemsData) {
+              await tx.insert(kitItems).values({
+                kitProductId: newProduct.id,
+                productId: item.productId,
+                quantity: item.quantity,
+              });
+            }
+          }
+
+          return newProduct;
+        });
+
+        res.status(201).json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to create product:", error);
+        res.status(500).json({ error: "Failed to create product" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/products/:id",
+    requireAuth,
+    requirePermission("inventory:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const id = parseInt(req.params.id);
+
+        const parseResult = updateProductRequestSchema.safeParse(req.body);
+        if (!parseResult.success) {
+          console.error("Validation error:", parseResult.error.errors);
+          return res.status(400).json({ error: parseResult.error.errors });
         }
 
-        if (variations !== undefined) {
-          await tx
-            .delete(productVariations)
-            .where(eq(productVariations.productId, id));
-          for (const variation of variations) {
-            await tx.insert(productVariations).values({
-              productId: id,
-              name: variation.name,
-              sku: variation.sku || null,
-              attributes: variation.attributes || null,
-              extraPrice: variation.extraPrice || "0",
-              stock: variation.stock,
-            });
+        const {
+          product,
+          variations,
+          media,
+          kitItems: kitItemsData,
+        } = parseResult.data;
+
+        const result = await db.transaction(async (tx) => {
+          let updatedProduct;
+          if (product) {
+            const [updated] = await tx
+              .update(products)
+              .set({ ...product, updatedAt: new Date() })
+              .where(
+                and(eq(products.id, id), eq(products.companyId, companyId))
+              )
+              .returning();
+            if (!updated) {
+              throw new Error("Product not found");
+            }
+            updatedProduct = updated;
+          } else {
+            const [existing] = await tx
+              .select()
+              .from(products)
+              .where(
+                and(eq(products.id, id), eq(products.companyId, companyId))
+              );
+            if (!existing) {
+              throw new Error("Product not found");
+            }
+            updatedProduct = existing;
           }
-        }
 
-        if (media !== undefined) {
-          await tx.delete(productMedia).where(eq(productMedia.productId, id));
-          for (const m of media) {
-            await tx.insert(productMedia).values({
-              productId: id,
-              url: m.url,
-              isPrimary: m.isPrimary || false,
-            });
+          if (variations !== undefined) {
+            await tx
+              .delete(productVariations)
+              .where(eq(productVariations.productId, id));
+            for (const variation of variations) {
+              await tx.insert(productVariations).values({
+                productId: id,
+                name: variation.name,
+                sku: variation.sku || null,
+                attributes: variation.attributes || null,
+                extraPrice: variation.extraPrice || "0",
+                stock: variation.stock,
+              });
+            }
           }
-        }
 
-        if (kitItemsData !== undefined) {
-          await tx.delete(kitItems).where(eq(kitItems.kitProductId, id));
-          for (const item of kitItemsData) {
-            await tx.insert(kitItems).values({
-              kitProductId: id,
-              productId: item.productId,
-              quantity: item.quantity,
-            });
+          if (media !== undefined) {
+            await tx.delete(productMedia).where(eq(productMedia.productId, id));
+            for (const m of media) {
+              await tx.insert(productMedia).values({
+                productId: id,
+                url: m.url,
+                isPrimary: m.isPrimary || false,
+              });
+            }
           }
+
+          if (kitItemsData !== undefined) {
+            await tx.delete(kitItems).where(eq(kitItems.kitProductId, id));
+            for (const item of kitItemsData) {
+              await tx.insert(kitItems).values({
+                kitProductId: id,
+                productId: item.productId,
+                quantity: item.quantity,
+              });
+            }
+          }
+
+          return updatedProduct;
+        });
+
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
         }
-
-        return updatedProduct;
-      });
-
-      res.json(result);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+        if (error instanceof Error && error.message === "Product not found") {
+          return res.status(404).json({ error: "Product not found" });
+        }
+        console.error("Failed to update product:", error);
+        res.status(500).json({ error: "Failed to update product" });
       }
-      if (error instanceof Error && error.message === "Product not found") {
-        return res.status(404).json({ error: "Product not found" });
+    }
+  );
+
+  app.delete(
+    "/api/products/:id",
+    requireAuth,
+    requirePermission("inventory:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const id = parseInt(req.params.id);
+        await storage.deleteProduct(id, companyId);
+        res.status(204).send();
+      } catch (error) {
+        res.status(500).json({ error: "Failed to delete product" });
       }
-      console.error("Failed to update product:", error);
-      res.status(500).json({ error: "Failed to update product" });
     }
-  });
+  );
 
-  app.delete("/api/products/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.get(
+    "/api/customers",
+    requireAuth,
+    requirePermission("customers:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const id = parseInt(req.params.id);
-      await storage.deleteProduct(id, companyId);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Failed to delete product" });
-    }
-  });
-
-  app.get("/api/customers", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const customersList = await storage.getAllCustomers(companyId);
-      res.json(customersList);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch customers" });
-    }
-  });
-
-  app.post("/api/customers", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const validated = insertCustomerSchema.parse(req.body);
-      const customer = await storage.createCustomer({
-        ...validated,
-        companyId,
-      });
-      res.status(201).json(customer);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+        const customersList = await storage.getAllCustomers(companyId);
+        res.json(customersList);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch customers" });
       }
-      res.status(500).json({ error: "Failed to create customer" });
     }
-  });
+  );
 
-  app.patch("/api/customers/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.post(
+    "/api/customers",
+    requireAuth,
+    requirePermission("customers:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const id = parseInt(req.params.id);
-      const validated = insertCustomerSchema.partial().parse(req.body);
-      const customer = await storage.updateCustomer(id, companyId, validated);
-      if (!customer) {
-        return res.status(404).json({ error: "Customer not found" });
+        const validated = insertCustomerSchema.parse(req.body);
+        const customer = await storage.createCustomer({
+          ...validated,
+          companyId,
+        });
+        res.status(201).json(customer);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to create customer" });
       }
-      res.json(customer);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+    }
+  );
+
+  app.patch(
+    "/api/customers/:id",
+    requireAuth,
+    requirePermission("customers:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const id = parseInt(req.params.id);
+        const validated = insertCustomerSchema.partial().parse(req.body);
+        const customer = await storage.updateCustomer(id, companyId, validated);
+        if (!customer) {
+          return res.status(404).json({ error: "Customer not found" });
+        }
+        res.json(customer);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to update customer" });
       }
-      res.status(500).json({ error: "Failed to update customer" });
     }
-  });
+  );
 
-  app.delete("/api/customers/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.delete(
+    "/api/customers/:id",
+    requireAuth,
+    requirePermission("customers:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const id = parseInt(req.params.id);
-      await storage.deleteCustomer(id, companyId);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Failed to delete customer" });
-    }
-  });
-
-  app.get("/api/suppliers", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const suppliersList = await storage.getAllSuppliers(companyId);
-      res.json(suppliersList);
-    } catch (error) {
-      console.error("Failed to fetch suppliers:", error);
-      res.status(500).json({ error: "Failed to fetch suppliers" });
-    }
-  });
-
-  app.post("/api/suppliers", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const validated = insertSupplierSchema.parse(req.body);
-      const supplier = await storage.createSupplier({
-        ...validated,
-        companyId,
-      });
-      res.status(201).json(supplier);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+        const id = parseInt(req.params.id);
+        await storage.deleteCustomer(id, companyId);
+        res.status(204).send();
+      } catch (error) {
+        res.status(500).json({ error: "Failed to delete customer" });
       }
-      res.status(500).json({ error: "Failed to create supplier" });
     }
-  });
+  );
 
-  app.patch("/api/suppliers/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.get(
+    "/api/suppliers",
+    requireAuth,
+    requirePermission("suppliers:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const id = parseInt(req.params.id);
-      const validated = insertSupplierSchema.partial().parse(req.body);
-      const supplier = await storage.updateSupplier(id, companyId, validated);
-      if (!supplier) {
-        return res.status(404).json({ error: "Supplier not found" });
+        const suppliersList = await storage.getAllSuppliers(companyId);
+        res.json(suppliersList);
+      } catch (error) {
+        console.error("Failed to fetch suppliers:", error);
+        res.status(500).json({ error: "Failed to fetch suppliers" });
       }
-      res.json(supplier);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+    }
+  );
+
+  app.post(
+    "/api/suppliers",
+    requireAuth,
+    requirePermission("suppliers:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const validated = insertSupplierSchema.parse(req.body);
+        const supplier = await storage.createSupplier({
+          ...validated,
+          companyId,
+        });
+        res.status(201).json(supplier);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to create supplier" });
       }
-      res.status(500).json({ error: "Failed to update supplier" });
     }
-  });
+  );
 
-  app.delete("/api/suppliers/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.patch(
+    "/api/suppliers/:id",
+    requireAuth,
+    requirePermission("suppliers:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const id = parseInt(req.params.id);
-      await storage.deleteSupplier(id, companyId);
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Failed to delete supplier" });
-    }
-  });
-
-  app.get("/api/sales", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const salesList = await storage.getAllSales(companyId);
-      res.json(salesList);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch sales" });
-    }
-  });
-
-  app.get("/api/sales/stats", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const stats = await storage.getSalesStats(companyId);
-      res.json(stats);
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch stats" });
-    }
-  });
-
-  app.get("/api/sales/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const id = parseInt(req.params.id);
-      const sale = await storage.getSale(id, companyId);
-      if (!sale) {
-        return res.status(404).json({ error: "Sale not found" });
+        const id = parseInt(req.params.id);
+        const validated = insertSupplierSchema.partial().parse(req.body);
+        const supplier = await storage.updateSupplier(id, companyId, validated);
+        if (!supplier) {
+          return res.status(404).json({ error: "Supplier not found" });
+        }
+        res.json(supplier);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to update supplier" });
       }
-      const items = await storage.getSaleItems(id);
-      res.json({ ...sale, items });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch sale" });
     }
-  });
+  );
+
+  app.delete(
+    "/api/suppliers/:id",
+    requireAuth,
+    requirePermission("suppliers:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const id = parseInt(req.params.id);
+        await storage.deleteSupplier(id, companyId);
+        res.status(204).send();
+      } catch (error) {
+        res.status(500).json({ error: "Failed to delete supplier" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/sales",
+    requireAuth,
+    requirePermission("pos:view", "reports:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const salesList = await storage.getAllSales(companyId);
+        res.json(salesList);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch sales" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/sales/stats",
+    requireAuth,
+    requirePermission("pos:view", "reports:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const stats = await storage.getSalesStats(companyId);
+        res.json(stats);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch stats" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/sales/:id",
+    requireAuth,
+    requirePermission("pos:view", "reports:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const id = parseInt(req.params.id);
+        const sale = await storage.getSale(id, companyId);
+        if (!sale) {
+          return res.status(404).json({ error: "Sale not found" });
+        }
+        const items = await storage.getSaleItems(id);
+        res.json({ ...sale, items });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch sale" });
+      }
+    }
+  );
 
   const createSaleRequestSchema = z.object({
     sale: insertSaleSchema,
     items: z.array(insertSaleItemSchema.omit({ saleId: true })),
   });
 
-  app.post("/api/sales", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      const userId = getUserId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.post(
+    "/api/sales",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        const userId = getUserId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const { sale, items } = createSaleRequestSchema.parse(req.body);
+        const { sale, items } = createSaleRequestSchema.parse(req.body);
 
-      const settings = await storage.getCompanySettings(companyId);
-      const isFiscalConfigured = !!(
-        settings &&
-        settings.fiscalEnabled &&
-        settings.cscToken &&
-        settings.cscId
-      );
-
-      const saleData = {
-        ...sale,
-        companyId,
-        userId,
-        nfceStatus: isFiscalConfigured ? "Autorizada" : "Pendente Fiscal",
-        status: isFiscalConfigured ? "Concluído" : "Aguardando Emissão",
-      };
-
-      for (const item of items) {
-        await storage.updateProductStock(
-          item.productId,
-          companyId,
-          -item.quantity
+        const settings = await storage.getCompanySettings(companyId);
+        const isFiscalConfigured = !!(
+          settings &&
+          settings.fiscalEnabled &&
+          settings.cscToken &&
+          settings.cscId
         );
-      }
 
-      const newSale = await storage.createSale(saleData, items as any);
-      res.status(201).json({
-        sale: newSale,
-        fiscalConfigured: isFiscalConfigured,
-      });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+        const saleData = {
+          ...sale,
+          companyId,
+          userId,
+          nfceStatus: isFiscalConfigured ? "Autorizada" : "Pendente Fiscal",
+          status: isFiscalConfigured ? "Concluído" : "Aguardando Emissão",
+        };
+
+        for (const item of items) {
+          await storage.updateProductStock(
+            item.productId,
+            companyId,
+            -item.quantity
+          );
+        }
+
+        const newSale = await storage.createSale(saleData, items as any);
+        res.status(201).json({
+          sale: newSale,
+          fiscalConfigured: isFiscalConfigured,
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to create sale" });
       }
-      res.status(500).json({ error: "Failed to create sale" });
     }
-  });
+  );
 
   const updateNfceStatusSchema = z.object({
     status: z.string(),
@@ -566,62 +672,82 @@ export async function registerRoutes(
     key: z.string().optional(),
   });
 
-  app.patch("/api/sales/:id/nfce-status", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.patch(
+    "/api/sales/:id/nfce-status",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const id = parseInt(req.params.id);
-      const { status, protocol, key } = updateNfceStatusSchema.parse(req.body);
-      const sale = await storage.updateSaleNfceStatus(
-        id,
-        companyId,
-        status,
-        protocol,
-        key
-      );
-      if (!sale) {
-        return res.status(404).json({ error: "Sale not found" });
+        const id = parseInt(req.params.id);
+        const { status, protocol, key } = updateNfceStatusSchema.parse(
+          req.body
+        );
+        const sale = await storage.updateSaleNfceStatus(
+          id,
+          companyId,
+          status,
+          protocol,
+          key
+        );
+        if (!sale) {
+          return res.status(404).json({ error: "Sale not found" });
+        }
+        res.json(sale);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to update NFC-e status" });
       }
-      res.json(sale);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+    }
+  );
+
+  app.get(
+    "/api/settings",
+    requireAuth,
+    requirePermission("settings:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const settings = await storage.getCompanySettings(companyId);
+        res.json(settings || {});
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch settings" });
       }
-      res.status(500).json({ error: "Failed to update NFC-e status" });
     }
-  });
+  );
 
-  app.get("/api/settings", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.patch(
+    "/api/settings",
+    requireAuth,
+    requirePermission("settings:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const settings = await storage.getCompanySettings(companyId);
-      res.json(settings || {});
-    } catch (error) {
-      res.status(500).json({ error: "Failed to fetch settings" });
-    }
-  });
-
-  app.patch("/api/settings", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const validated = insertCompanySettingsSchema.partial().parse(req.body);
-      const settings = await storage.updateCompanySettings(
-        companyId,
-        validated
-      );
-      res.json(settings);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+        const validated = insertCompanySettingsSchema.partial().parse(req.body);
+        const settings = await storage.updateCompanySettings(
+          companyId,
+          validated
+        );
+        res.json(settings);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to update settings" });
       }
-      res.status(500).json({ error: "Failed to update settings" });
     }
-  });
+  );
 
   app.get("/api/ean/:code", requireAuth, async (req, res) => {
     try {
@@ -647,67 +773,73 @@ export async function registerRoutes(
     notes: z.string().optional(),
   });
 
-  app.post("/api/inventory/adjust", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.post(
+    "/api/inventory/adjust",
+    requireAuth,
+    requirePermission("inventory:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const { productId, quantity, type, reason, notes } =
-        adjustStockSchema.parse(req.body);
+        const { productId, quantity, type, reason, notes } =
+          adjustStockSchema.parse(req.body);
 
-      const product = await storage.getProduct(productId, companyId);
-      if (!product) {
-        return res.status(404).json({ error: "Produto não encontrado" });
-      }
+        const product = await storage.getProduct(productId, companyId);
+        if (!product) {
+          return res.status(404).json({ error: "Produto não encontrado" });
+        }
 
-      const quantityDelta =
-        type === "saida" || type === "perda"
-          ? -Math.abs(quantity)
-          : Math.abs(quantity);
+        const quantityDelta =
+          type === "saida" || type === "perda"
+            ? -Math.abs(quantity)
+            : Math.abs(quantity);
 
-      const newStock = product.stock + quantityDelta;
-      if (newStock < 0) {
-        return res
-          .status(400)
-          .json({ error: "Estoque não pode ficar negativo" });
-      }
+        const newStock = product.stock + quantityDelta;
+        if (newStock < 0) {
+          return res
+            .status(400)
+            .json({ error: "Estoque não pode ficar negativo" });
+        }
 
-      await storage.createInventoryMovement({
-        productId,
-        companyId,
-        type,
-        quantity: quantityDelta,
-        reason: reason || null,
-        notes: notes || null,
-        referenceId: null,
-        referenceType: null,
-        variationId: null,
-      });
-
-      const updatedProduct = await storage.updateProductStock(
-        productId,
-        companyId,
-        quantityDelta
-      );
-
-      res.json({
-        product: updatedProduct,
-        movement: {
+        await storage.createInventoryMovement({
           productId,
+          companyId,
           type,
           quantity: quantityDelta,
-          reason,
-          notes,
-        },
-      });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+          reason: reason || null,
+          notes: notes || null,
+          referenceId: null,
+          referenceType: null,
+          variationId: null,
+        });
+
+        const updatedProduct = await storage.updateProductStock(
+          productId,
+          companyId,
+          quantityDelta
+        );
+
+        res.json({
+          product: updatedProduct,
+          movement: {
+            productId,
+            type,
+            quantity: quantityDelta,
+            reason,
+            notes,
+          },
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to adjust stock:", error);
+        res.status(500).json({ error: "Falha ao ajustar estoque" });
       }
-      console.error("Failed to adjust stock:", error);
-      res.status(500).json({ error: "Falha ao ajustar estoque" });
     }
-  });
+  );
 
   app.get(
     "/api/inventory/movements/:productId",
@@ -1279,165 +1411,213 @@ export async function registerRoutes(
     notes: z.string().optional().nullable(),
   });
 
-  app.get("/api/payables", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.get(
+    "/api/payables",
+    requireAuth,
+    requirePermission("finance:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const payables = await storage.getAllPayables(companyId);
-      res.json(payables);
-    } catch (error) {
-      console.error("Failed to fetch payables:", error);
-      res.status(500).json({ error: "Failed to fetch payables" });
-    }
-  });
-
-  app.post("/api/payables", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const validated = createPayableSchema.parse(req.body);
-      const payable = await storage.createPayable({
-        ...validated,
-        companyId,
-      } as any);
-      res.status(201).json(payable);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+        const payables = await storage.getAllPayables(companyId);
+        res.json(payables);
+      } catch (error) {
+        console.error("Failed to fetch payables:", error);
+        res.status(500).json({ error: "Failed to fetch payables" });
       }
-      console.error("Failed to create payable:", error);
-      res.status(500).json({ error: "Failed to create payable" });
     }
-  });
+  );
 
-  app.patch("/api/payables/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.post(
+    "/api/payables",
+    requireAuth,
+    requirePermission("finance:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const id = parseInt(req.params.id);
-      const existing = await storage.getPayable(id, companyId);
-      if (!existing) {
-        return res.status(404).json({ error: "Payable not found" });
+        const validated = createPayableSchema.parse(req.body);
+        const payable = await storage.createPayable({
+          ...validated,
+          companyId,
+        } as any);
+        res.status(201).json(payable);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to create payable:", error);
+        res.status(500).json({ error: "Failed to create payable" });
       }
-      const validated = updatePayableSchema.parse(req.body);
-      const cleanedData = Object.fromEntries(
-        Object.entries(validated).filter(([_, v]) => v !== undefined)
-      );
-      const payable = await storage.updatePayable(
-        id,
-        companyId,
-        cleanedData as any
-      );
-      res.json(payable);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
-      }
-      console.error("Failed to update payable:", error);
-      res.status(500).json({ error: "Failed to update payable" });
     }
-  });
+  );
 
-  app.delete("/api/payables/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.patch(
+    "/api/payables/:id",
+    requireAuth,
+    requirePermission("finance:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const id = parseInt(req.params.id);
-      const existing = await storage.getPayable(id, companyId);
-      if (!existing) {
-        return res.status(404).json({ error: "Payable not found" });
+        const id = parseInt(req.params.id);
+        const existing = await storage.getPayable(id, companyId);
+        if (!existing) {
+          return res.status(404).json({ error: "Payable not found" });
+        }
+        const validated = updatePayableSchema.parse(req.body);
+        const cleanedData = Object.fromEntries(
+          Object.entries(validated).filter(([_, v]) => v !== undefined)
+        );
+        const payable = await storage.updatePayable(
+          id,
+          companyId,
+          cleanedData as any
+        );
+        res.json(payable);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to update payable:", error);
+        res.status(500).json({ error: "Failed to update payable" });
       }
-      await storage.deletePayable(id, companyId);
-      res.status(204).send();
-    } catch (error) {
-      console.error("Failed to delete payable:", error);
-      res.status(500).json({ error: "Failed to delete payable" });
     }
-  });
+  );
 
-  app.get("/api/receivables", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.delete(
+    "/api/payables/:id",
+    requireAuth,
+    requirePermission("finance:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const receivables = await storage.getAllReceivables(companyId);
-      res.json(receivables);
-    } catch (error) {
-      console.error("Failed to fetch receivables:", error);
-      res.status(500).json({ error: "Failed to fetch receivables" });
-    }
-  });
-
-  app.post("/api/receivables", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const validated = createReceivableSchema.parse(req.body);
-      const receivable = await storage.createReceivable({
-        ...validated,
-        companyId,
-      } as any);
-      res.status(201).json(receivable);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
+        const id = parseInt(req.params.id);
+        const existing = await storage.getPayable(id, companyId);
+        if (!existing) {
+          return res.status(404).json({ error: "Payable not found" });
+        }
+        await storage.deletePayable(id, companyId);
+        res.status(204).send();
+      } catch (error) {
+        console.error("Failed to delete payable:", error);
+        res.status(500).json({ error: "Failed to delete payable" });
       }
-      console.error("Failed to create receivable:", error);
-      res.status(500).json({ error: "Failed to create receivable" });
     }
-  });
+  );
 
-  app.patch("/api/receivables/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.get(
+    "/api/receivables",
+    requireAuth,
+    requirePermission("finance:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const id = parseInt(req.params.id);
-      const existing = await storage.getReceivable(id, companyId);
-      if (!existing) {
-        return res.status(404).json({ error: "Receivable not found" });
+        const receivables = await storage.getAllReceivables(companyId);
+        res.json(receivables);
+      } catch (error) {
+        console.error("Failed to fetch receivables:", error);
+        res.status(500).json({ error: "Failed to fetch receivables" });
       }
-      const validated = updateReceivableSchema.parse(req.body);
-      const cleanedData = Object.fromEntries(
-        Object.entries(validated).filter(([_, v]) => v !== undefined)
-      );
-      const receivable = await storage.updateReceivable(
-        id,
-        companyId,
-        cleanedData as any
-      );
-      res.json(receivable);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
-      }
-      console.error("Failed to update receivable:", error);
-      res.status(500).json({ error: "Failed to update receivable" });
     }
-  });
+  );
 
-  app.delete("/api/receivables/:id", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.post(
+    "/api/receivables",
+    requireAuth,
+    requirePermission("finance:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const id = parseInt(req.params.id);
-      const existing = await storage.getReceivable(id, companyId);
-      if (!existing) {
-        return res.status(404).json({ error: "Receivable not found" });
+        const validated = createReceivableSchema.parse(req.body);
+        const receivable = await storage.createReceivable({
+          ...validated,
+          companyId,
+        } as any);
+        res.status(201).json(receivable);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to create receivable:", error);
+        res.status(500).json({ error: "Failed to create receivable" });
       }
-      await storage.deleteReceivable(id, companyId);
-      res.status(204).send();
-    } catch (error) {
-      console.error("Failed to delete receivable:", error);
-      res.status(500).json({ error: "Failed to delete receivable" });
     }
-  });
+  );
+
+  app.patch(
+    "/api/receivables/:id",
+    requireAuth,
+    requirePermission("finance:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const id = parseInt(req.params.id);
+        const existing = await storage.getReceivable(id, companyId);
+        if (!existing) {
+          return res.status(404).json({ error: "Receivable not found" });
+        }
+        const validated = updateReceivableSchema.parse(req.body);
+        const cleanedData = Object.fromEntries(
+          Object.entries(validated).filter(([_, v]) => v !== undefined)
+        );
+        const receivable = await storage.updateReceivable(
+          id,
+          companyId,
+          cleanedData as any
+        );
+        res.json(receivable);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to update receivable:", error);
+        res.status(500).json({ error: "Failed to update receivable" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/receivables/:id",
+    requireAuth,
+    requirePermission("finance:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const id = parseInt(req.params.id);
+        const existing = await storage.getReceivable(id, companyId);
+        if (!existing) {
+          return res.status(404).json({ error: "Receivable not found" });
+        }
+        await storage.deleteReceivable(id, companyId);
+        res.status(204).send();
+      } catch (error) {
+        console.error("Failed to delete receivable:", error);
+        res.status(500).json({ error: "Failed to delete receivable" });
+      }
+    }
+  );
 
   app.get("/api/notifications", requireAuth, async (req, res) => {
     try {

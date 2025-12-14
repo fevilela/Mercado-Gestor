@@ -420,11 +420,19 @@ authRouter.get("/roles", async (req, res) => {
 });
 
 authRouter.get("/users", async (req, res) => {
-  if (!req.session.companyId) {
+  if (!req.session.companyId || !req.session.userId) {
     return res.status(401).json({ error: "Não autenticado" });
   }
 
   try {
+    const userPerms = await getUserPermissions(req.session.userId);
+    if (
+      !userPerms.includes("users:view") &&
+      !userPerms.includes("users:manage")
+    ) {
+      return res.status(403).json({ error: "Sem permissão para esta ação" });
+    }
+
     const companyUsers = await db
       .select({
         id: users.id,
@@ -457,11 +465,16 @@ const createUserSchema = z.object({
 });
 
 authRouter.post("/users", async (req, res) => {
-  if (!req.session.companyId) {
+  if (!req.session.companyId || !req.session.userId) {
     return res.status(401).json({ error: "Não autenticado" });
   }
 
   try {
+    const userPerms = await getUserPermissions(req.session.userId);
+    if (!userPerms.includes("users:manage")) {
+      return res.status(403).json({ error: "Sem permissão para esta ação" });
+    }
+
     const data = createUserSchema.parse(req.body);
 
     const existingUser = await db
@@ -513,11 +526,16 @@ authRouter.post("/users", async (req, res) => {
 });
 
 authRouter.patch("/users/:id", async (req, res) => {
-  if (!req.session.companyId) {
+  if (!req.session.companyId || !req.session.userId) {
     return res.status(401).json({ error: "Não autenticado" });
   }
 
   try {
+    const userPerms = await getUserPermissions(req.session.userId);
+    if (!userPerms.includes("users:manage")) {
+      return res.status(403).json({ error: "Sem permissão para esta ação" });
+    }
+
     const userId = req.params.id;
     const { name, email, phone, roleId, isActive, password } = req.body;
 
@@ -543,11 +561,16 @@ authRouter.patch("/users/:id", async (req, res) => {
 });
 
 authRouter.delete("/users/:id", async (req, res) => {
-  if (!req.session.companyId) {
+  if (!req.session.companyId || !req.session.userId) {
     return res.status(401).json({ error: "Não autenticado" });
   }
 
   try {
+    const userPerms = await getUserPermissions(req.session.userId);
+    if (!userPerms.includes("users:manage")) {
+      return res.status(403).json({ error: "Sem permissão para esta ação" });
+    }
+
     const userId = req.params.id;
 
     if (userId === req.session.userId) {
@@ -624,11 +647,19 @@ authRouter.get("/permissions", async (req, res) => {
 });
 
 authRouter.get("/roles/:id/permissions", async (req, res) => {
-  if (!req.session.companyId) {
+  if (!req.session.companyId || !req.session.userId) {
     return res.status(401).json({ error: "Não autenticado" });
   }
 
   try {
+    const userPerms = await getUserPermissions(req.session.userId);
+    if (
+      !userPerms.includes("users:view") &&
+      !userPerms.includes("users:manage")
+    ) {
+      return res.status(403).json({ error: "Sem permissão para esta ação" });
+    }
+
     const roleId = parseInt(req.params.id);
     const rolePerms = await db
       .select({
@@ -644,11 +675,16 @@ authRouter.get("/roles/:id/permissions", async (req, res) => {
 });
 
 authRouter.put("/roles/:id/permissions", async (req, res) => {
-  if (!req.session.companyId) {
+  if (!req.session.companyId || !req.session.userId) {
     return res.status(401).json({ error: "Não autenticado" });
   }
 
   try {
+    const userPerms = await getUserPermissions(req.session.userId);
+    if (!userPerms.includes("users:manage")) {
+      return res.status(403).json({ error: "Sem permissão para esta ação" });
+    }
+
     const roleId = parseInt(req.params.id);
     const { permissionIds } = req.body as { permissionIds: number[] };
 
