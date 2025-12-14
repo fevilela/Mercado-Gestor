@@ -21,8 +21,15 @@ import {
   insertReceivableSchema,
 } from "@shared/schema";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { lookupEAN } from "./ean-service";
+import {
+  requireAuth,
+  requirePermission,
+  getCompanyId,
+  getUserId,
+} from "./middleware";
+import "./types";
 
 function parseNFeXML(xmlContent: string): Array<{
   name: string;
@@ -92,9 +99,12 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  app.get("/api/products", async (req, res) => {
+  app.get("/api/products", requireAuth, async (req, res) => {
     try {
-      const productsList = await storage.getAllProducts();
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const productsList = await storage.getAllProducts(companyId);
       res.json(productsList);
     } catch (error) {
       console.error("Failed to fetch products:", error);
@@ -102,10 +112,13 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/products/:id", async (req, res) => {
+  app.get("/api/products/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
-      const product = await storage.getProduct(id);
+      const product = await storage.getProduct(id, companyId);
       if (!product) {
         return res.status(404).json({ error: "Product not found" });
       }
@@ -152,8 +165,11 @@ export async function registerRoutes(
     kitItems: z.array(kitItemSchema).optional(),
   });
 
-  app.post("/api/products", async (req, res) => {
+  app.post("/api/products", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const {
         product,
         variations,
@@ -164,7 +180,7 @@ export async function registerRoutes(
       const result = await db.transaction(async (tx) => {
         const [newProduct] = await tx
           .insert(products)
-          .values(product)
+          .values({ ...product, companyId })
           .returning();
 
         if (variations && variations.length > 0) {
@@ -213,13 +229,12 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/products/:id", async (req, res) => {
+  app.patch("/api/products/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
-      console.log(
-        "PATCH /api/products/:id - Request body:",
-        JSON.stringify(req.body, null, 2)
-      );
 
       const parseResult = updateProductRequestSchema.safeParse(req.body);
       if (!parseResult.success) {
@@ -240,7 +255,7 @@ export async function registerRoutes(
           const [updated] = await tx
             .update(products)
             .set({ ...product, updatedAt: new Date() })
-            .where(eq(products.id, id))
+            .where(and(eq(products.id, id), eq(products.companyId, companyId)))
             .returning();
           if (!updated) {
             throw new Error("Product not found");
@@ -250,7 +265,7 @@ export async function registerRoutes(
           const [existing] = await tx
             .select()
             .from(products)
-            .where(eq(products.id, id));
+            .where(and(eq(products.id, id), eq(products.companyId, companyId)));
           if (!existing) {
             throw new Error("Product not found");
           }
@@ -311,29 +326,41 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/products/:id", async (req, res) => {
+  app.delete("/api/products/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
-      await storage.deleteProduct(id);
+      await storage.deleteProduct(id, companyId);
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete product" });
     }
   });
 
-  app.get("/api/customers", async (req, res) => {
+  app.get("/api/customers", requireAuth, async (req, res) => {
     try {
-      const customers = await storage.getAllCustomers();
-      res.json(customers);
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const customersList = await storage.getAllCustomers(companyId);
+      res.json(customersList);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch customers" });
     }
   });
 
-  app.post("/api/customers", async (req, res) => {
+  app.post("/api/customers", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const validated = insertCustomerSchema.parse(req.body);
-      const customer = await storage.createCustomer(validated);
+      const customer = await storage.createCustomer({
+        ...validated,
+        companyId,
+      });
       res.status(201).json(customer);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -343,11 +370,14 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/customers/:id", async (req, res) => {
+  app.patch("/api/customers/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
       const validated = insertCustomerSchema.partial().parse(req.body);
-      const customer = await storage.updateCustomer(id, validated);
+      const customer = await storage.updateCustomer(id, companyId, validated);
       if (!customer) {
         return res.status(404).json({ error: "Customer not found" });
       }
@@ -360,30 +390,42 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/customers/:id", async (req, res) => {
+  app.delete("/api/customers/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
-      await db.delete(customers).where(eq(customers.id, id));
+      await storage.deleteCustomer(id, companyId);
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete customer" });
     }
   });
 
-  app.get("/api/suppliers", async (req, res) => {
+  app.get("/api/suppliers", requireAuth, async (req, res) => {
     try {
-      const suppliers = await storage.getAllSuppliers();
-      res.json(suppliers);
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const suppliersList = await storage.getAllSuppliers(companyId);
+      res.json(suppliersList);
     } catch (error) {
       console.error("Failed to fetch suppliers:", error);
       res.status(500).json({ error: "Failed to fetch suppliers" });
     }
   });
 
-  app.post("/api/suppliers", async (req, res) => {
+  app.post("/api/suppliers", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const validated = insertSupplierSchema.parse(req.body);
-      const supplier = await storage.createSupplier(validated);
+      const supplier = await storage.createSupplier({
+        ...validated,
+        companyId,
+      });
       res.status(201).json(supplier);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -393,11 +435,14 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/suppliers/:id", async (req, res) => {
+  app.patch("/api/suppliers/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
       const validated = insertSupplierSchema.partial().parse(req.body);
-      const supplier = await storage.updateSupplier(id, validated);
+      const supplier = await storage.updateSupplier(id, companyId, validated);
       if (!supplier) {
         return res.status(404).json({ error: "Supplier not found" });
       }
@@ -410,38 +455,50 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/suppliers/:id", async (req, res) => {
+  app.delete("/api/suppliers/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
-      await db.delete(suppliers).where(eq(suppliers.id, id));
+      await storage.deleteSupplier(id, companyId);
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete supplier" });
     }
   });
 
-  app.get("/api/sales", async (req, res) => {
+  app.get("/api/sales", requireAuth, async (req, res) => {
     try {
-      const sales = await storage.getAllSales();
-      res.json(sales);
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const salesList = await storage.getAllSales(companyId);
+      res.json(salesList);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch sales" });
     }
   });
 
-  app.get("/api/sales/stats", async (req, res) => {
+  app.get("/api/sales/stats", requireAuth, async (req, res) => {
     try {
-      const stats = await storage.getSalesStats();
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const stats = await storage.getSalesStats(companyId);
       res.json(stats);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch stats" });
     }
   });
 
-  app.get("/api/sales/:id", async (req, res) => {
+  app.get("/api/sales/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
-      const sale = await storage.getSale(id);
+      const sale = await storage.getSale(id, companyId);
       if (!sale) {
         return res.status(404).json({ error: "Sale not found" });
       }
@@ -457,11 +514,15 @@ export async function registerRoutes(
     items: z.array(insertSaleItemSchema.omit({ saleId: true })),
   });
 
-  app.post("/api/sales", async (req, res) => {
+  app.post("/api/sales", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      const userId = getUserId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const { sale, items } = createSaleRequestSchema.parse(req.body);
 
-      const settings = await storage.getCompanySettings();
+      const settings = await storage.getCompanySettings(companyId);
       const isFiscalConfigured = !!(
         settings &&
         settings.fiscalEnabled &&
@@ -471,12 +532,18 @@ export async function registerRoutes(
 
       const saleData = {
         ...sale,
+        companyId,
+        userId,
         nfceStatus: isFiscalConfigured ? "Autorizada" : "Pendente Fiscal",
         status: isFiscalConfigured ? "Concluído" : "Aguardando Emissão",
       };
 
       for (const item of items) {
-        await storage.updateProductStock(item.productId, -item.quantity);
+        await storage.updateProductStock(
+          item.productId,
+          companyId,
+          -item.quantity
+        );
       }
 
       const newSale = await storage.createSale(saleData, items as any);
@@ -498,12 +565,16 @@ export async function registerRoutes(
     key: z.string().optional(),
   });
 
-  app.patch("/api/sales/:id/nfce-status", async (req, res) => {
+  app.patch("/api/sales/:id/nfce-status", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
       const { status, protocol, key } = updateNfceStatusSchema.parse(req.body);
       const sale = await storage.updateSaleNfceStatus(
         id,
+        companyId,
         status,
         protocol,
         key
@@ -520,19 +591,28 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/settings", async (req, res) => {
+  app.get("/api/settings", requireAuth, async (req, res) => {
     try {
-      const settings = await storage.getCompanySettings();
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const settings = await storage.getCompanySettings(companyId);
       res.json(settings || {});
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch settings" });
     }
   });
 
-  app.patch("/api/settings", async (req, res) => {
+  app.patch("/api/settings", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const validated = insertCompanySettingsSchema.partial().parse(req.body);
-      const settings = await storage.updateCompanySettings(validated);
+      const settings = await storage.updateCompanySettings(
+        companyId,
+        validated
+      );
       res.json(settings);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -542,7 +622,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/ean/:code", async (req, res) => {
+  app.get("/api/ean/:code", requireAuth, async (req, res) => {
     try {
       const { code } = req.params;
       const result = await lookupEAN(code);
@@ -566,12 +646,15 @@ export async function registerRoutes(
     notes: z.string().optional(),
   });
 
-  app.post("/api/inventory/adjust", async (req, res) => {
+  app.post("/api/inventory/adjust", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const { productId, quantity, type, reason, notes } =
         adjustStockSchema.parse(req.body);
 
-      const product = await storage.getProduct(productId);
+      const product = await storage.getProduct(productId, companyId);
       if (!product) {
         return res.status(404).json({ error: "Produto não encontrado" });
       }
@@ -590,6 +673,7 @@ export async function registerRoutes(
 
       await storage.createInventoryMovement({
         productId,
+        companyId,
         type,
         quantity: quantityDelta,
         reason: reason || null,
@@ -601,6 +685,7 @@ export async function registerRoutes(
 
       const updatedProduct = await storage.updateProductStock(
         productId,
+        companyId,
         quantityDelta
       );
 
@@ -623,22 +708,36 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/inventory/movements/:productId", async (req, res) => {
-    try {
-      const productId = parseInt(req.params.productId);
-      const movements = await storage.getInventoryMovements(productId);
-      res.json(movements);
-    } catch (error) {
-      res.status(500).json({ error: "Falha ao buscar movimentações" });
+  app.get(
+    "/api/inventory/movements/:productId",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const productId = parseInt(req.params.productId);
+        const movements = await storage.getInventoryMovements(
+          productId,
+          companyId
+        );
+        res.json(movements);
+      } catch (error) {
+        res.status(500).json({ error: "Falha ao buscar movimentações" });
+      }
     }
-  });
+  );
 
   const importXmlSchema = z.object({
     xmlContent: z.string().min(1),
   });
 
-  app.post("/api/products/preview-xml", async (req, res) => {
+  app.post("/api/products/preview-xml", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const { xmlContent } = importXmlSchema.parse(req.body);
 
       const parsedProducts = parseNFeXML(xmlContent);
@@ -650,7 +749,7 @@ export async function registerRoutes(
         });
       }
 
-      const existingProducts = await storage.getAllProducts();
+      const existingProducts = await storage.getAllProducts(companyId);
 
       const previewProducts = parsedProducts.map((prod, index) => {
         const existing = prod.ean
@@ -706,8 +805,11 @@ export async function registerRoutes(
     ),
   });
 
-  app.post("/api/products/import-confirmed", async (req, res) => {
+  app.post("/api/products/import-confirmed", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const { products: productsToImport } = importProductsSchema.parse(
         req.body
       );
@@ -719,10 +821,12 @@ export async function registerRoutes(
         if (prodData.isExisting && prodData.existingProductId) {
           await storage.updateProductStock(
             prodData.existingProductId,
+            companyId,
             prodData.quantity
           );
           await storage.createInventoryMovement({
             productId: prodData.existingProductId,
+            companyId,
             type: "entrada",
             quantity: prodData.quantity,
             reason: "Importação XML NFe",
@@ -749,12 +853,14 @@ export async function registerRoutes(
               purchasePrice: prodData.purchasePrice,
               stock: prodData.quantity,
               isActive: true,
+              companyId,
             })
             .returning();
 
           if (prodData.quantity > 0) {
             await storage.createInventoryMovement({
               productId: newProduct.id,
+              companyId,
               type: "entrada",
               quantity: prodData.quantity,
               reason: "Importação XML NFe - Estoque inicial",
@@ -785,8 +891,11 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/products/import-xml", async (req, res) => {
+  app.post("/api/products/import-xml", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const { xmlContent } = importXmlSchema.parse(req.body);
 
       const parsedProducts = parseNFeXML(xmlContent);
@@ -802,13 +911,18 @@ export async function registerRoutes(
 
       for (const prodData of parsedProducts) {
         if (prodData.ean) {
-          const existingProducts = await storage.getAllProducts();
+          const existingProducts = await storage.getAllProducts(companyId);
           const existing = existingProducts.find((p) => p.ean === prodData.ean);
           if (existing) {
             const newStock = existing.stock + prodData.quantity;
-            await storage.updateProductStock(existing.id, prodData.quantity);
+            await storage.updateProductStock(
+              existing.id,
+              companyId,
+              prodData.quantity
+            );
             await storage.createInventoryMovement({
               productId: existing.id,
+              companyId,
               type: "entrada",
               quantity: prodData.quantity,
               reason: "Importação XML NFe",
@@ -838,12 +952,14 @@ export async function registerRoutes(
             purchasePrice: prodData.purchasePrice,
             stock: prodData.quantity,
             isActive: true,
+            companyId,
           })
           .returning();
 
         if (prodData.quantity > 0) {
           await storage.createInventoryMovement({
             productId: newProduct.id,
+            companyId,
             type: "entrada",
             quantity: prodData.quantity,
             reason: "Importação XML NFe - Estoque inicial",
@@ -873,8 +989,11 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/sales/export/xml", async (req, res) => {
+  app.get("/api/sales/export/xml", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const monthParam = req.query.month as string | undefined;
       const yearParam = req.query.year as string | undefined;
 
@@ -890,8 +1009,8 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Ano inválido." });
       }
 
-      const sales = await storage.getAllSales();
-      const settings = await storage.getCompanySettings();
+      const sales = await storage.getAllSales(companyId);
+      const settings = await storage.getCompanySettings(companyId);
 
       const filteredSales = sales.filter((sale: any) => {
         const saleDate = new Date(sale.createdAt);
@@ -993,8 +1112,11 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/sales/report/closing", async (req, res) => {
+  app.get("/api/sales/report/closing", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const dateParam = req.query.date as string | undefined;
       let targetDate: Date;
 
@@ -1009,7 +1131,7 @@ export async function registerRoutes(
         targetDate = new Date();
       }
 
-      const sales = await storage.getAllSales();
+      const sales = await storage.getAllSales(companyId);
 
       const daySales = sales.filter((sale: any) => {
         const saleDate = new Date(sale.createdAt);
@@ -1156,9 +1278,12 @@ export async function registerRoutes(
     notes: z.string().optional().nullable(),
   });
 
-  app.get("/api/payables", async (req, res) => {
+  app.get("/api/payables", requireAuth, async (req, res) => {
     try {
-      const payables = await storage.getAllPayables();
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const payables = await storage.getAllPayables(companyId);
       res.json(payables);
     } catch (error) {
       console.error("Failed to fetch payables:", error);
@@ -1166,10 +1291,16 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/payables", async (req, res) => {
+  app.post("/api/payables", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const validated = createPayableSchema.parse(req.body);
-      const payable = await storage.createPayable(validated as any);
+      const payable = await storage.createPayable({
+        ...validated,
+        companyId,
+      } as any);
       res.status(201).json(payable);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1180,10 +1311,13 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/payables/:id", async (req, res) => {
+  app.patch("/api/payables/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
-      const existing = await storage.getPayable(id);
+      const existing = await storage.getPayable(id, companyId);
       if (!existing) {
         return res.status(404).json({ error: "Payable not found" });
       }
@@ -1191,7 +1325,11 @@ export async function registerRoutes(
       const cleanedData = Object.fromEntries(
         Object.entries(validated).filter(([_, v]) => v !== undefined)
       );
-      const payable = await storage.updatePayable(id, cleanedData as any);
+      const payable = await storage.updatePayable(
+        id,
+        companyId,
+        cleanedData as any
+      );
       res.json(payable);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1202,14 +1340,17 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/payables/:id", async (req, res) => {
+  app.delete("/api/payables/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
-      const existing = await storage.getPayable(id);
+      const existing = await storage.getPayable(id, companyId);
       if (!existing) {
         return res.status(404).json({ error: "Payable not found" });
       }
-      await storage.deletePayable(id);
+      await storage.deletePayable(id, companyId);
       res.status(204).send();
     } catch (error) {
       console.error("Failed to delete payable:", error);
@@ -1217,9 +1358,12 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/receivables", async (req, res) => {
+  app.get("/api/receivables", requireAuth, async (req, res) => {
     try {
-      const receivables = await storage.getAllReceivables();
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const receivables = await storage.getAllReceivables(companyId);
       res.json(receivables);
     } catch (error) {
       console.error("Failed to fetch receivables:", error);
@@ -1227,10 +1371,16 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/receivables", async (req, res) => {
+  app.post("/api/receivables", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const validated = createReceivableSchema.parse(req.body);
-      const receivable = await storage.createReceivable(validated as any);
+      const receivable = await storage.createReceivable({
+        ...validated,
+        companyId,
+      } as any);
       res.status(201).json(receivable);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1241,10 +1391,13 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/receivables/:id", async (req, res) => {
+  app.patch("/api/receivables/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
-      const existing = await storage.getReceivable(id);
+      const existing = await storage.getReceivable(id, companyId);
       if (!existing) {
         return res.status(404).json({ error: "Receivable not found" });
       }
@@ -1252,7 +1405,11 @@ export async function registerRoutes(
       const cleanedData = Object.fromEntries(
         Object.entries(validated).filter(([_, v]) => v !== undefined)
       );
-      const receivable = await storage.updateReceivable(id, cleanedData as any);
+      const receivable = await storage.updateReceivable(
+        id,
+        companyId,
+        cleanedData as any
+      );
       res.json(receivable);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1263,14 +1420,17 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/receivables/:id", async (req, res) => {
+  app.delete("/api/receivables/:id", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
       const id = parseInt(req.params.id);
-      const existing = await storage.getReceivable(id);
+      const existing = await storage.getReceivable(id, companyId);
       if (!existing) {
         return res.status(404).json({ error: "Receivable not found" });
       }
-      await storage.deleteReceivable(id);
+      await storage.deleteReceivable(id, companyId);
       res.status(204).send();
     } catch (error) {
       console.error("Failed to delete receivable:", error);

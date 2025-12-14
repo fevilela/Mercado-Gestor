@@ -13,24 +13,117 @@ import {
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// ============================================
+// MULTI-TENANCY: Companies (Empresas)
+// ============================================
+export const companies = pgTable("companies", {
+  id: serial("id").primaryKey(),
+  cnpj: text("cnpj").notNull().unique(),
+  ie: text("ie"),
+  razaoSocial: text("razao_social").notNull(),
+  nomeFantasia: text("nome_fantasia"),
+  email: text("email"),
+  phone: text("phone"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  zipCode: text("zip_code"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCompanySchema = createInsertSchema(companies).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
+export type Company = typeof companies.$inferSelect;
+
+// ============================================
+// RBAC: Roles (Perfis/Funções)
+// ============================================
+export const roles = pgTable("roles", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  isSystemRole: boolean("is_system_role").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertRoleSchema = createInsertSchema(roles).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertRole = z.infer<typeof insertRoleSchema>;
+export type Role = typeof roles.$inferSelect;
+
+// ============================================
+// RBAC: Permissions (Permissões)
+// ============================================
+export const permissions = pgTable("permissions", {
+  id: serial("id").primaryKey(),
+  module: text("module").notNull(),
+  action: text("action").notNull(),
+  description: text("description"),
+});
+
+export const insertPermissionSchema = createInsertSchema(permissions).omit({
+  id: true,
+});
+export type InsertPermission = z.infer<typeof insertPermissionSchema>;
+export type Permission = typeof permissions.$inferSelect;
+
+// ============================================
+// RBAC: Role Permissions (Permissões do Perfil)
+// ============================================
+export const rolePermissions = pgTable("role_permissions", {
+  id: serial("id").primaryKey(),
+  roleId: integer("role_id").notNull(),
+  permissionId: integer("permission_id").notNull(),
+});
+
+export const insertRolePermissionSchema = createInsertSchema(
+  rolePermissions
+).omit({
+  id: true,
+});
+export type InsertRolePermission = z.infer<typeof insertRolePermissionSchema>;
+export type RolePermission = typeof rolePermissions.$inferSelect;
+
+// ============================================
+// USERS: Usuários (Funcionários)
+// ============================================
 export const users = pgTable("users", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
+  companyId: integer("company_id").notNull(),
+  roleId: integer("role_id").notNull(),
+  username: text("username").notNull(),
+  email: text("email").notNull(),
   password: text("password").notNull(),
+  name: text("name").notNull(),
+  phone: text("phone"),
+  isActive: boolean("is_active").default(true),
+  lastLogin: timestamp("last_login"),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  lastLogin: true,
+  createdAt: true,
 });
-
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
+// User with role information for frontend
+export type UserWithRole = User & { role: Role; permissions: string[] };
+
 export const products = pgTable("products", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
   name: text("name").notNull(),
   ean: text("ean"),
   sku: text("sku"),
@@ -115,6 +208,7 @@ export type KitItem = typeof kitItems.$inferSelect;
 
 export const customers = pgTable("customers", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
   name: text("name").notNull(),
   email: text("email"),
   phone: text("phone"),
@@ -141,6 +235,7 @@ export type Customer = typeof customers.$inferSelect;
 
 export const suppliers = pgTable("suppliers", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
   name: text("name").notNull(),
   contact: text("contact"),
   phone: text("phone"),
@@ -166,6 +261,8 @@ export type Supplier = typeof suppliers.$inferSelect;
 
 export const sales = pgTable("sales", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  userId: varchar("user_id"),
   customerId: integer("customer_id"),
   customerName: text("customer_name").notNull().default("Consumidor Final"),
   total: decimal("total", { precision: 10, scale: 2 }).notNull(),
@@ -203,6 +300,7 @@ export type SaleItem = typeof saleItems.$inferSelect;
 
 export const inventoryMovements = pgTable("inventory_movements", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
   productId: integer("product_id").notNull(),
   variationId: integer("variation_id"),
   type: text("type").notNull(),
@@ -224,6 +322,7 @@ export type InventoryMovement = typeof inventoryMovements.$inferSelect;
 
 export const companySettings = pgTable("company_settings", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
   cnpj: text("cnpj"),
   ie: text("ie"),
   razaoSocial: text("razao_social"),
@@ -257,6 +356,7 @@ export type CompanySettings = typeof companySettings.$inferSelect;
 
 export const payables = pgTable("payables", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
   description: text("description").notNull(),
   supplierId: integer("supplier_id"),
   supplierName: text("supplier_name"),
@@ -278,6 +378,7 @@ export type Payable = typeof payables.$inferSelect;
 
 export const receivables = pgTable("receivables", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
   description: text("description").notNull(),
   customerId: integer("customer_id"),
   customerName: text("customer_name"),

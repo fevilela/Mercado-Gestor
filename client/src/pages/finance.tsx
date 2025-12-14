@@ -111,6 +111,16 @@ interface Receivable {
   createdAt: string;
 }
 
+interface Supplier {
+  id: number;
+  name: string;
+}
+
+interface Customer {
+  id: number;
+  name: string;
+}
+
 const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8"];
 
 const PAYABLE_CATEGORIES = [
@@ -162,12 +172,34 @@ export default function Finance() {
     },
   });
 
+  const { data: suppliers = [] } = useQuery<Supplier[]>({
+    queryKey: ["/api/suppliers"],
+    queryFn: async () => {
+      const res = await fetch("/api/suppliers");
+      if (!res.ok) throw new Error("Failed to fetch suppliers");
+      return res.json();
+    },
+  });
+
+  const { data: customers = [] } = useQuery<Customer[]>({
+    queryKey: ["/api/customers"],
+    queryFn: async () => {
+      const res = await fetch("/api/customers");
+      if (!res.ok) throw new Error("Failed to fetch customers");
+      return res.json();
+    },
+  });
+
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+
   const createPayableMutation = useMutation({
     mutationFn: async (data: {
       description: string;
       category: string;
       amount: string;
       dueDate: string;
+      supplierId?: number;
       supplierName?: string;
       notes?: string;
     }) => {
@@ -187,6 +219,7 @@ export default function Finance() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payables"] });
       setPayableDialogOpen(false);
+      setSelectedSupplierId("");
       toast({ title: "Conta a pagar criada com sucesso" });
     },
     onError: () => {
@@ -200,6 +233,7 @@ export default function Finance() {
       category: string;
       amount: string;
       dueDate: string;
+      customerId?: number;
       customerName?: string;
       notes?: string;
     }) => {
@@ -219,6 +253,7 @@ export default function Finance() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/receivables"] });
       setReceivableDialogOpen(false);
+      setSelectedCustomerId("");
       toast({ title: "Conta a receber criada com sucesso" });
     },
     onError: () => {
@@ -452,12 +487,16 @@ export default function Finance() {
   const handlePayableSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    const selectedSupplier = suppliers.find(
+      (s) => s.id.toString() === selectedSupplierId
+    );
     createPayableMutation.mutate({
       description: formData.get("description") as string,
       category: formData.get("category") as string,
       amount: formData.get("amount") as string,
       dueDate: formData.get("dueDate") as string,
-      supplierName: formData.get("supplierName") as string,
+      supplierId: selectedSupplier ? selectedSupplier.id : undefined,
+      supplierName: selectedSupplier ? selectedSupplier.name : undefined,
       notes: formData.get("notes") as string,
     });
   };
@@ -465,12 +504,16 @@ export default function Finance() {
   const handleReceivableSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    const selectedCustomer = customers.find(
+      (c) => c.id.toString() === selectedCustomerId
+    );
     createReceivableMutation.mutate({
       description: formData.get("description") as string,
       category: formData.get("category") as string,
       amount: formData.get("amount") as string,
       dueDate: formData.get("dueDate") as string,
-      customerName: formData.get("customerName") as string,
+      customerId: selectedCustomer ? selectedCustomer.id : undefined,
+      customerName: selectedCustomer ? selectedCustomer.name : undefined,
       notes: formData.get("notes") as string,
     });
   };
@@ -788,8 +831,25 @@ export default function Finance() {
                             />
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="supplierName">Fornecedor</Label>
-                            <Input id="supplierName" name="supplierName" />
+                            <Label htmlFor="supplierId">Fornecedor</Label>
+                            <Select
+                              value={selectedSupplierId}
+                              onValueChange={setSelectedSupplierId}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione um fornecedor..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {suppliers.map((supplier) => (
+                                  <SelectItem
+                                    key={supplier.id}
+                                    value={supplier.id.toString()}
+                                  >
+                                    {supplier.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                           <div className="grid gap-2">
                             <Label htmlFor="notes">Observações</Label>
@@ -972,8 +1032,25 @@ export default function Finance() {
                             />
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="customerName">Cliente</Label>
-                            <Input id="customerName" name="customerName" />
+                            <Label htmlFor="customerId">Cliente</Label>
+                            <Select
+                              value={selectedCustomerId}
+                              onValueChange={setSelectedCustomerId}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione um cliente..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {customers.map((customer) => (
+                                  <SelectItem
+                                    key={customer.id}
+                                    value={customer.id.toString()}
+                                  >
+                                    {customer.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                           <div className="grid gap-2">
                             <Label htmlFor="notes">Observações</Label>
