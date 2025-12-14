@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import Layout from "@/components/layout";
@@ -37,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Plus,
   UserCog,
@@ -46,11 +47,19 @@ import {
   Loader2,
   Pencil,
   Trash2,
+  Settings,
 } from "lucide-react";
 
 interface Role {
   id: number;
   name: string;
+  description: string | null;
+}
+
+interface Permission {
+  id: number;
+  module: string;
+  action: string;
   description: string | null;
 }
 
@@ -80,6 +89,9 @@ export default function Users() {
     password: "",
     roleId: "",
   });
+  const [permDialogOpen, setPermDialogOpen] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+  const [selectedPermissions, setSelectedPermissions] = useState<number[]>([]);
 
   const { data: users = [], isLoading: usersLoading } = useQuery<UserData[]>({
     queryKey: ["/api/auth/users"],
@@ -96,6 +108,57 @@ export default function Users() {
       const res = await fetch("/api/auth/roles");
       if (!res.ok) throw new Error("Failed to fetch roles");
       return res.json();
+    },
+  });
+
+  const { data: allPermissions = [] } = useQuery<Permission[]>({
+    queryKey: ["/api/auth/permissions"],
+    queryFn: async () => {
+      const res = await fetch("/api/auth/permissions");
+      if (!res.ok) throw new Error("Failed to fetch permissions");
+      return res.json();
+    },
+  });
+
+  const {
+    data: rolePermissions = [],
+    refetch: refetchRolePermissions,
+    isFetching: isLoadingRolePerms,
+  } = useQuery<number[]>({
+    queryKey: ["/api/auth/roles", selectedRole?.id, "permissions"],
+    queryFn: async () => {
+      if (!selectedRole) return [];
+      const res = await fetch(`/api/auth/roles/${selectedRole.id}/permissions`);
+      if (!res.ok) throw new Error("Failed to fetch role permissions");
+      return res.json();
+    },
+    enabled: !!selectedRole,
+  });
+
+  const updatePermissionsMutation = useMutation({
+    mutationFn: async ({
+      roleId,
+      permissionIds,
+    }: {
+      roleId: number;
+      permissionIds: number[];
+    }) => {
+      const res = await fetch(`/api/auth/roles/${roleId}/permissions`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permissionIds }),
+      });
+      if (!res.ok) throw new Error("Erro ao atualizar permissoes");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/roles"] });
+      toast({ title: "Permissoes atualizadas com sucesso!" });
+      setPermDialogOpen(false);
+      setSelectedRole(null);
+    },
+    onError: () => {
+      toast({ title: "Erro ao atualizar permissoes", variant: "destructive" });
     },
   });
 
@@ -235,6 +298,59 @@ export default function Users() {
   };
 
   const canManageUsers = hasPermission("users:manage");
+
+  useEffect(() => {
+    if (rolePermissions.length > 0) {
+      setSelectedPermissions(rolePermissions);
+    } else if (selectedRole) {
+      setSelectedPermissions([]);
+    }
+  }, [rolePermissions, selectedRole]);
+
+  const openPermissionDialog = async (role: Role) => {
+    setSelectedRole(role);
+    setSelectedPermissions([]);
+    setPermDialogOpen(true);
+    setTimeout(() => refetchRolePermissions(), 100);
+  };
+
+  const handlePermissionToggle = (permId: number) => {
+    setSelectedPermissions((prev) =>
+      prev.includes(permId)
+        ? prev.filter((id) => id !== permId)
+        : [...prev, permId]
+    );
+  };
+
+  const handleSavePermissions = () => {
+    if (selectedRole) {
+      updatePermissionsMutation.mutate({
+        roleId: selectedRole.id,
+        permissionIds: selectedPermissions,
+      });
+    }
+  };
+
+  const groupPermissionsByModule = (perms: Permission[]) => {
+    const grouped: Record<string, Permission[]> = {};
+    for (const perm of perms) {
+      if (!grouped[perm.module]) grouped[perm.module] = [];
+      grouped[perm.module].push(perm);
+    }
+    return grouped;
+  };
+
+  const moduleLabels: Record<string, string> = {
+    pos: "PDV",
+    inventory: "Estoque",
+    customers: "Clientes",
+    suppliers: "Fornecedores",
+    finance: "Financeiro",
+    reports: "Relatorios",
+    settings: "Configuracoes",
+    fiscal: "Fiscal",
+    users: "Usuarios",
+  };
 
   return (
     <Layout>
@@ -489,6 +605,133 @@ export default function Users() {
               )}
             </CardContent>
           </Card>
+
+          {canManageUsers && (
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5" />
+                  Perfis e Permissoes
+                </CardTitle>
+                <CardDescription>
+                  Gerencie as permissoes de cada perfil
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Perfil</TableHead>
+                      <TableHead>Descricao</TableHead>
+                      <TableHead className="text-right">Acoes</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {roles.map((role) => (
+                      <TableRow
+                        key={role.id}
+                        data-testid={`row-role-${role.id}`}
+                      >
+                        <TableCell className="font-medium">
+                          {role.name}
+                        </TableCell>
+                        <TableCell>{role.description || "-"}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openPermissionDialog(role)}
+                            data-testid={`button-edit-permissions-${role.id}`}
+                          >
+                            <Settings className="h-4 w-4 mr-2" />
+                            Permissoes
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+
+          <Dialog
+            open={permDialogOpen}
+            onOpenChange={(open) => {
+              setPermDialogOpen(open);
+              if (!open) setSelectedRole(null);
+            }}
+          >
+            <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Permissoes - {selectedRole?.name}</DialogTitle>
+              </DialogHeader>
+              {isLoadingRolePerms ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {Object.entries(groupPermissionsByModule(allPermissions)).map(
+                    ([module, perms]) => (
+                      <div key={module} className="space-y-2">
+                        <h4 className="font-semibold text-sm uppercase text-muted-foreground">
+                          {moduleLabels[module] || module}
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {perms.map((perm) => (
+                            <div
+                              key={perm.id}
+                              className="flex items-center space-x-2 p-2 rounded border"
+                              data-testid={`perm-item-${perm.id}`}
+                            >
+                              <Checkbox
+                                id={`perm-${perm.id}`}
+                                checked={selectedPermissions.includes(perm.id)}
+                                onCheckedChange={() =>
+                                  handlePermissionToggle(perm.id)
+                                }
+                                data-testid={`checkbox-perm-${perm.id}`}
+                              />
+                              <label
+                                htmlFor={`perm-${perm.id}`}
+                                className="text-sm cursor-pointer flex-1"
+                              >
+                                {perm.description ||
+                                  `${perm.module}:${perm.action}`}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+              <div className="flex justify-end gap-2 mt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setPermDialogOpen(false)}
+                  data-testid="button-cancel-permissions"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleSavePermissions}
+                  disabled={
+                    updatePermissionsMutation.isPending || isLoadingRolePerms
+                  }
+                  data-testid="button-save-permissions"
+                >
+                  {updatePermissionsMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Salvar Permissoes"
+                  )}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </Layout>

@@ -19,6 +19,7 @@ import {
   insertCompanySettingsSchema,
   insertPayableSchema,
   insertReceivableSchema,
+  insertNotificationSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
@@ -1435,6 +1436,109 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Failed to delete receivable:", error);
       res.status(500).json({ error: "Failed to delete receivable" });
+    }
+  });
+
+  app.get("/api/notifications", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      const userId = getUserId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const notificationsList = await storage.getAllNotifications(
+        companyId,
+        userId || undefined
+      );
+      res.json(notificationsList);
+    } catch (error) {
+      console.error("Failed to fetch notifications:", error);
+      res.status(500).json({ error: "Falha ao buscar notificações" });
+    }
+  });
+
+  app.get("/api/notifications/count", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      const userId = getUserId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const count = await storage.getUnreadNotificationsCount(
+        companyId,
+        userId || undefined
+      );
+      res.json({ count });
+    } catch (error) {
+      console.error("Failed to fetch notification count:", error);
+      res
+        .status(500)
+        .json({ error: "Falha ao buscar contagem de notificações" });
+    }
+  });
+
+  app.post("/api/notifications", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const validated = insertNotificationSchema.parse({
+        ...req.body,
+        companyId,
+      });
+      const notification = await storage.createNotification(validated);
+      res.status(201).json(notification);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to create notification:", error);
+      res.status(500).json({ error: "Falha ao criar notificação" });
+    }
+  });
+
+  app.patch("/api/notifications/:id/read", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const id = parseInt(req.params.id);
+      const notification = await storage.markNotificationAsRead(id, companyId);
+      if (!notification) {
+        return res.status(404).json({ error: "Notificação não encontrada" });
+      }
+      res.json(notification);
+    } catch (error) {
+      console.error("Failed to mark notification as read:", error);
+      res.status(500).json({ error: "Falha ao marcar notificação como lida" });
+    }
+  });
+
+  app.post("/api/notifications/read-all", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      const userId = getUserId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      await storage.markAllNotificationsAsRead(companyId, userId || undefined);
+      res.json({ message: "Todas as notificações foram marcadas como lidas" });
+    } catch (error) {
+      console.error("Failed to mark all notifications as read:", error);
+      res
+        .status(500)
+        .json({ error: "Falha ao marcar notificações como lidas" });
+    }
+  });
+
+  app.delete("/api/notifications/:id", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const id = parseInt(req.params.id);
+      await storage.deleteNotification(id, companyId);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Failed to delete notification:", error);
+      res.status(500).json({ error: "Falha ao excluir notificação" });
     }
   });
 

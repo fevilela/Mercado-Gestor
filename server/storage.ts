@@ -25,6 +25,8 @@ import {
   type InsertPayable,
   type Receivable,
   type InsertReceivable,
+  type Notification,
+  type InsertNotification,
   users,
   products,
   productVariations,
@@ -38,6 +40,7 @@ import {
   companySettings,
   payables,
   receivables,
+  notifications,
 } from "@shared/schema";
 import { db, pool } from "./db";
 import { eq, desc, sql, gte, and } from "drizzle-orm";
@@ -145,6 +148,22 @@ export interface IStorage {
     receivable: Partial<InsertReceivable>
   ): Promise<Receivable | undefined>;
   deleteReceivable(id: number, companyId: number): Promise<boolean>;
+
+  getAllNotifications(
+    companyId: number,
+    userId?: string
+  ): Promise<Notification[]>;
+  getUnreadNotificationsCount(
+    companyId: number,
+    userId?: string
+  ): Promise<number>;
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  markNotificationAsRead(
+    id: number,
+    companyId: number
+  ): Promise<Notification | undefined>;
+  markAllNotificationsAsRead(companyId: number, userId?: string): Promise<void>;
+  deleteNotification(id: number, companyId: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -648,6 +667,100 @@ export class DatabaseStorage implements IStorage {
     await db
       .delete(receivables)
       .where(and(eq(receivables.id, id), eq(receivables.companyId, companyId)));
+    return true;
+  }
+
+  async getAllNotifications(
+    companyId: number,
+    userId?: string
+  ): Promise<Notification[]> {
+    if (userId) {
+      return await db
+        .select()
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.companyId, companyId),
+            sql`(${notifications.userId} = ${userId} OR ${notifications.userId} IS NULL)`
+          )
+        )
+        .orderBy(desc(notifications.createdAt))
+        .limit(50);
+    }
+    return await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.companyId, companyId))
+      .orderBy(desc(notifications.createdAt))
+      .limit(50);
+  }
+
+  async getUnreadNotificationsCount(
+    companyId: number,
+    userId?: string
+  ): Promise<number> {
+    const condition = userId
+      ? and(
+          eq(notifications.companyId, companyId),
+          eq(notifications.isRead, false),
+          sql`(${notifications.userId} = ${userId} OR ${notifications.userId} IS NULL)`
+        )
+      : and(
+          eq(notifications.companyId, companyId),
+          eq(notifications.isRead, false)
+        );
+
+    const [result] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(notifications)
+      .where(condition);
+    return Number(result?.count || 0);
+  }
+
+  async createNotification(
+    notification: InsertNotification
+  ): Promise<Notification> {
+    const [newNotification] = await db
+      .insert(notifications)
+      .values(notification)
+      .returning();
+    return newNotification;
+  }
+
+  async markNotificationAsRead(
+    id: number,
+    companyId: number
+  ): Promise<Notification | undefined> {
+    const [updated] = await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(
+        and(eq(notifications.id, id), eq(notifications.companyId, companyId))
+      )
+      .returning();
+    return updated || undefined;
+  }
+
+  async markAllNotificationsAsRead(
+    companyId: number,
+    userId?: string
+  ): Promise<void> {
+    const condition = userId
+      ? and(
+          eq(notifications.companyId, companyId),
+          sql`(${notifications.userId} = ${userId} OR ${notifications.userId} IS NULL)`
+        )
+      : eq(notifications.companyId, companyId);
+
+    await db.update(notifications).set({ isRead: true }).where(condition);
+  }
+
+  async deleteNotification(id: number, companyId: number): Promise<boolean> {
+    await db
+      .delete(notifications)
+      .where(
+        and(eq(notifications.id, id), eq(notifications.companyId, companyId))
+      );
     return true;
   }
 }

@@ -398,3 +398,26 @@ export const insertReceivableSchema = createInsertSchema(receivables).omit({
 });
 export type InsertReceivable = z.infer<typeof insertReceivableSchema>;
 export type Receivable = typeof receivables.$inferSelect;
+
+// ============================================
+// NOTIFICATIONS: Sistema de Notificações
+// ============================================
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  userId: varchar("user_id"),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  referenceId: integer("reference_id"),
+  referenceType: text("reference_type"),
+  isRead: boolean("is_read").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;

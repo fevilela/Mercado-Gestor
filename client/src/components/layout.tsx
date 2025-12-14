@@ -12,6 +12,7 @@ import {
   Bell,
   Menu,
   ChevronDown,
+  User,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -26,7 +27,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
+import { useAuth } from "@/lib/auth";
+import { useQuery } from "@tanstack/react-query";
 
 const sidebarItems = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/" },
@@ -36,12 +40,49 @@ const sidebarItems = [
   { icon: Wallet, label: "Financeiro", href: "/finance" },
   { icon: Users, label: "Clientes & Fornecedores", href: "/contacts" },
   { icon: BarChart3, label: "Relatórios", href: "/reports" },
+  { icon: User, label: "Usuários", href: "/users" },
   { icon: Settings, label: "Configurações", href: "/settings" },
 ];
 
+interface Notification {
+  id: number;
+  type: string;
+  title: string;
+  message: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
 export default function Layout({ children }: { children: React.ReactNode }) {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const { user, company, logout } = useAuth();
+
+  const { data: notifications = [] } = useQuery<Notification[]>({
+    queryKey: ["/api/notifications"],
+    queryFn: async () => {
+      const res = await fetch("/api/notifications?unread=true");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchInterval: 30000,
+  });
+
+  const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setLocation("/login");
+  };
 
   const SidebarContent = () => (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -75,20 +116,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </nav>
       </div>
       <div className="border-t border-sidebar-border p-4">
-        <div className="flex items-center gap-3 rounded-lg bg-sidebar-accent/50 p-3 text-sm">
-          <Avatar className="h-9 w-9 border border-sidebar-border">
-            <AvatarImage src="https://github.com/shadcn.png" />
-            <AvatarFallback>JD</AvatarFallback>
-          </Avatar>
-          <div className="flex flex-col overflow-hidden">
-            <span className="truncate font-semibold text-sidebar-foreground">
-              João Silva
-            </span>
-            <span className="truncate text-xs text-sidebar-foreground/70">
-              Gerente
-            </span>
+        <Link href="/profile">
+          <div className="flex items-center gap-3 rounded-lg bg-sidebar-accent/50 p-3 text-sm cursor-pointer hover:bg-sidebar-accent transition-colors">
+            <Avatar className="h-9 w-9 border border-sidebar-border">
+              <AvatarFallback>
+                {user ? getInitials(user.name) : "?"}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex flex-col overflow-hidden">
+              <span className="truncate font-semibold text-sidebar-foreground">
+                {user?.name || "Usuário"}
+              </span>
+              <span className="truncate text-xs text-sidebar-foreground/70">
+                {user?.role?.name || "Carregando..."}
+              </span>
+            </div>
           </div>
-        </div>
+        </Link>
       </div>
     </div>
   );
@@ -127,27 +171,97 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5 text-muted-foreground" />
-              <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-destructive border border-background"></span>
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="relative"
+                  data-testid="button-notifications"
+                >
+                  <Bell className="h-5 w-5 text-muted-foreground" />
+                  {unreadCount > 0 && (
+                    <Badge
+                      variant="destructive"
+                      className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
+                    >
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </Badge>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-80">
+                <DropdownMenuLabel>Notificações</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {notifications.length === 0 ? (
+                  <div className="p-4 text-center text-sm text-muted-foreground">
+                    Nenhuma notificação
+                  </div>
+                ) : (
+                  notifications.slice(0, 5).map((notification) => (
+                    <DropdownMenuItem
+                      key={notification.id}
+                      className="flex flex-col items-start gap-1 p-3"
+                    >
+                      <span className="font-medium text-sm">
+                        {notification.title}
+                      </span>
+                      <span className="text-xs text-muted-foreground line-clamp-2">
+                        {notification.message}
+                      </span>
+                    </DropdownMenuItem>
+                  ))
+                )}
+                {notifications.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="justify-center text-primary"
+                      onClick={() => setLocation("/notifications")}
+                    >
+                      Ver todas as notificações
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="gap-2 pl-2">
+                <Button
+                  variant="ghost"
+                  className="gap-2 pl-2"
+                  data-testid="button-user-menu"
+                >
                   <span className="hidden sm:inline-block text-sm font-medium">
-                    Minha Loja
+                    {company?.nomeFantasia ||
+                      company?.razaoSocial ||
+                      "Minha Loja"}
                   </span>
                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Conta</DropdownMenuLabel>
+                <DropdownMenuLabel>{user?.name || "Conta"}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>Perfil</DropdownMenuItem>
-                <DropdownMenuItem>Configurações</DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setLocation("/profile")}
+                  data-testid="menu-profile"
+                >
+                  <User className="mr-2 h-4 w-4" /> Perfil
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setLocation("/settings")}
+                  data-testid="menu-settings"
+                >
+                  <Settings className="mr-2 h-4 w-4" /> Configurações
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive">
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={handleLogout}
+                  data-testid="menu-logout"
+                >
                   <LogOut className="mr-2 h-4 w-4" /> Sair
                 </DropdownMenuItem>
               </DropdownMenuContent>

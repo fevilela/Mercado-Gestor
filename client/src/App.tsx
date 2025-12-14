@@ -16,6 +16,7 @@ import Settings from "@/pages/settings";
 import Login from "@/pages/login";
 import Register from "@/pages/register";
 import Users from "@/pages/users";
+import Profile from "@/pages/profile";
 import { Loader2 } from "lucide-react";
 
 function ProtectedRoute({
@@ -97,6 +98,9 @@ function Router() {
       </Route>
       <Route path="/users">
         <ProtectedRoute component={Users} />
+      </Route>
+      <Route path="/profile">
+        <ProtectedRoute component={Profile} />
       </Route>
       <Route component={NotFound} />
     </Switch>

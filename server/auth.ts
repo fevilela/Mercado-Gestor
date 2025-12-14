@@ -8,6 +8,7 @@ import {
   roles,
   permissions,
   rolePermissions,
+  companySettings,
   insertCompanySchema,
   insertUserSchema,
   type Company,
@@ -153,6 +154,7 @@ async function getUserPermissions(userId: string): Promise<string[]> {
 
 const registerCompanySchema = z.object({
   cnpj: z.string().min(14).max(18),
+  ie: z.string().optional(),
   razaoSocial: z.string().min(3),
   nomeFantasia: z.string().optional(),
   email: z.string().email(),
@@ -198,6 +200,14 @@ authRouter.post("/register", async (req, res) => {
       .returning();
 
     await createDefaultRolesForCompany(company.id);
+
+    await db.insert(companySettings).values({
+      companyId: company.id,
+      cnpj: company.cnpj,
+      ie: data.ie || null,
+      razaoSocial: company.razaoSocial,
+      nomeFantasia: company.nomeFantasia,
+    });
 
     const adminRole = await db
       .select()
@@ -555,6 +565,102 @@ authRouter.delete("/users/:id", async (req, res) => {
     res.json({ message: "Usuário excluído com sucesso" });
   } catch (error) {
     res.status(500).json({ error: "Erro ao excluir usuário" });
+  }
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(6),
+});
+
+authRouter.post("/change-password", async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: "Não autenticado" });
+  }
+
+  try {
+    const { currentPassword, newPassword } = changePasswordSchema.parse(
+      req.body
+    );
+
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, req.session.userId))
+      .limit(1);
+
+    if (!user) {
+      return res.status(404).json({ error: "Usuário não encontrado" });
+    }
+
+    const validPassword = await bcrypt.compare(currentPassword, user.password);
+    if (!validPassword) {
+      return res.status(400).json({ error: "Senha atual incorreta" });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await db
+      .update(users)
+      .set({ password: hashedPassword })
+      .where(eq(users.id, req.session.userId));
+
+    res.json({ message: "Senha alterada com sucesso" });
+  } catch (error) {
+    console.error("Change password error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados inválidos" });
+    }
+    res.status(500).json({ error: "Erro ao alterar senha" });
+  }
+});
+
+authRouter.get("/permissions", async (req, res) => {
+  try {
+    const allPermissions = await db.select().from(permissions);
+    res.json(allPermissions);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar permissões" });
+  }
+});
+
+authRouter.get("/roles/:id/permissions", async (req, res) => {
+  if (!req.session.companyId) {
+    return res.status(401).json({ error: "Não autenticado" });
+  }
+
+  try {
+    const roleId = parseInt(req.params.id);
+    const rolePerms = await db
+      .select({
+        permissionId: rolePermissions.permissionId,
+      })
+      .from(rolePermissions)
+      .where(eq(rolePermissions.roleId, roleId));
+
+    res.json(rolePerms.map((p) => p.permissionId));
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar permissões do perfil" });
+  }
+});
+
+authRouter.put("/roles/:id/permissions", async (req, res) => {
+  if (!req.session.companyId) {
+    return res.status(401).json({ error: "Não autenticado" });
+  }
+
+  try {
+    const roleId = parseInt(req.params.id);
+    const { permissionIds } = req.body as { permissionIds: number[] };
+
+    await db.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+
+    for (const permissionId of permissionIds) {
+      await db.insert(rolePermissions).values({ roleId, permissionId });
+    }
+
+    res.json({ message: "Permissões atualizadas com sucesso" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar permissões" });
   }
 });
 
