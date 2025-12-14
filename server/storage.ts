@@ -40,23 +40,25 @@ import {
   receivables,
 } from "@shared/schema";
 import { db, pool } from "./db";
-import { eq, desc, sql, gte } from "drizzle-orm";
+import { eq, desc, sql, gte, and } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
 
-  getAllProducts(): Promise<Product[]>;
-  getProduct(id: number): Promise<Product | undefined>;
+  getAllProducts(companyId: number): Promise<Product[]>;
+  getProduct(id: number, companyId: number): Promise<Product | undefined>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(
     id: number,
+    companyId: number,
     product: Partial<InsertProduct>
   ): Promise<Product | undefined>;
-  deleteProduct(id: number): Promise<boolean>;
+  deleteProduct(id: number, companyId: number): Promise<boolean>;
   updateProductStock(
     id: number,
+    companyId: number,
     quantity: number
   ): Promise<Product | undefined>;
 
@@ -74,62 +76,75 @@ export interface IStorage {
   createKitItem(item: InsertKitItem): Promise<KitItem>;
   deleteKitItems(kitProductId: number): Promise<boolean>;
 
-  getAllCustomers(): Promise<Customer[]>;
-  getCustomer(id: number): Promise<Customer | undefined>;
+  getAllCustomers(companyId: number): Promise<Customer[]>;
+  getCustomer(id: number, companyId: number): Promise<Customer | undefined>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   updateCustomer(
     id: number,
+    companyId: number,
     customer: Partial<InsertCustomer>
   ): Promise<Customer | undefined>;
+  deleteCustomer(id: number, companyId: number): Promise<boolean>;
 
-  getAllSuppliers(): Promise<Supplier[]>;
-  getSupplier(id: number): Promise<Supplier | undefined>;
+  getAllSuppliers(companyId: number): Promise<Supplier[]>;
+  getSupplier(id: number, companyId: number): Promise<Supplier | undefined>;
   createSupplier(supplier: InsertSupplier): Promise<Supplier>;
   updateSupplier(
     id: number,
+    companyId: number,
     supplier: Partial<InsertSupplier>
   ): Promise<Supplier | undefined>;
+  deleteSupplier(id: number, companyId: number): Promise<boolean>;
 
-  getAllSales(): Promise<Sale[]>;
-  getSale(id: number): Promise<Sale | undefined>;
+  getAllSales(companyId: number): Promise<Sale[]>;
+  getSale(id: number, companyId: number): Promise<Sale | undefined>;
   createSale(sale: InsertSale, items: InsertSaleItem[]): Promise<Sale>;
   updateSaleNfceStatus(
     id: number,
+    companyId: number,
     status: string,
     protocol?: string,
     key?: string
   ): Promise<Sale | undefined>;
   getSaleItems(saleId: number): Promise<SaleItem[]>;
   getSaleItemsBatch(saleIds: number[]): Promise<Map<number, SaleItem[]>>;
-  getSalesStats(): Promise<{ today: number; week: number; month: number }>;
+  getSalesStats(
+    companyId: number
+  ): Promise<{ today: number; week: number; month: number }>;
 
   createInventoryMovement(
     movement: InsertInventoryMovement
   ): Promise<InventoryMovement>;
-  getInventoryMovements(productId: number): Promise<InventoryMovement[]>;
+  getInventoryMovements(
+    productId: number,
+    companyId: number
+  ): Promise<InventoryMovement[]>;
 
-  getCompanySettings(): Promise<CompanySettings | undefined>;
+  getCompanySettings(companyId: number): Promise<CompanySettings | undefined>;
   updateCompanySettings(
+    companyId: number,
     settings: Partial<InsertCompanySettings>
   ): Promise<CompanySettings>;
 
-  getAllPayables(): Promise<Payable[]>;
-  getPayable(id: number): Promise<Payable | undefined>;
+  getAllPayables(companyId: number): Promise<Payable[]>;
+  getPayable(id: number, companyId: number): Promise<Payable | undefined>;
   createPayable(payable: InsertPayable): Promise<Payable>;
   updatePayable(
     id: number,
+    companyId: number,
     payable: Partial<InsertPayable>
   ): Promise<Payable | undefined>;
-  deletePayable(id: number): Promise<boolean>;
+  deletePayable(id: number, companyId: number): Promise<boolean>;
 
-  getAllReceivables(): Promise<Receivable[]>;
-  getReceivable(id: number): Promise<Receivable | undefined>;
+  getAllReceivables(companyId: number): Promise<Receivable[]>;
+  getReceivable(id: number, companyId: number): Promise<Receivable | undefined>;
   createReceivable(receivable: InsertReceivable): Promise<Receivable>;
   updateReceivable(
     id: number,
+    companyId: number,
     receivable: Partial<InsertReceivable>
   ): Promise<Receivable | undefined>;
-  deleteReceivable(id: number): Promise<boolean>;
+  deleteReceivable(id: number, companyId: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -151,15 +166,22 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async getAllProducts(): Promise<Product[]> {
-    return await db.select().from(products).orderBy(desc(products.id));
+  async getAllProducts(companyId: number): Promise<Product[]> {
+    return await db
+      .select()
+      .from(products)
+      .where(eq(products.companyId, companyId))
+      .orderBy(desc(products.id));
   }
 
-  async getProduct(id: number): Promise<Product | undefined> {
+  async getProduct(
+    id: number,
+    companyId: number
+  ): Promise<Product | undefined> {
     const [product] = await db
       .select()
       .from(products)
-      .where(eq(products.id, id));
+      .where(and(eq(products.id, id), eq(products.companyId, companyId)));
     return product || undefined;
   }
 
@@ -170,32 +192,36 @@ export class DatabaseStorage implements IStorage {
 
   async updateProduct(
     id: number,
+    companyId: number,
     product: Partial<InsertProduct>
   ): Promise<Product | undefined> {
     const [updated] = await db
       .update(products)
       .set({ ...product, updatedAt: new Date() })
-      .where(eq(products.id, id))
+      .where(and(eq(products.id, id), eq(products.companyId, companyId)))
       .returning();
     return updated || undefined;
   }
 
-  async deleteProduct(id: number): Promise<boolean> {
+  async deleteProduct(id: number, companyId: number): Promise<boolean> {
     await this.deleteProductVariations(id);
     await this.deleteProductMedia(id);
     await this.deleteKitItems(id);
-    await db.delete(products).where(eq(products.id, id));
+    await db
+      .delete(products)
+      .where(and(eq(products.id, id), eq(products.companyId, companyId)));
     return true;
   }
 
   async updateProductStock(
     id: number,
+    companyId: number,
     quantity: number
   ): Promise<Product | undefined> {
     const [updated] = await db
       .update(products)
       .set({ stock: sql`${products.stock} + ${quantity}` })
-      .where(eq(products.id, id))
+      .where(and(eq(products.id, id), eq(products.companyId, companyId)))
       .returning();
     return updated || undefined;
   }
@@ -258,15 +284,22 @@ export class DatabaseStorage implements IStorage {
     return true;
   }
 
-  async getAllCustomers(): Promise<Customer[]> {
-    return await db.select().from(customers).orderBy(desc(customers.id));
+  async getAllCustomers(companyId: number): Promise<Customer[]> {
+    return await db
+      .select()
+      .from(customers)
+      .where(eq(customers.companyId, companyId))
+      .orderBy(desc(customers.id));
   }
 
-  async getCustomer(id: number): Promise<Customer | undefined> {
+  async getCustomer(
+    id: number,
+    companyId: number
+  ): Promise<Customer | undefined> {
     const [customer] = await db
       .select()
       .from(customers)
-      .where(eq(customers.id, id));
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
     return customer || undefined;
   }
 
@@ -280,25 +313,40 @@ export class DatabaseStorage implements IStorage {
 
   async updateCustomer(
     id: number,
+    companyId: number,
     customer: Partial<InsertCustomer>
   ): Promise<Customer | undefined> {
     const [updated] = await db
       .update(customers)
       .set(customer)
-      .where(eq(customers.id, id))
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)))
       .returning();
     return updated || undefined;
   }
 
-  async getAllSuppliers(): Promise<Supplier[]> {
-    return await db.select().from(suppliers).orderBy(desc(suppliers.id));
+  async deleteCustomer(id: number, companyId: number): Promise<boolean> {
+    await db
+      .delete(customers)
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
+    return true;
   }
 
-  async getSupplier(id: number): Promise<Supplier | undefined> {
+  async getAllSuppliers(companyId: number): Promise<Supplier[]> {
+    return await db
+      .select()
+      .from(suppliers)
+      .where(eq(suppliers.companyId, companyId))
+      .orderBy(desc(suppliers.id));
+  }
+
+  async getSupplier(
+    id: number,
+    companyId: number
+  ): Promise<Supplier | undefined> {
     const [supplier] = await db
       .select()
       .from(suppliers)
-      .where(eq(suppliers.id, id));
+      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyId)));
     return supplier || undefined;
   }
 
@@ -312,22 +360,37 @@ export class DatabaseStorage implements IStorage {
 
   async updateSupplier(
     id: number,
+    companyId: number,
     supplier: Partial<InsertSupplier>
   ): Promise<Supplier | undefined> {
     const [updated] = await db
       .update(suppliers)
       .set(supplier)
-      .where(eq(suppliers.id, id))
+      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyId)))
       .returning();
     return updated || undefined;
   }
 
-  async getAllSales(): Promise<Sale[]> {
-    return await db.select().from(sales).orderBy(desc(sales.id));
+  async deleteSupplier(id: number, companyId: number): Promise<boolean> {
+    await db
+      .delete(suppliers)
+      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyId)));
+    return true;
   }
 
-  async getSale(id: number): Promise<Sale | undefined> {
-    const [sale] = await db.select().from(sales).where(eq(sales.id, id));
+  async getAllSales(companyId: number): Promise<Sale[]> {
+    return await db
+      .select()
+      .from(sales)
+      .where(eq(sales.companyId, companyId))
+      .orderBy(desc(sales.id));
+  }
+
+  async getSale(id: number, companyId: number): Promise<Sale | undefined> {
+    const [sale] = await db
+      .select()
+      .from(sales)
+      .where(and(eq(sales.id, id), eq(sales.companyId, companyId)));
     return sale || undefined;
   }
 
@@ -346,6 +409,7 @@ export class DatabaseStorage implements IStorage {
 
   async updateSaleNfceStatus(
     id: number,
+    companyId: number,
     status: string,
     protocol?: string,
     key?: string
@@ -357,7 +421,7 @@ export class DatabaseStorage implements IStorage {
         ...(protocol && { nfceProtocol: protocol }),
         ...(key && { nfceKey: key }),
       })
-      .where(eq(sales.id, id))
+      .where(and(eq(sales.id, id), eq(sales.companyId, companyId)))
       .returning();
     return updated || undefined;
   }
@@ -391,7 +455,7 @@ export class DatabaseStorage implements IStorage {
     return itemsMap;
   }
 
-  async getSalesStats(): Promise<{
+  async getSalesStats(companyId: number): Promise<{
     today: number;
     week: number;
     month: number;
@@ -410,21 +474,25 @@ export class DatabaseStorage implements IStorage {
         total: sql<number>`COALESCE(SUM(CAST(${sales.total} AS DECIMAL)), 0)`,
       })
       .from(sales)
-      .where(gte(sales.createdAt, today));
+      .where(and(eq(sales.companyId, companyId), gte(sales.createdAt, today)));
 
     const [weekStats] = await db
       .select({
         total: sql<number>`COALESCE(SUM(CAST(${sales.total} AS DECIMAL)), 0)`,
       })
       .from(sales)
-      .where(gte(sales.createdAt, weekAgo));
+      .where(
+        and(eq(sales.companyId, companyId), gte(sales.createdAt, weekAgo))
+      );
 
     const [monthStats] = await db
       .select({
         total: sql<number>`COALESCE(SUM(CAST(${sales.total} AS DECIMAL)), 0)`,
       })
       .from(sales)
-      .where(gte(sales.createdAt, monthAgo));
+      .where(
+        and(eq(sales.companyId, companyId), gte(sales.createdAt, monthAgo))
+      );
 
     return {
       today: Number(todayStats?.total || 0),
@@ -443,23 +511,38 @@ export class DatabaseStorage implements IStorage {
     return newMovement;
   }
 
-  async getInventoryMovements(productId: number): Promise<InventoryMovement[]> {
+  async getInventoryMovements(
+    productId: number,
+    companyId: number
+  ): Promise<InventoryMovement[]> {
     return await db
       .select()
       .from(inventoryMovements)
-      .where(eq(inventoryMovements.productId, productId))
+      .where(
+        and(
+          eq(inventoryMovements.productId, productId),
+          eq(inventoryMovements.companyId, companyId)
+        )
+      )
       .orderBy(desc(inventoryMovements.id));
   }
 
-  async getCompanySettings(): Promise<CompanySettings | undefined> {
-    const [settings] = await db.select().from(companySettings).limit(1);
+  async getCompanySettings(
+    companyId: number
+  ): Promise<CompanySettings | undefined> {
+    const [settings] = await db
+      .select()
+      .from(companySettings)
+      .where(eq(companySettings.companyId, companyId))
+      .limit(1);
     return settings || undefined;
   }
 
   async updateCompanySettings(
+    companyId: number,
     settings: Partial<InsertCompanySettings>
   ): Promise<CompanySettings> {
-    const existing = await this.getCompanySettings();
+    const existing = await this.getCompanySettings(companyId);
 
     if (existing) {
       const [updated] = await db
@@ -471,21 +554,28 @@ export class DatabaseStorage implements IStorage {
     } else {
       const [created] = await db
         .insert(companySettings)
-        .values(settings)
+        .values({ ...settings, companyId })
         .returning();
       return created;
     }
   }
 
-  async getAllPayables(): Promise<Payable[]> {
-    return await db.select().from(payables).orderBy(desc(payables.dueDate));
+  async getAllPayables(companyId: number): Promise<Payable[]> {
+    return await db
+      .select()
+      .from(payables)
+      .where(eq(payables.companyId, companyId))
+      .orderBy(desc(payables.dueDate));
   }
 
-  async getPayable(id: number): Promise<Payable | undefined> {
+  async getPayable(
+    id: number,
+    companyId: number
+  ): Promise<Payable | undefined> {
     const [payable] = await db
       .select()
       .from(payables)
-      .where(eq(payables.id, id));
+      .where(and(eq(payables.id, id), eq(payables.companyId, companyId)));
     return payable || undefined;
   }
 
@@ -496,33 +586,40 @@ export class DatabaseStorage implements IStorage {
 
   async updatePayable(
     id: number,
+    companyId: number,
     payable: Partial<InsertPayable>
   ): Promise<Payable | undefined> {
     const [updated] = await db
       .update(payables)
       .set(payable)
-      .where(eq(payables.id, id))
+      .where(and(eq(payables.id, id), eq(payables.companyId, companyId)))
       .returning();
     return updated || undefined;
   }
 
-  async deletePayable(id: number): Promise<boolean> {
-    await db.delete(payables).where(eq(payables.id, id));
+  async deletePayable(id: number, companyId: number): Promise<boolean> {
+    await db
+      .delete(payables)
+      .where(and(eq(payables.id, id), eq(payables.companyId, companyId)));
     return true;
   }
 
-  async getAllReceivables(): Promise<Receivable[]> {
+  async getAllReceivables(companyId: number): Promise<Receivable[]> {
     return await db
       .select()
       .from(receivables)
+      .where(eq(receivables.companyId, companyId))
       .orderBy(desc(receivables.dueDate));
   }
 
-  async getReceivable(id: number): Promise<Receivable | undefined> {
+  async getReceivable(
+    id: number,
+    companyId: number
+  ): Promise<Receivable | undefined> {
     const [receivable] = await db
       .select()
       .from(receivables)
-      .where(eq(receivables.id, id));
+      .where(and(eq(receivables.id, id), eq(receivables.companyId, companyId)));
     return receivable || undefined;
   }
 
@@ -536,18 +633,21 @@ export class DatabaseStorage implements IStorage {
 
   async updateReceivable(
     id: number,
+    companyId: number,
     receivable: Partial<InsertReceivable>
   ): Promise<Receivable | undefined> {
     const [updated] = await db
       .update(receivables)
       .set(receivable)
-      .where(eq(receivables.id, id))
+      .where(and(eq(receivables.id, id), eq(receivables.companyId, companyId)))
       .returning();
     return updated || undefined;
   }
 
-  async deleteReceivable(id: number): Promise<boolean> {
-    await db.delete(receivables).where(eq(receivables.id, id));
+  async deleteReceivable(id: number, companyId: number): Promise<boolean> {
+    await db
+      .delete(receivables)
+      .where(and(eq(receivables.id, id), eq(receivables.companyId, companyId)));
     return true;
   }
 }
