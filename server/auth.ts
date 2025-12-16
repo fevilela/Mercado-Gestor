@@ -22,15 +22,69 @@ import { z } from "zod";
 const authRouter = Router();
 
 const DEFAULT_PERMISSIONS = [
-  { module: "pos", action: "view", description: "Visualizar PDV" },
+  // PDV - Ponto de Venda
+  { module: "pos", action: "view", description: "Acessar tela do PDV" },
   { module: "pos", action: "sell", description: "Realizar vendas" },
   { module: "pos", action: "discount", description: "Aplicar descontos" },
+  {
+    module: "pos",
+    action: "discount_limit",
+    description: "Desconto acima do limite",
+  },
   { module: "pos", action: "cancel", description: "Cancelar vendas" },
+  { module: "pos", action: "reprint", description: "Reimprimir cupons" },
+  { module: "pos", action: "open_drawer", description: "Abrir gaveta" },
+  { module: "pos", action: "sangria", description: "Realizar sangria" },
+  { module: "pos", action: "suprimento", description: "Realizar suprimento" },
+  { module: "pos", action: "credit_sale", description: "Vender a prazo/fiado" },
+
+  // Estoque - Inventário
   { module: "inventory", action: "view", description: "Visualizar estoque" },
-  { module: "inventory", action: "manage", description: "Gerenciar estoque" },
-  { module: "inventory", action: "import", description: "Importar NFe" },
+  { module: "inventory", action: "create", description: "Cadastrar produtos" },
+  { module: "inventory", action: "edit", description: "Editar produtos" },
+  { module: "inventory", action: "delete", description: "Excluir produtos" },
+  { module: "inventory", action: "adjust", description: "Ajustar estoque" },
+  {
+    module: "inventory",
+    action: "transfer",
+    description: "Transferir estoque",
+  },
+  { module: "inventory", action: "import", description: "Importar NFe/XML" },
+  { module: "inventory", action: "export", description: "Exportar produtos" },
+  {
+    module: "inventory",
+    action: "view_cost",
+    description: "Ver preço de custo",
+  },
+  { module: "inventory", action: "edit_price", description: "Alterar preços" },
+  {
+    module: "inventory",
+    action: "view_margin",
+    description: "Ver margem de lucro",
+  },
+
+  // Clientes
   { module: "customers", action: "view", description: "Visualizar clientes" },
-  { module: "customers", action: "manage", description: "Gerenciar clientes" },
+  { module: "customers", action: "create", description: "Cadastrar clientes" },
+  { module: "customers", action: "edit", description: "Editar clientes" },
+  { module: "customers", action: "delete", description: "Excluir clientes" },
+  {
+    module: "customers",
+    action: "view_credit",
+    description: "Ver limite de crédito",
+  },
+  {
+    module: "customers",
+    action: "edit_credit",
+    description: "Alterar limite de crédito",
+  },
+  {
+    module: "customers",
+    action: "view_history",
+    description: "Ver histórico de compras",
+  },
+
+  // Fornecedores
   {
     module: "suppliers",
     action: "view",
@@ -38,12 +92,93 @@ const DEFAULT_PERMISSIONS = [
   },
   {
     module: "suppliers",
-    action: "manage",
-    description: "Gerenciar fornecedores",
+    action: "create",
+    description: "Cadastrar fornecedores",
   },
+  { module: "suppliers", action: "edit", description: "Editar fornecedores" },
+  {
+    module: "suppliers",
+    action: "delete",
+    description: "Excluir fornecedores",
+  },
+  {
+    module: "suppliers",
+    action: "view_orders",
+    description: "Ver pedidos de compra",
+  },
+  {
+    module: "suppliers",
+    action: "create_order",
+    description: "Criar pedido de compra",
+  },
+
+  // Financeiro
   { module: "finance", action: "view", description: "Visualizar financeiro" },
-  { module: "finance", action: "manage", description: "Gerenciar contas" },
-  { module: "reports", action: "view", description: "Visualizar relatórios" },
+  {
+    module: "finance",
+    action: "view_payables",
+    description: "Ver contas a pagar",
+  },
+  {
+    module: "finance",
+    action: "create_payable",
+    description: "Lançar conta a pagar",
+  },
+  { module: "finance", action: "pay", description: "Baixar pagamento" },
+  {
+    module: "finance",
+    action: "view_receivables",
+    description: "Ver contas a receber",
+  },
+  {
+    module: "finance",
+    action: "create_receivable",
+    description: "Lançar conta a receber",
+  },
+  { module: "finance", action: "receive", description: "Baixar recebimento" },
+  {
+    module: "finance",
+    action: "view_cashflow",
+    description: "Ver fluxo de caixa",
+  },
+  {
+    module: "finance",
+    action: "delete_transaction",
+    description: "Excluir lançamento",
+  },
+  {
+    module: "finance",
+    action: "edit_transaction",
+    description: "Editar lançamento",
+  },
+
+  // Relatórios
+  { module: "reports", action: "view", description: "Acessar relatórios" },
+  { module: "reports", action: "sales", description: "Relatório de vendas" },
+  {
+    module: "reports",
+    action: "inventory",
+    description: "Relatório de estoque",
+  },
+  {
+    module: "reports",
+    action: "financial",
+    description: "Relatório financeiro",
+  },
+  {
+    module: "reports",
+    action: "customers",
+    description: "Relatório de clientes",
+  },
+  {
+    module: "reports",
+    action: "products",
+    description: "Relatório de produtos",
+  },
+  { module: "reports", action: "cashiers", description: "Relatório de caixas" },
+  { module: "reports", action: "export", description: "Exportar relatórios" },
+
+  // Configurações
   {
     module: "settings",
     action: "view",
@@ -51,17 +186,55 @@ const DEFAULT_PERMISSIONS = [
   },
   {
     module: "settings",
-    action: "manage",
-    description: "Gerenciar configurações",
+    action: "company",
+    description: "Editar dados da empresa",
   },
+  {
+    module: "settings",
+    action: "payments",
+    description: "Configurar pagamentos/TEF",
+  },
+  {
+    module: "settings",
+    action: "equipment",
+    description: "Configurar equipamentos",
+  },
+  { module: "settings", action: "backup", description: "Gerenciar backups" },
+
+  // Fiscal
   { module: "fiscal", action: "view", description: "Visualizar fiscal" },
+  { module: "fiscal", action: "emit_nfce", description: "Emitir NFC-e" },
+  { module: "fiscal", action: "cancel_nfce", description: "Cancelar NFC-e" },
+  { module: "fiscal", action: "emit_nfe", description: "Emitir NF-e" },
+  { module: "fiscal", action: "cancel_nfe", description: "Cancelar NF-e" },
   {
     module: "fiscal",
-    action: "manage",
-    description: "Gerenciar fiscal (CSC, certificados)",
+    action: "manage_certs",
+    description: "Gerenciar certificados",
   },
+  { module: "fiscal", action: "sped", description: "Gerar SPED" },
+  { module: "fiscal", action: "sintegra", description: "Gerar Sintegra" },
+
+  // Usuários e Acessos
   { module: "users", action: "view", description: "Visualizar usuários" },
-  { module: "users", action: "manage", description: "Gerenciar usuários" },
+  { module: "users", action: "create", description: "Criar usuários" },
+  { module: "users", action: "edit", description: "Editar usuários" },
+  { module: "users", action: "delete", description: "Excluir usuários" },
+  {
+    module: "users",
+    action: "manage",
+    description: "Gerenciar perfis/permissões",
+  },
+  {
+    module: "users",
+    action: "reset_password",
+    description: "Resetar senha de usuários",
+  },
+  {
+    module: "users",
+    action: "view_logs",
+    description: "Ver logs de auditoria",
+  },
 ];
 
 const ROLE_TEMPLATES = {
@@ -72,32 +245,169 @@ const ROLE_TEMPLATES = {
   },
   manager: {
     name: "Gerente",
-    description:
-      "Gerencia operações, sem acesso a configurações fiscais sensíveis",
-    permissions: DEFAULT_PERMISSIONS.filter(
-      (p) => !(p.module === "fiscal" && p.action === "manage")
-    )
-      .filter((p) => !(p.module === "users" && p.action === "manage"))
-      .map((p) => `${p.module}:${p.action}`),
+    description: "Gerencia operações, relatórios e equipe",
+    permissions: [
+      // PDV completo
+      "pos:view",
+      "pos:sell",
+      "pos:discount",
+      "pos:discount_limit",
+      "pos:cancel",
+      "pos:reprint",
+      "pos:open_drawer",
+      "pos:sangria",
+      "pos:suprimento",
+      "pos:credit_sale",
+      // Estoque completo (sem excluir)
+      "inventory:view",
+      "inventory:create",
+      "inventory:edit",
+      "inventory:adjust",
+      "inventory:import",
+      "inventory:export",
+      "inventory:view_cost",
+      "inventory:edit_price",
+      "inventory:view_margin",
+      // Clientes completo
+      "customers:view",
+      "customers:create",
+      "customers:edit",
+      "customers:delete",
+      "customers:view_credit",
+      "customers:edit_credit",
+      "customers:view_history",
+      // Fornecedores completo
+      "suppliers:view",
+      "suppliers:create",
+      "suppliers:edit",
+      "suppliers:delete",
+      "suppliers:view_orders",
+      "suppliers:create_order",
+      // Financeiro (sem excluir)
+      "finance:view",
+      "finance:view_payables",
+      "finance:create_payable",
+      "finance:pay",
+      "finance:view_receivables",
+      "finance:create_receivable",
+      "finance:receive",
+      "finance:view_cashflow",
+      "finance:edit_transaction",
+      // Relatórios completo
+      "reports:view",
+      "reports:sales",
+      "reports:inventory",
+      "reports:financial",
+      "reports:customers",
+      "reports:products",
+      "reports:cashiers",
+      "reports:export",
+      // Configurações (sem certificados)
+      "settings:view",
+      "settings:company",
+      "settings:payments",
+      "settings:equipment",
+      // Fiscal (emissão apenas)
+      "fiscal:view",
+      "fiscal:emit_nfce",
+      "fiscal:emit_nfe",
+      // Usuários (visualizar apenas)
+      "users:view",
+    ],
   },
   cashier: {
     name: "Caixa",
-    description: "Apenas operações de PDV",
-    permissions: ["pos:view", "pos:sell", "inventory:view", "customers:view"],
+    description: "Operações de PDV e consultas básicas",
+    permissions: [
+      "pos:view",
+      "pos:sell",
+      "pos:reprint",
+      "inventory:view",
+      "customers:view",
+      "customers:create",
+    ],
+  },
+  cashier_senior: {
+    name: "Caixa Sênior",
+    description: "Caixa com permissões extras de desconto e sangria",
+    permissions: [
+      "pos:view",
+      "pos:sell",
+      "pos:discount",
+      "pos:reprint",
+      "pos:sangria",
+      "pos:suprimento",
+      "inventory:view",
+      "customers:view",
+      "customers:create",
+      "customers:edit",
+    ],
+  },
+  stockist: {
+    name: "Estoquista",
+    description: "Gerenciamento de estoque e produtos",
+    permissions: [
+      "inventory:view",
+      "inventory:create",
+      "inventory:edit",
+      "inventory:adjust",
+      "inventory:transfer",
+      "inventory:import",
+      "inventory:export",
+      "suppliers:view",
+      "suppliers:view_orders",
+    ],
+  },
+  financial: {
+    name: "Financeiro",
+    description: "Gestão de contas a pagar e receber",
+    permissions: [
+      "finance:view",
+      "finance:view_payables",
+      "finance:create_payable",
+      "finance:pay",
+      "finance:view_receivables",
+      "finance:create_receivable",
+      "finance:receive",
+      "finance:view_cashflow",
+      "finance:edit_transaction",
+      "reports:view",
+      "reports:financial",
+      "reports:export",
+      "customers:view",
+      "customers:view_credit",
+      "suppliers:view",
+    ],
   },
   viewer: {
     name: "Visualizador",
     description: "Apenas visualização de dados",
-    permissions: DEFAULT_PERMISSIONS.filter((p) => p.action === "view").map(
-      (p) => `${p.module}:${p.action}`
-    ),
+    permissions: [
+      "pos:view",
+      "inventory:view",
+      "customers:view",
+      "suppliers:view",
+      "finance:view",
+      "finance:view_payables",
+      "finance:view_receivables",
+      "finance:view_cashflow",
+      "reports:view",
+      "settings:view",
+      "fiscal:view",
+      "users:view",
+    ],
   },
 };
 
 async function initializePermissions() {
   const existingPermissions = await db.select().from(permissions);
-  if (existingPermissions.length === 0) {
-    for (const perm of DEFAULT_PERMISSIONS) {
+  const existingKeys = new Set(
+    existingPermissions.map((p) => `${p.module}:${p.action}`)
+  );
+
+  for (const perm of DEFAULT_PERMISSIONS) {
+    const key = `${perm.module}:${perm.action}`;
+    if (!existingKeys.has(key)) {
       await db.insert(permissions).values(perm);
     }
   }
@@ -700,4 +1010,4 @@ authRouter.put("/roles/:id/permissions", async (req, res) => {
   }
 });
 
-export { authRouter, getUserPermissions };
+export { authRouter, getUserPermissions, initializePermissions };

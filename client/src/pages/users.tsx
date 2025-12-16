@@ -339,15 +339,42 @@ export default function Users() {
   };
 
   const moduleLabels: Record<string, string> = {
-    pos: "PDV",
-    inventory: "Estoque",
+    pos: "PDV - Ponto de Venda",
+    inventory: "Estoque & Produtos",
     customers: "Clientes",
     suppliers: "Fornecedores",
     finance: "Financeiro",
-    reports: "Relatorios",
-    settings: "Configuracoes",
-    fiscal: "Fiscal",
-    users: "Usuarios",
+    reports: "Relatórios",
+    settings: "Configurações",
+    fiscal: "Fiscal & Tributário",
+    users: "Usuários & Acessos",
+  };
+
+  const handleSelectAllModule = (module: string, perms: Permission[]) => {
+    const modulePermIds = perms.map((p) => p.id);
+    const allSelected = modulePermIds.every((id) =>
+      selectedPermissions.includes(id)
+    );
+
+    if (allSelected) {
+      setSelectedPermissions((prev) =>
+        prev.filter((id) => !modulePermIds.includes(id))
+      );
+    } else {
+      setSelectedPermissions((prev) => {
+        const combined = [...prev, ...modulePermIds];
+        return Array.from(new Set(combined));
+      });
+    }
+  };
+
+  const isModuleAllSelected = (perms: Permission[]) => {
+    return perms.every((p) => selectedPermissions.includes(p.id));
+  };
+
+  const isModulePartialSelected = (perms: Permission[]) => {
+    const selected = perms.filter((p) => selectedPermissions.includes(p.id));
+    return selected.length > 0 && selected.length < perms.length;
   };
 
   return (
@@ -672,15 +699,46 @@ export default function Users() {
                 <div className="space-y-6">
                   {Object.entries(groupPermissionsByModule(allPermissions)).map(
                     ([module, perms]) => (
-                      <div key={module} className="space-y-2">
-                        <h4 className="font-semibold text-sm uppercase text-muted-foreground">
-                          {moduleLabels[module] || module}
-                        </h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <div
+                        key={module}
+                        className="space-y-2 border rounded-lg p-4"
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id={`module-${module}`}
+                              checked={isModuleAllSelected(perms)}
+                              onCheckedChange={() =>
+                                handleSelectAllModule(module, perms)
+                              }
+                              className={
+                                isModulePartialSelected(perms)
+                                  ? "opacity-60"
+                                  : ""
+                              }
+                              data-testid={`checkbox-module-${module}`}
+                            />
+                            <label
+                              htmlFor={`module-${module}`}
+                              className="font-semibold text-sm cursor-pointer"
+                            >
+                              {moduleLabels[module] || module}
+                            </label>
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {
+                              perms.filter((p) =>
+                                selectedPermissions.includes(p.id)
+                              ).length
+                            }
+                            /{perms.length}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pl-6">
                           {perms.map((perm) => (
                             <div
                               key={perm.id}
-                              className="flex items-center space-x-2 p-2 rounded border"
+                              className="flex items-center space-x-2 p-2 rounded border bg-background hover:bg-muted/50 transition-colors"
                               data-testid={`perm-item-${perm.id}`}
                             >
                               <Checkbox

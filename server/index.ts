@@ -6,7 +6,7 @@ import "./types";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { authRouter } from "./auth";
+import { authRouter, initializePermissions } from "./auth";
 import { pool } from "./db";
 
 const app = express();
@@ -89,6 +89,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await initializePermissions();
+  log("Permissions initialized");
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

@@ -19,7 +19,10 @@ import {
   CheckCircle2,
   Printer,
   ScanBarcode,
+  Users,
+  ArrowRight,
 } from "lucide-react";
+import { Link } from "wouter";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -841,6 +844,38 @@ export default function Settings() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="users">
+            <Card>
+              <CardHeader className="flex flex-row items-center gap-4 space-y-0">
+                <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                  <Users className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle>Gerenciamento de Usuários</CardTitle>
+                  <CardDescription>
+                    Gerencie usuários, perfis e permissões do sistema
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-muted-foreground">
+                  Acesse a página de usuários para gerenciar todos os usuários
+                  da sua empresa, definir perfis de acesso e configurar
+                  permissões específicas para cada função.
+                </p>
+                <div className="flex flex-col gap-2">
+                  <Link href="/users">
+                    <Button className="w-full sm:w-auto">
+                      <Users className="mr-2 h-4 w-4" />
+                      Gerenciar Usuários
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
