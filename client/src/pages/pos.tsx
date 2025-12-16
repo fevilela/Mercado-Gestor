@@ -19,6 +19,10 @@ import {
   Ban,
   XCircle,
   Volume2,
+  DollarSign,
+  Wallet,
+  Lock,
+  ArrowDownLeft,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -55,8 +59,128 @@ export default function POS() {
     { product: any; qty: number }[]
   >([]);
   const [cancelledTotal, setCancelledTotal] = useState(0);
+  const [showOpenCashDialog, setShowOpenCashDialog] = useState(false);
+  const [showSangriaDialog, setShowSangriaDialog] = useState(false);
+  const [openingAmount, setOpeningAmount] = useState("");
+  const [sangriaAmount, setSangriaAmount] = useState("");
+  const [sangriaReason, setSangriaReason] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const { data: cashRegisterData, isLoading: isLoadingCashRegister } = useQuery(
+    {
+      queryKey: ["/api/cash-register/current"],
+      queryFn: async () => {
+        const res = await fetch("/api/cash-register/current");
+        if (!res.ok) throw new Error("Failed to fetch cash register");
+        return res.json();
+      },
+    }
+  );
+
+  const cashRegister = cashRegisterData?.register;
+  const cashMovements = cashRegisterData?.movements || [];
+
+  const openCashRegisterMutation = useMutation({
+    mutationFn: async (data: { openingAmount: string }) => {
+      const res = await fetch("/api/cash-register/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to open cash register");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/cash-register/current"],
+      });
+      setShowOpenCashDialog(false);
+      setOpeningAmount("");
+      toast({
+        title: "Caixa Aberto",
+        description: "O caixa foi aberto com sucesso.",
+        className: "bg-emerald-500 text-white border-none",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const sangriaMutation = useMutation({
+    mutationFn: async (data: {
+      type: string;
+      amount: string;
+      reason?: string;
+    }) => {
+      const res = await fetch("/api/cash-register/movement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to create movement");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/cash-register/current"],
+      });
+      setShowSangriaDialog(false);
+      setSangriaAmount("");
+      setSangriaReason("");
+      toast({
+        title: "Sangria Registrada",
+        description: "A retirada de dinheiro foi registrada com sucesso.",
+        className: "bg-emerald-500 text-white border-none",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleOpenCashRegister = () => {
+    if (!openingAmount || parseFloat(openingAmount) < 0) {
+      toast({
+        title: "Valor Inválido",
+        description: "Informe o valor inicial do caixa.",
+        variant: "destructive",
+      });
+      return;
+    }
+    openCashRegisterMutation.mutate({ openingAmount });
+  };
+
+  const handleSangria = () => {
+    if (!sangriaAmount || parseFloat(sangriaAmount) <= 0) {
+      toast({
+        title: "Valor Inválido",
+        description: "Informe o valor da sangria.",
+        variant: "destructive",
+      });
+      return;
+    }
+    sangriaMutation.mutate({
+      type: "sangria",
+      amount: sangriaAmount,
+      reason: sangriaReason,
+    });
+  };
 
   const playBeep = useCallback(() => {
     const audioContext = new (window.AudioContext ||
@@ -503,6 +627,17 @@ export default function POS() {
                 <FileCheck className="h-3 w-3 mr-1" /> Modo Offline
               </Badge>
             )}
+            {cashRegister && (
+              <Button
+                variant="secondary"
+                className="gap-2"
+                onClick={() => setShowSangriaDialog(true)}
+                data-testid="button-sangria"
+              >
+                <ArrowDownLeft className="h-4 w-4" />
+                Sangria
+              </Button>
+            )}
             <Button
               variant="secondary"
               className="gap-2"
@@ -516,7 +651,7 @@ export default function POS() {
               variant="secondary"
               className="bg-white/20 hover:bg-white/30 text-white border-0"
             >
-              Caixa 01
+              {cashRegister ? `Caixa Aberto` : `Caixa Fechado`}
             </Badge>
           </div>
         </div>
@@ -928,6 +1063,160 @@ export default function POS() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Open Cash Register Dialog */}
+      <Dialog open={showOpenCashDialog} onOpenChange={setShowOpenCashDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-primary" />
+              Abrir Caixa
+            </DialogTitle>
+            <DialogDescription>
+              Informe o valor inicial em dinheiro no caixa para iniciar as
+              operações do dia.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Valor Inicial (Fundo de Caixa)
+              </label>
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  value={openingAmount}
+                  onChange={(e) => setOpeningAmount(e.target.value)}
+                  className="pl-9"
+                  autoFocus
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Digite o valor em dinheiro que está no caixa antes de iniciar as
+                vendas.
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowOpenCashDialog(false)}
+              className="flex-1"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleOpenCashRegister}
+              className="flex-1"
+              disabled={openCashRegisterMutation.isPending}
+            >
+              {openCashRegisterMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Wallet className="mr-2 h-4 w-4" />
+              )}
+              Abrir Caixa
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sangria Dialog */}
+      <Dialog open={showSangriaDialog} onOpenChange={setShowSangriaDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowDownLeft className="h-5 w-5 text-orange-500" />
+              Sangria (Retirada de Dinheiro)
+            </DialogTitle>
+            <DialogDescription>
+              Registre a retirada de dinheiro do caixa. Esta operação é opcional
+              e pode ser realizada a qualquer momento durante o expediente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Valor da Retirada</label>
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  value={sangriaAmount}
+                  onChange={(e) => setSangriaAmount(e.target.value)}
+                  className="pl-9"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Motivo (Opcional)</label>
+              <Input
+                placeholder="Ex: Pagamento de fornecedor, troco..."
+                value={sangriaReason}
+                onChange={(e) => setSangriaReason(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowSangriaDialog(false)}
+              className="flex-1"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSangria}
+              className="flex-1 bg-orange-500 hover:bg-orange-600"
+              disabled={sangriaMutation.isPending}
+            >
+              {sangriaMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowDownLeft className="mr-2 h-4 w-4" />
+              )}
+              Registrar Sangria
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cash Register Closed Overlay */}
+      {!isLoadingCashRegister && !cashRegister && (
+        <div className="fixed inset-0 bg-background/95 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="text-center space-y-6 max-w-md p-8">
+            <div className="h-24 w-24 rounded-full bg-muted flex items-center justify-center mx-auto">
+              <Lock className="h-12 w-12 text-muted-foreground" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold">Caixa Fechado</h2>
+              <p className="text-muted-foreground">
+                Para iniciar as vendas, é necessário abrir o caixa informando o
+                valor inicial em dinheiro.
+              </p>
+            </div>
+            <div className="flex gap-4 justify-center">
+              <Link href="/">
+                <Button variant="outline" size="lg">
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Voltar
+                </Button>
+              </Link>
+              <Button size="lg" onClick={() => setShowOpenCashDialog(true)}>
+                <Wallet className="mr-2 h-4 w-4" />
+                Abrir Caixa
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

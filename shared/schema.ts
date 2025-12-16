@@ -421,3 +421,54 @@ export const insertNotificationSchema = createInsertSchema(notifications).omit({
 });
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type Notification = typeof notifications.$inferSelect;
+
+// ============================================
+// CASH REGISTER: Controle de Caixa
+// ============================================
+export const cashRegisters = pgTable("cash_registers", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  userName: text("user_name").notNull(),
+  openingAmount: decimal("opening_amount", {
+    precision: 10,
+    scale: 2,
+  }).notNull(),
+  closingAmount: decimal("closing_amount", { precision: 10, scale: 2 }),
+  expectedAmount: decimal("expected_amount", { precision: 10, scale: 2 }),
+  difference: decimal("difference", { precision: 10, scale: 2 }),
+  status: text("status").notNull().default("open"),
+  notes: text("notes"),
+  openedAt: timestamp("opened_at").defaultNow(),
+  closedAt: timestamp("closed_at"),
+});
+
+export const insertCashRegisterSchema = createInsertSchema(cashRegisters).omit({
+  id: true,
+  openedAt: true,
+  closedAt: true,
+});
+export type InsertCashRegister = z.infer<typeof insertCashRegisterSchema>;
+export type CashRegister = typeof cashRegisters.$inferSelect;
+
+// ============================================
+// CASH MOVEMENTS: Movimentações de Caixa (Sangria, Suprimento, etc.)
+// ============================================
+export const cashMovements = pgTable("cash_movements", {
+  id: serial("id").primaryKey(),
+  cashRegisterId: integer("cash_register_id").notNull(),
+  companyId: integer("company_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  userName: text("user_name").notNull(),
+  type: text("type").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCashMovement = z.infer<typeof insertCashMovementSchema>;
+export type CashMovement = typeof cashMovements.$inferSelect;

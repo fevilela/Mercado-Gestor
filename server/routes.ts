@@ -1722,5 +1722,171 @@ export async function registerRoutes(
     }
   });
 
+  // ============================================
+  // CASH REGISTER ROUTES: Controle de Caixa
+  // ============================================
+
+  app.get("/api/cash-register/current", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const register = await storage.getOpenCashRegister(companyId);
+      if (register) {
+        const movements = await storage.getCashMovements(register.id);
+        res.json({ register, movements });
+      } else {
+        res.json({ register: null, movements: [] });
+      }
+    } catch (error) {
+      console.error("Failed to fetch cash register:", error);
+      res.status(500).json({ error: "Falha ao buscar caixa" });
+    }
+  });
+
+  const openCashRegisterSchema = z.object({
+    openingAmount: z.string(),
+    notes: z.string().optional(),
+  });
+
+  app.post("/api/cash-register/open", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      const userId = getUserId(req);
+      if (!companyId || !userId)
+        return res.status(401).json({ error: "Não autenticado" });
+
+      const existingOpen = await storage.getOpenCashRegister(companyId);
+      if (existingOpen) {
+        return res.status(400).json({ error: "Já existe um caixa aberto" });
+      }
+
+      const { openingAmount, notes } = openCashRegisterSchema.parse(req.body);
+
+      const user = await storage.getUser(userId);
+      const userName = user?.name || "Operador";
+
+      const register = await storage.openCashRegister({
+        companyId,
+        userId,
+        userName,
+        openingAmount,
+        notes,
+        status: "open",
+      });
+
+      res.status(201).json(register);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to open cash register:", error);
+      res.status(500).json({ error: "Falha ao abrir caixa" });
+    }
+  });
+
+  const closeCashRegisterSchema = z.object({
+    closingAmount: z.string(),
+    notes: z.string().optional(),
+  });
+
+  app.post("/api/cash-register/close", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const openRegister = await storage.getOpenCashRegister(companyId);
+      if (!openRegister) {
+        return res.status(400).json({ error: "Nenhum caixa aberto" });
+      }
+
+      const { closingAmount, notes } = closeCashRegisterSchema.parse(req.body);
+
+      const movements = await storage.getCashMovements(openRegister.id);
+      const totalWithdrawals = movements
+        .filter((m) => m.type === "sangria")
+        .reduce((acc, m) => acc + parseFloat(m.amount), 0);
+      const totalSupplements = movements
+        .filter((m) => m.type === "suprimento")
+        .reduce((acc, m) => acc + parseFloat(m.amount), 0);
+
+      const allSales = await storage.getAllSales(companyId);
+      const openedAt = openRegister.openedAt;
+      const registerSales = allSales.filter(
+        (sale) => sale.createdAt && sale.createdAt >= openedAt!
+      );
+      const totalSales = registerSales.reduce(
+        (acc, sale) => acc + parseFloat(sale.total),
+        0
+      );
+
+      const expectedAmount = (
+        parseFloat(openRegister.openingAmount) +
+        totalSales +
+        totalSupplements -
+        totalWithdrawals
+      ).toFixed(2);
+
+      const register = await storage.closeCashRegister(
+        openRegister.id,
+        companyId,
+        closingAmount,
+        expectedAmount,
+        notes
+      );
+
+      res.json(register);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to close cash register:", error);
+      res.status(500).json({ error: "Falha ao fechar caixa" });
+    }
+  });
+
+  const cashMovementSchema = z.object({
+    type: z.enum(["sangria", "suprimento"]),
+    amount: z.string(),
+    reason: z.string().optional(),
+  });
+
+  app.post("/api/cash-register/movement", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      const userId = getUserId(req);
+      if (!companyId || !userId)
+        return res.status(401).json({ error: "Não autenticado" });
+
+      const openRegister = await storage.getOpenCashRegister(companyId);
+      if (!openRegister) {
+        return res.status(400).json({ error: "Nenhum caixa aberto" });
+      }
+
+      const { type, amount, reason } = cashMovementSchema.parse(req.body);
+
+      const user = await storage.getUser(userId);
+      const userName = user?.name || "Operador";
+
+      const movement = await storage.createCashMovement({
+        cashRegisterId: openRegister.id,
+        companyId,
+        userId,
+        userName,
+        type,
+        amount,
+        reason,
+      });
+
+      res.status(201).json(movement);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Failed to create cash movement:", error);
+      res.status(500).json({ error: "Falha ao registrar movimentação" });
+    }
+  });
+
   return httpServer;
 }

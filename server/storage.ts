@@ -1,768 +1,474 @@
+import { sql } from "drizzle-orm";
 import {
-  type User,
-  type InsertUser,
-  type Product,
-  type InsertProduct,
-  type ProductVariation,
-  type InsertProductVariation,
-  type ProductMedia,
-  type InsertProductMedia,
-  type KitItem,
-  type InsertKitItem,
-  type Customer,
-  type InsertCustomer,
-  type Supplier,
-  type InsertSupplier,
-  type Sale,
-  type InsertSale,
-  type SaleItem,
-  type InsertSaleItem,
-  type InventoryMovement,
-  type InsertInventoryMovement,
-  type CompanySettings,
-  type InsertCompanySettings,
-  type Payable,
-  type InsertPayable,
-  type Receivable,
-  type InsertReceivable,
-  type Notification,
-  type InsertNotification,
-  users,
-  products,
-  productVariations,
-  productMedia,
-  kitItems,
-  customers,
-  suppliers,
-  sales,
-  saleItems,
-  inventoryMovements,
-  companySettings,
-  payables,
-  receivables,
-  notifications,
-} from "@shared/schema";
-import { db, pool } from "./db";
-import { eq, desc, sql, gte, and } from "drizzle-orm";
-
-export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
-
-  getAllProducts(companyId: number): Promise<Product[]>;
-  getProduct(id: number, companyId: number): Promise<Product | undefined>;
-  createProduct(product: InsertProduct): Promise<Product>;
-  updateProduct(
-    id: number,
-    companyId: number,
-    product: Partial<InsertProduct>
-  ): Promise<Product | undefined>;
-  deleteProduct(id: number, companyId: number): Promise<boolean>;
-  updateProductStock(
-    id: number,
-    companyId: number,
-    quantity: number
-  ): Promise<Product | undefined>;
-
-  getProductVariations(productId: number): Promise<ProductVariation[]>;
-  createProductVariation(
-    variation: InsertProductVariation
-  ): Promise<ProductVariation>;
-  deleteProductVariations(productId: number): Promise<boolean>;
-
-  getProductMedia(productId: number): Promise<ProductMedia[]>;
-  createProductMedia(media: InsertProductMedia): Promise<ProductMedia>;
-  deleteProductMedia(productId: number): Promise<boolean>;
-
-  getKitItems(kitProductId: number): Promise<KitItem[]>;
-  createKitItem(item: InsertKitItem): Promise<KitItem>;
-  deleteKitItems(kitProductId: number): Promise<boolean>;
-
-  getAllCustomers(companyId: number): Promise<Customer[]>;
-  getCustomer(id: number, companyId: number): Promise<Customer | undefined>;
-  createCustomer(customer: InsertCustomer): Promise<Customer>;
-  updateCustomer(
-    id: number,
-    companyId: number,
-    customer: Partial<InsertCustomer>
-  ): Promise<Customer | undefined>;
-  deleteCustomer(id: number, companyId: number): Promise<boolean>;
-
-  getAllSuppliers(companyId: number): Promise<Supplier[]>;
-  getSupplier(id: number, companyId: number): Promise<Supplier | undefined>;
-  createSupplier(supplier: InsertSupplier): Promise<Supplier>;
-  updateSupplier(
-    id: number,
-    companyId: number,
-    supplier: Partial<InsertSupplier>
-  ): Promise<Supplier | undefined>;
-  deleteSupplier(id: number, companyId: number): Promise<boolean>;
-
-  getAllSales(companyId: number): Promise<Sale[]>;
-  getSale(id: number, companyId: number): Promise<Sale | undefined>;
-  createSale(sale: InsertSale, items: InsertSaleItem[]): Promise<Sale>;
-  updateSaleNfceStatus(
-    id: number,
-    companyId: number,
-    status: string,
-    protocol?: string,
-    key?: string
-  ): Promise<Sale | undefined>;
-  getSaleItems(saleId: number): Promise<SaleItem[]>;
-  getSaleItemsBatch(saleIds: number[]): Promise<Map<number, SaleItem[]>>;
-  getSalesStats(
-    companyId: number
-  ): Promise<{ today: number; week: number; month: number }>;
-
-  createInventoryMovement(
-    movement: InsertInventoryMovement
-  ): Promise<InventoryMovement>;
-  getInventoryMovements(
-    productId: number,
-    companyId: number
-  ): Promise<InventoryMovement[]>;
-
-  getCompanySettings(companyId: number): Promise<CompanySettings | undefined>;
-  updateCompanySettings(
-    companyId: number,
-    settings: Partial<InsertCompanySettings>
-  ): Promise<CompanySettings>;
-
-  getAllPayables(companyId: number): Promise<Payable[]>;
-  getPayable(id: number, companyId: number): Promise<Payable | undefined>;
-  createPayable(payable: InsertPayable): Promise<Payable>;
-  updatePayable(
-    id: number,
-    companyId: number,
-    payable: Partial<InsertPayable>
-  ): Promise<Payable | undefined>;
-  deletePayable(id: number, companyId: number): Promise<boolean>;
-
-  getAllReceivables(companyId: number): Promise<Receivable[]>;
-  getReceivable(id: number, companyId: number): Promise<Receivable | undefined>;
-  createReceivable(receivable: InsertReceivable): Promise<Receivable>;
-  updateReceivable(
-    id: number,
-    companyId: number,
-    receivable: Partial<InsertReceivable>
-  ): Promise<Receivable | undefined>;
-  deleteReceivable(id: number, companyId: number): Promise<boolean>;
-
-  getAllNotifications(
-    companyId: number,
-    userId?: string
-  ): Promise<Notification[]>;
-  getUnreadNotificationsCount(
-    companyId: number,
-    userId?: string
-  ): Promise<number>;
-  createNotification(notification: InsertNotification): Promise<Notification>;
-  markNotificationAsRead(
-    id: number,
-    companyId: number
-  ): Promise<Notification | undefined>;
-  markAllNotificationsAsRead(companyId: number, userId?: string): Promise<void>;
-  deleteNotification(id: number, companyId: number): Promise<boolean>;
-}
-
-export class DatabaseStorage implements IStorage {
-  async getUser(id: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user || undefined;
-  }
-
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.username, username));
-    return user || undefined;
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
-  }
-
-  async getAllProducts(companyId: number): Promise<Product[]> {
-    return await db
-      .select()
-      .from(products)
-      .where(eq(products.companyId, companyId))
-      .orderBy(desc(products.id));
-  }
-
-  async getProduct(
-    id: number,
-    companyId: number
-  ): Promise<Product | undefined> {
-    const [product] = await db
-      .select()
-      .from(products)
-      .where(and(eq(products.id, id), eq(products.companyId, companyId)));
-    return product || undefined;
-  }
-
-  async createProduct(product: InsertProduct): Promise<Product> {
-    const [newProduct] = await db.insert(products).values(product).returning();
-    return newProduct;
-  }
-
-  async updateProduct(
-    id: number,
-    companyId: number,
-    product: Partial<InsertProduct>
-  ): Promise<Product | undefined> {
-    const [updated] = await db
-      .update(products)
-      .set({ ...product, updatedAt: new Date() })
-      .where(and(eq(products.id, id), eq(products.companyId, companyId)))
-      .returning();
-    return updated || undefined;
-  }
-
-  async deleteProduct(id: number, companyId: number): Promise<boolean> {
-    await this.deleteProductVariations(id);
-    await this.deleteProductMedia(id);
-    await this.deleteKitItems(id);
-    await db
-      .delete(products)
-      .where(and(eq(products.id, id), eq(products.companyId, companyId)));
-    return true;
-  }
-
-  async updateProductStock(
-    id: number,
-    companyId: number,
-    quantity: number
-  ): Promise<Product | undefined> {
-    const [updated] = await db
-      .update(products)
-      .set({ stock: sql`${products.stock} + ${quantity}` })
-      .where(and(eq(products.id, id), eq(products.companyId, companyId)))
-      .returning();
-    return updated || undefined;
-  }
-
-  async getProductVariations(productId: number): Promise<ProductVariation[]> {
-    return await db
-      .select()
-      .from(productVariations)
-      .where(eq(productVariations.productId, productId));
-  }
-
-  async createProductVariation(
-    variation: InsertProductVariation
-  ): Promise<ProductVariation> {
-    const [newVariation] = await db
-      .insert(productVariations)
-      .values(variation)
-      .returning();
-    return newVariation;
-  }
-
-  async deleteProductVariations(productId: number): Promise<boolean> {
-    await db
-      .delete(productVariations)
-      .where(eq(productVariations.productId, productId));
-    return true;
-  }
-
-  async getProductMedia(productId: number): Promise<ProductMedia[]> {
-    return await db
-      .select()
-      .from(productMedia)
-      .where(eq(productMedia.productId, productId));
-  }
-
-  async createProductMedia(media: InsertProductMedia): Promise<ProductMedia> {
-    const [newMedia] = await db.insert(productMedia).values(media).returning();
-    return newMedia;
-  }
-
-  async deleteProductMedia(productId: number): Promise<boolean> {
-    await db.delete(productMedia).where(eq(productMedia.productId, productId));
-    return true;
-  }
-
-  async getKitItems(kitProductId: number): Promise<KitItem[]> {
-    return await db
-      .select()
-      .from(kitItems)
-      .where(eq(kitItems.kitProductId, kitProductId));
-  }
-
-  async createKitItem(item: InsertKitItem): Promise<KitItem> {
-    const [newItem] = await db.insert(kitItems).values(item).returning();
-    return newItem;
-  }
-
-  async deleteKitItems(kitProductId: number): Promise<boolean> {
-    await db.delete(kitItems).where(eq(kitItems.kitProductId, kitProductId));
-    return true;
-  }
-
-  async getAllCustomers(companyId: number): Promise<Customer[]> {
-    return await db
-      .select()
-      .from(customers)
-      .where(eq(customers.companyId, companyId))
-      .orderBy(desc(customers.id));
-  }
-
-  async getCustomer(
-    id: number,
-    companyId: number
-  ): Promise<Customer | undefined> {
-    const [customer] = await db
-      .select()
-      .from(customers)
-      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
-    return customer || undefined;
-  }
-
-  async createCustomer(customer: InsertCustomer): Promise<Customer> {
-    const [newCustomer] = await db
-      .insert(customers)
-      .values(customer)
-      .returning();
-    return newCustomer;
-  }
-
-  async updateCustomer(
-    id: number,
-    companyId: number,
-    customer: Partial<InsertCustomer>
-  ): Promise<Customer | undefined> {
-    const [updated] = await db
-      .update(customers)
-      .set(customer)
-      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)))
-      .returning();
-    return updated || undefined;
-  }
-
-  async deleteCustomer(id: number, companyId: number): Promise<boolean> {
-    await db
-      .delete(customers)
-      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
-    return true;
-  }
-
-  async getAllSuppliers(companyId: number): Promise<Supplier[]> {
-    return await db
-      .select()
-      .from(suppliers)
-      .where(eq(suppliers.companyId, companyId))
-      .orderBy(desc(suppliers.id));
-  }
-
-  async getSupplier(
-    id: number,
-    companyId: number
-  ): Promise<Supplier | undefined> {
-    const [supplier] = await db
-      .select()
-      .from(suppliers)
-      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyId)));
-    return supplier || undefined;
-  }
-
-  async createSupplier(supplier: InsertSupplier): Promise<Supplier> {
-    const [newSupplier] = await db
-      .insert(suppliers)
-      .values(supplier)
-      .returning();
-    return newSupplier;
-  }
-
-  async updateSupplier(
-    id: number,
-    companyId: number,
-    supplier: Partial<InsertSupplier>
-  ): Promise<Supplier | undefined> {
-    const [updated] = await db
-      .update(suppliers)
-      .set(supplier)
-      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyId)))
-      .returning();
-    return updated || undefined;
-  }
-
-  async deleteSupplier(id: number, companyId: number): Promise<boolean> {
-    await db
-      .delete(suppliers)
-      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyId)));
-    return true;
-  }
-
-  async getAllSales(companyId: number): Promise<Sale[]> {
-    return await db
-      .select()
-      .from(sales)
-      .where(eq(sales.companyId, companyId))
-      .orderBy(desc(sales.id));
-  }
-
-  async getSale(id: number, companyId: number): Promise<Sale | undefined> {
-    const [sale] = await db
-      .select()
-      .from(sales)
-      .where(and(eq(sales.id, id), eq(sales.companyId, companyId)));
-    return sale || undefined;
-  }
-
-  async createSale(sale: InsertSale, items: InsertSaleItem[]): Promise<Sale> {
-    const [newSale] = await db.insert(sales).values(sale).returning();
-
-    const itemsWithSaleId = items.map((item) => ({
-      ...item,
-      saleId: newSale.id,
-    }));
-
-    await db.insert(saleItems).values(itemsWithSaleId);
-
-    return newSale;
-  }
-
-  async updateSaleNfceStatus(
-    id: number,
-    companyId: number,
-    status: string,
-    protocol?: string,
-    key?: string
-  ): Promise<Sale | undefined> {
-    const [updated] = await db
-      .update(sales)
-      .set({
-        nfceStatus: status,
-        ...(protocol && { nfceProtocol: protocol }),
-        ...(key && { nfceKey: key }),
-      })
-      .where(and(eq(sales.id, id), eq(sales.companyId, companyId)))
-      .returning();
-    return updated || undefined;
-  }
-
-  async getSaleItems(saleId: number): Promise<SaleItem[]> {
-    return await db
-      .select()
-      .from(saleItems)
-      .where(eq(saleItems.saleId, saleId));
-  }
-
-  async getSaleItemsBatch(saleIds: number[]): Promise<Map<number, SaleItem[]>> {
-    if (saleIds.length === 0) {
-      return new Map();
-    }
-    const allItems = await db
-      .select()
-      .from(saleItems)
-      .where(
-        sql`${saleItems.saleId} = ANY(ARRAY[${sql.raw(
-          saleIds.join(",")
-        )}]::int[])`
-      );
-
-    const itemsMap = new Map<number, SaleItem[]>();
-    for (const item of allItems) {
-      const existing = itemsMap.get(item.saleId) || [];
-      existing.push(item);
-      itemsMap.set(item.saleId, existing);
-    }
-    return itemsMap;
-  }
-
-  async getSalesStats(companyId: number): Promise<{
-    today: number;
-    week: number;
-    month: number;
-  }> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-
-    const monthAgo = new Date(today);
-    monthAgo.setMonth(monthAgo.getMonth() - 1);
-
-    const [todayStats] = await db
-      .select({
-        total: sql<number>`COALESCE(SUM(CAST(${sales.total} AS DECIMAL)), 0)`,
-      })
-      .from(sales)
-      .where(and(eq(sales.companyId, companyId), gte(sales.createdAt, today)));
-
-    const [weekStats] = await db
-      .select({
-        total: sql<number>`COALESCE(SUM(CAST(${sales.total} AS DECIMAL)), 0)`,
-      })
-      .from(sales)
-      .where(
-        and(eq(sales.companyId, companyId), gte(sales.createdAt, weekAgo))
-      );
-
-    const [monthStats] = await db
-      .select({
-        total: sql<number>`COALESCE(SUM(CAST(${sales.total} AS DECIMAL)), 0)`,
-      })
-      .from(sales)
-      .where(
-        and(eq(sales.companyId, companyId), gte(sales.createdAt, monthAgo))
-      );
-
-    return {
-      today: Number(todayStats?.total || 0),
-      week: Number(weekStats?.total || 0),
-      month: Number(monthStats?.total || 0),
-    };
-  }
-
-  async createInventoryMovement(
-    movement: InsertInventoryMovement
-  ): Promise<InventoryMovement> {
-    const [newMovement] = await db
-      .insert(inventoryMovements)
-      .values(movement)
-      .returning();
-    return newMovement;
-  }
-
-  async getInventoryMovements(
-    productId: number,
-    companyId: number
-  ): Promise<InventoryMovement[]> {
-    return await db
-      .select()
-      .from(inventoryMovements)
-      .where(
-        and(
-          eq(inventoryMovements.productId, productId),
-          eq(inventoryMovements.companyId, companyId)
-        )
-      )
-      .orderBy(desc(inventoryMovements.id));
-  }
-
-  async getCompanySettings(
-    companyId: number
-  ): Promise<CompanySettings | undefined> {
-    const [settings] = await db
-      .select()
-      .from(companySettings)
-      .where(eq(companySettings.companyId, companyId))
-      .limit(1);
-    return settings || undefined;
-  }
-
-  async updateCompanySettings(
-    companyId: number,
-    settings: Partial<InsertCompanySettings>
-  ): Promise<CompanySettings> {
-    const existing = await this.getCompanySettings(companyId);
-
-    if (existing) {
-      const [updated] = await db
-        .update(companySettings)
-        .set({ ...settings, updatedAt: new Date() })
-        .where(eq(companySettings.id, existing.id))
-        .returning();
-      return updated;
-    } else {
-      const [created] = await db
-        .insert(companySettings)
-        .values({ ...settings, companyId })
-        .returning();
-      return created;
-    }
-  }
-
-  async getAllPayables(companyId: number): Promise<Payable[]> {
-    return await db
-      .select()
-      .from(payables)
-      .where(eq(payables.companyId, companyId))
-      .orderBy(desc(payables.dueDate));
-  }
-
-  async getPayable(
-    id: number,
-    companyId: number
-  ): Promise<Payable | undefined> {
-    const [payable] = await db
-      .select()
-      .from(payables)
-      .where(and(eq(payables.id, id), eq(payables.companyId, companyId)));
-    return payable || undefined;
-  }
-
-  async createPayable(payable: InsertPayable): Promise<Payable> {
-    const [newPayable] = await db.insert(payables).values(payable).returning();
-    return newPayable;
-  }
-
-  async updatePayable(
-    id: number,
-    companyId: number,
-    payable: Partial<InsertPayable>
-  ): Promise<Payable | undefined> {
-    const [updated] = await db
-      .update(payables)
-      .set(payable)
-      .where(and(eq(payables.id, id), eq(payables.companyId, companyId)))
-      .returning();
-    return updated || undefined;
-  }
-
-  async deletePayable(id: number, companyId: number): Promise<boolean> {
-    await db
-      .delete(payables)
-      .where(and(eq(payables.id, id), eq(payables.companyId, companyId)));
-    return true;
-  }
-
-  async getAllReceivables(companyId: number): Promise<Receivable[]> {
-    return await db
-      .select()
-      .from(receivables)
-      .where(eq(receivables.companyId, companyId))
-      .orderBy(desc(receivables.dueDate));
-  }
-
-  async getReceivable(
-    id: number,
-    companyId: number
-  ): Promise<Receivable | undefined> {
-    const [receivable] = await db
-      .select()
-      .from(receivables)
-      .where(and(eq(receivables.id, id), eq(receivables.companyId, companyId)));
-    return receivable || undefined;
-  }
-
-  async createReceivable(receivable: InsertReceivable): Promise<Receivable> {
-    const [newReceivable] = await db
-      .insert(receivables)
-      .values(receivable)
-      .returning();
-    return newReceivable;
-  }
-
-  async updateReceivable(
-    id: number,
-    companyId: number,
-    receivable: Partial<InsertReceivable>
-  ): Promise<Receivable | undefined> {
-    const [updated] = await db
-      .update(receivables)
-      .set(receivable)
-      .where(and(eq(receivables.id, id), eq(receivables.companyId, companyId)))
-      .returning();
-    return updated || undefined;
-  }
-
-  async deleteReceivable(id: number, companyId: number): Promise<boolean> {
-    await db
-      .delete(receivables)
-      .where(and(eq(receivables.id, id), eq(receivables.companyId, companyId)));
-    return true;
-  }
-
-  async getAllNotifications(
-    companyId: number,
-    userId?: string
-  ): Promise<Notification[]> {
-    if (userId) {
-      return await db
-        .select()
-        .from(notifications)
-        .where(
-          and(
-            eq(notifications.companyId, companyId),
-            sql`(${notifications.userId} = ${userId} OR ${notifications.userId} IS NULL)`
-          )
-        )
-        .orderBy(desc(notifications.createdAt))
-        .limit(50);
-    }
-    return await db
-      .select()
-      .from(notifications)
-      .where(eq(notifications.companyId, companyId))
-      .orderBy(desc(notifications.createdAt))
-      .limit(50);
-  }
-
-  async getUnreadNotificationsCount(
-    companyId: number,
-    userId?: string
-  ): Promise<number> {
-    const condition = userId
-      ? and(
-          eq(notifications.companyId, companyId),
-          eq(notifications.isRead, false),
-          sql`(${notifications.userId} = ${userId} OR ${notifications.userId} IS NULL)`
-        )
-      : and(
-          eq(notifications.companyId, companyId),
-          eq(notifications.isRead, false)
-        );
-
-    const [result] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(notifications)
-      .where(condition);
-    return Number(result?.count || 0);
-  }
-
-  async createNotification(
-    notification: InsertNotification
-  ): Promise<Notification> {
-    const [newNotification] = await db
-      .insert(notifications)
-      .values(notification)
-      .returning();
-    return newNotification;
-  }
-
-  async markNotificationAsRead(
-    id: number,
-    companyId: number
-  ): Promise<Notification | undefined> {
-    const [updated] = await db
-      .update(notifications)
-      .set({ isRead: true })
-      .where(
-        and(eq(notifications.id, id), eq(notifications.companyId, companyId))
-      )
-      .returning();
-    return updated || undefined;
-  }
-
-  async markAllNotificationsAsRead(
-    companyId: number,
-    userId?: string
-  ): Promise<void> {
-    const condition = userId
-      ? and(
-          eq(notifications.companyId, companyId),
-          sql`(${notifications.userId} = ${userId} OR ${notifications.userId} IS NULL)`
-        )
-      : eq(notifications.companyId, companyId);
-
-    await db.update(notifications).set({ isRead: true }).where(condition);
-  }
-
-  async deleteNotification(id: number, companyId: number): Promise<boolean> {
-    await db
-      .delete(notifications)
-      .where(
-        and(eq(notifications.id, id), eq(notifications.companyId, companyId))
-      );
-    return true;
-  }
-}
-
-export const storage = new DatabaseStorage();
+  pgTable,
+  text,
+  varchar,
+  integer,
+  decimal,
+  timestamp,
+  boolean,
+  serial,
+  jsonb,
+} from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+// ============================================
+// MULTI-TENANCY: Companies (Empresas)
+// ============================================
+export const companies = pgTable("companies", {
+  id: serial("id").primaryKey(),
+  cnpj: text("cnpj").notNull().unique(),
+  ie: text("ie"),
+  razaoSocial: text("razao_social").notNull(),
+  nomeFantasia: text("nome_fantasia"),
+  email: text("email"),
+  phone: text("phone"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  zipCode: text("zip_code"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCompanySchema = createInsertSchema(companies).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
+export type Company = typeof companies.$inferSelect;
+
+// ============================================
+// RBAC: Roles (Perfis/Funções)
+// ============================================
+export const roles = pgTable("roles", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  isSystemRole: boolean("is_system_role").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertRoleSchema = createInsertSchema(roles).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertRole = z.infer<typeof insertRoleSchema>;
+export type Role = typeof roles.$inferSelect;
+
+// ============================================
+// RBAC: Permissions (Permissões)
+// ============================================
+export const permissions = pgTable("permissions", {
+  id: serial("id").primaryKey(),
+  module: text("module").notNull(),
+  action: text("action").notNull(),
+  description: text("description"),
+});
+
+export const insertPermissionSchema = createInsertSchema(permissions).omit({
+  id: true,
+});
+export type InsertPermission = z.infer<typeof insertPermissionSchema>;
+export type Permission = typeof permissions.$inferSelect;
+
+// ============================================
+// RBAC: Role Permissions (Permissões do Perfil)
+// ============================================
+export const rolePermissions = pgTable("role_permissions", {
+  id: serial("id").primaryKey(),
+  roleId: integer("role_id").notNull(),
+  permissionId: integer("permission_id").notNull(),
+});
+
+export const insertRolePermissionSchema = createInsertSchema(
+  rolePermissions
+).omit({
+  id: true,
+});
+export type InsertRolePermission = z.infer<typeof insertRolePermissionSchema>;
+export type RolePermission = typeof rolePermissions.$inferSelect;
+
+// ============================================
+// USERS: Usuários (Funcionários)
+// ============================================
+export const users = pgTable("users", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  companyId: integer("company_id").notNull(),
+  roleId: integer("role_id").notNull(),
+  username: text("username").notNull(),
+  email: text("email").notNull(),
+  password: text("password").notNull(),
+  name: text("name").notNull(),
+  phone: text("phone"),
+  isActive: boolean("is_active").default(true),
+  lastLogin: timestamp("last_login"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  lastLogin: true,
+  createdAt: true,
+});
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
+
+// User with role information for frontend
+export type UserWithRole = User & { role: Role; permissions: string[] };
+
+export const products = pgTable("products", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  name: text("name").notNull(),
+  ean: text("ean"),
+  sku: text("sku"),
+  category: text("category").notNull(),
+  unit: text("unit").notNull().default("UN"),
+  brand: text("brand"),
+  type: text("type"),
+  ncm: text("ncm"),
+  cest: text("cest"),
+  description: text("description"),
+  mainImageUrl: text("main_image_url"),
+  purchasePrice: decimal("purchase_price", { precision: 10, scale: 2 }),
+  margin: decimal("margin", { precision: 5, scale: 2 }),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  promoPrice: decimal("promo_price", { precision: 10, scale: 2 }),
+  promoStart: timestamp("promo_start"),
+  promoEnd: timestamp("promo_end"),
+  stock: integer("stock").notNull().default(0),
+  minStock: integer("min_stock").default(10),
+  maxStock: integer("max_stock").default(100),
+  isKit: boolean("is_kit").default(false),
+  isActive: boolean("is_active").default(true),
+  supplierId: integer("supplier_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertProductSchema = createInsertSchema(products).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertProduct = z.infer<typeof insertProductSchema>;
+export type Product = typeof products.$inferSelect;
+
+export const productVariations = pgTable("product_variations", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").notNull(),
+  sku: text("sku"),
+  name: text("name").notNull(),
+  attributes: jsonb("attributes"),
+  extraPrice: decimal("extra_price", { precision: 10, scale: 2 }).default("0"),
+  stock: integer("stock").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertProductVariationSchema = createInsertSchema(
+  productVariations
+).omit({ id: true, createdAt: true });
+export type InsertProductVariation = z.infer<
+  typeof insertProductVariationSchema
+>;
+export type ProductVariation = typeof productVariations.$inferSelect;
+
+export const productMedia = pgTable("product_media", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").notNull(),
+  url: text("url").notNull(),
+  isPrimary: boolean("is_primary").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertProductMediaSchema = createInsertSchema(productMedia).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertProductMedia = z.infer<typeof insertProductMediaSchema>;
+export type ProductMedia = typeof productMedia.$inferSelect;
+
+export const kitItems = pgTable("kit_items", {
+  id: serial("id").primaryKey(),
+  kitProductId: integer("kit_product_id").notNull(),
+  productId: integer("product_id").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+});
+
+export const insertKitItemSchema = createInsertSchema(kitItems).omit({
+  id: true,
+});
+export type InsertKitItem = z.infer<typeof insertKitItemSchema>;
+export type KitItem = typeof kitItems.$inferSelect;
+
+export const customers = pgTable("customers", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  name: text("name").notNull(),
+  email: text("email"),
+  phone: text("phone"),
+  cpfCnpj: text("cpf_cnpj"),
+  type: text("type").notNull().default("Regular"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  zipCode: text("zip_code"),
+  creditLimit: decimal("credit_limit", { precision: 10, scale: 2 }).default(
+    "0"
+  ),
+  loyaltyPoints: integer("loyalty_points").default(0),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCustomerSchema = createInsertSchema(customers).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
+export type Customer = typeof customers.$inferSelect;
+
+export const suppliers = pgTable("suppliers", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  name: text("name").notNull(),
+  contact: text("contact"),
+  phone: text("phone"),
+  email: text("email"),
+  cnpj: text("cnpj"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  zipCode: text("zip_code"),
+  paymentTerms: text("payment_terms"),
+  leadTime: integer("lead_time"),
+  rating: integer("rating").default(0),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertSupplierSchema = createInsertSchema(suppliers).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
+export type Supplier = typeof suppliers.$inferSelect;
+
+export const sales = pgTable("sales", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  userId: varchar("user_id"),
+  customerId: integer("customer_id"),
+  customerName: text("customer_name").notNull().default("Consumidor Final"),
+  total: decimal("total", { precision: 10, scale: 2 }).notNull(),
+  itemsCount: integer("items_count").notNull(),
+  paymentMethod: text("payment_method").notNull(),
+  status: text("status").notNull().default("Concluído"),
+  nfceProtocol: text("nfce_protocol"),
+  nfceStatus: text("nfce_status").notNull().default("Pendente"),
+  nfceKey: text("nfce_key"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertSaleSchema = createInsertSchema(sales).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertSale = z.infer<typeof insertSaleSchema>;
+export type Sale = typeof sales.$inferSelect;
+
+export const saleItems = pgTable("sale_items", {
+  id: serial("id").primaryKey(),
+  saleId: integer("sale_id").notNull(),
+  productId: integer("product_id").notNull(),
+  productName: text("product_name").notNull(),
+  quantity: integer("quantity").notNull(),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
+});
+
+export const insertSaleItemSchema = createInsertSchema(saleItems).omit({
+  id: true,
+});
+export type InsertSaleItem = z.infer<typeof insertSaleItemSchema>;
+export type SaleItem = typeof saleItems.$inferSelect;
+
+export const inventoryMovements = pgTable("inventory_movements", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  productId: integer("product_id").notNull(),
+  variationId: integer("variation_id"),
+  type: text("type").notNull(),
+  quantity: integer("quantity").notNull(),
+  reason: text("reason"),
+  referenceId: integer("reference_id"),
+  referenceType: text("reference_type"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertInventoryMovementSchema = createInsertSchema(
+  inventoryMovements
+).omit({ id: true, createdAt: true });
+export type InsertInventoryMovement = z.infer<
+  typeof insertInventoryMovementSchema
+>;
+export type InventoryMovement = typeof inventoryMovements.$inferSelect;
+
+export const companySettings = pgTable("company_settings", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  cnpj: text("cnpj"),
+  ie: text("ie"),
+  razaoSocial: text("razao_social"),
+  nomeFantasia: text("nome_fantasia"),
+  fiscalEnabled: boolean("fiscal_enabled").default(false),
+  cscToken: text("csc_token"),
+  cscId: text("csc_id"),
+  stoneCode: text("stone_code"),
+  stoneEnabled: boolean("stone_enabled").default(false),
+  mpAccessToken: text("mp_access_token"),
+  mpTerminalId: text("mp_terminal_id"),
+  mpEnabled: boolean("mp_enabled").default(false),
+  printerEnabled: boolean("printer_enabled").default(false),
+  printerModel: text("printer_model"),
+  printerPort: text("printer_port"),
+  printerBaudRate: integer("printer_baud_rate").default(9600),
+  printerColumns: integer("printer_columns").default(48),
+  printerCutCommand: boolean("printer_cut_command").default(true),
+  printerBeepOnSale: boolean("printer_beep_on_sale").default(true),
+  barcodeScannerEnabled: boolean("barcode_scanner_enabled").default(true),
+  barcodeScannerAutoAdd: boolean("barcode_scanner_auto_add").default(true),
+  barcodeScannerBeep: boolean("barcode_scanner_beep").default(true),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertCompanySettingsSchema = createInsertSchema(
+  companySettings
+).omit({ id: true, updatedAt: true });
+export type InsertCompanySettings = z.infer<typeof insertCompanySettingsSchema>;
+export type CompanySettings = typeof companySettings.$inferSelect;
+
+export const payables = pgTable("payables", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  description: text("description").notNull(),
+  supplierId: integer("supplier_id"),
+  supplierName: text("supplier_name"),
+  category: text("category").notNull().default("Outros"),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  dueDate: timestamp("due_date").notNull(),
+  paidDate: timestamp("paid_date"),
+  status: text("status").notNull().default("Pendente"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPayableSchema = createInsertSchema(payables).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertPayable = z.infer<typeof insertPayableSchema>;
+export type Payable = typeof payables.$inferSelect;
+
+export const receivables = pgTable("receivables", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  description: text("description").notNull(),
+  customerId: integer("customer_id"),
+  customerName: text("customer_name"),
+  saleId: integer("sale_id"),
+  category: text("category").notNull().default("Vendas"),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  dueDate: timestamp("due_date").notNull(),
+  receivedDate: timestamp("received_date"),
+  status: text("status").notNull().default("Pendente"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertReceivableSchema = createInsertSchema(receivables).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertReceivable = z.infer<typeof insertReceivableSchema>;
+export type Receivable = typeof receivables.$inferSelect;
+
+// ============================================
+// NOTIFICATIONS: Sistema de Notificações
+// ============================================
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  userId: varchar("user_id"),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  referenceId: integer("reference_id"),
+  referenceType: text("reference_type"),
+  isRead: boolean("is_read").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
+
+// ============================================
+// CASH REGISTER: Controle de Caixa
+// ============================================
+export const cashRegisters = pgTable("cash_registers", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  userName: text("user_name").notNull(),
+  openingAmount: decimal("opening_amount", {
+    precision: 10,
+    scale: 2,
+  }).notNull(),
+  closingAmount: decimal("closing_amount", { precision: 10, scale: 2 }),
+  expectedAmount: decimal("expected_amount", { precision: 10, scale: 2 }),
+  difference: decimal("difference", { precision: 10, scale: 2 }),
+  status: text("status").notNull().default("open"),
+  notes: text("notes"),
+  openedAt: timestamp("opened_at").defaultNow(),
+  closedAt: timestamp("closed_at"),
+});
+
+export const insertCashRegisterSchema = createInsertSchema(cashRegisters).omit({
+  id: true,
+  openedAt: true,
+  closedAt: true,
+});
+export type InsertCashRegister = z.infer<typeof insertCashRegisterSchema>;
+export type CashRegister = typeof cashRegisters.$inferSelect;
+
+// ============================================
+// CASH MOVEMENTS: Movimentações de Caixa (Sangria, Suprimento, etc.)
+// ============================================
+export const cashMovements = pgTable("cash_movements", {
+  id: serial("id").primaryKey(),
+  cashRegisterId: integer("cash_register_id").notNull(),
+  companyId: integer("company_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  userName: text("user_name").notNull(),
+  type: text("type").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCashMovement = z.infer<typeof insertCashMovementSchema>;
+export type CashMovement = typeof cashMovements.$inferSelect;
