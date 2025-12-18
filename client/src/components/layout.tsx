@@ -13,6 +13,7 @@ import {
   Menu,
   ChevronDown,
   User,
+  History,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -57,6 +58,12 @@ const sidebarItems = [
     label: "Financeiro",
     href: "/finance",
     permissions: ["finance:view", "finance:manage"],
+  },
+  {
+    icon: History,
+    label: "Histórico de Caixa",
+    href: "/cash-history",
+    permissions: ["pos:cash_history"],
   },
   {
     icon: Users,

@@ -36,6 +36,13 @@ const DEFAULT_PERMISSIONS = [
   { module: "pos", action: "open_drawer", description: "Abrir gaveta" },
   { module: "pos", action: "sangria", description: "Realizar sangria" },
   { module: "pos", action: "suprimento", description: "Realizar suprimento" },
+  { module: "pos", action: "cash_open", description: "Abrir caixa" },
+  { module: "pos", action: "cash_close", description: "Fechar caixa" },
+  {
+    module: "pos",
+    action: "cash_history",
+    description: "Ver histórico de caixa",
+  },
   { module: "pos", action: "credit_sale", description: "Vender a prazo/fiado" },
 
   // Estoque - Inventário
@@ -546,6 +553,7 @@ authRouter.post("/register", async (req, res) => {
     req.session.userId = adminUser.id;
     req.session.companyId = company.id;
     req.session.roleId = adminRole[0].id;
+    req.session.userPermissions = userPermissions;
 
     res.json({
       message: "Empresa cadastrada com sucesso",
@@ -628,6 +636,7 @@ authRouter.post("/login", async (req, res) => {
     req.session.userId = user.id;
     req.session.companyId = user.companyId;
     req.session.roleId = user.roleId;
+    req.session.userPermissions = userPermissions;
 
     res.json({
       user: {

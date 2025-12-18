@@ -17,6 +17,7 @@ import Login from "@/pages/login";
 import Register from "@/pages/register";
 import Users from "@/pages/users";
 import Profile from "@/pages/profile";
+import CashHistory from "@/pages/cash-history";
 import { Loader2 } from "lucide-react";
 
 function ProtectedRoute({
@@ -101,6 +102,9 @@ function Router() {
       </Route>
       <Route path="/profile">
         <ProtectedRoute component={Profile} />
+      </Route>
+      <Route path="/cash-history">
+        <ProtectedRoute component={CashHistory} />
       </Route>
       <Route component={NotFound} />
     </Switch>

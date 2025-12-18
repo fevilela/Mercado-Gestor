@@ -1749,101 +1749,114 @@ export async function registerRoutes(
     notes: z.string().optional(),
   });
 
-  app.post("/api/cash-register/open", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      const userId = getUserId(req);
-      if (!companyId || !userId)
-        return res.status(401).json({ error: "Não autenticado" });
+  app.post(
+    "/api/cash-register/open",
+    requireAuth,
+    requirePermission("pos:cash_open"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        const userId = getUserId(req);
+        if (!companyId || !userId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const existingOpen = await storage.getOpenCashRegister(companyId);
-      if (existingOpen) {
-        return res.status(400).json({ error: "Já existe um caixa aberto" });
+        const existingOpen = await storage.getOpenCashRegister(companyId);
+        if (existingOpen) {
+          return res.status(400).json({ error: "Já existe um caixa aberto" });
+        }
+
+        const { openingAmount, notes } = openCashRegisterSchema.parse(req.body);
+
+        const user = await storage.getUser(userId);
+        const userName = user?.name || "Operador";
+
+        const register = await storage.openCashRegister({
+          companyId,
+          userId,
+          userName,
+          openingAmount,
+          notes,
+          status: "open",
+        });
+
+        res.status(201).json(register);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to open cash register:", error);
+        res.status(500).json({ error: "Falha ao abrir caixa" });
       }
-
-      const { openingAmount, notes } = openCashRegisterSchema.parse(req.body);
-
-      const user = await storage.getUser(userId);
-      const userName = user?.name || "Operador";
-
-      const register = await storage.openCashRegister({
-        companyId,
-        userId,
-        userName,
-        openingAmount,
-        notes,
-        status: "open",
-      });
-
-      res.status(201).json(register);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
-      }
-      console.error("Failed to open cash register:", error);
-      res.status(500).json({ error: "Falha ao abrir caixa" });
     }
-  });
+  );
 
   const closeCashRegisterSchema = z.object({
     closingAmount: z.string(),
     notes: z.string().optional(),
   });
 
-  app.post("/api/cash-register/close", requireAuth, async (req, res) => {
-    try {
-      const companyId = getCompanyId(req);
-      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+  app.post(
+    "/api/cash-register/close",
+    requireAuth,
+    requirePermission("pos:cash_close"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
 
-      const openRegister = await storage.getOpenCashRegister(companyId);
-      if (!openRegister) {
-        return res.status(400).json({ error: "Nenhum caixa aberto" });
+        const openRegister = await storage.getOpenCashRegister(companyId);
+        if (!openRegister) {
+          return res.status(400).json({ error: "Nenhum caixa aberto" });
+        }
+
+        const { closingAmount, notes } = closeCashRegisterSchema.parse(
+          req.body
+        );
+
+        const movements = await storage.getCashMovements(openRegister.id);
+        const totalWithdrawals = movements
+          .filter((m) => m.type === "sangria")
+          .reduce((acc, m) => acc + parseFloat(m.amount), 0);
+        const totalSupplements = movements
+          .filter((m) => m.type === "suprimento")
+          .reduce((acc, m) => acc + parseFloat(m.amount), 0);
+
+        const allSales = await storage.getAllSales(companyId);
+        const openedAt = openRegister.openedAt;
+        const registerSales = allSales.filter(
+          (sale) => sale.createdAt && sale.createdAt >= openedAt!
+        );
+        const totalSales = registerSales.reduce(
+          (acc, sale) => acc + parseFloat(sale.total),
+          0
+        );
+
+        const expectedAmount = (
+          parseFloat(openRegister.openingAmount) +
+          totalSales +
+          totalSupplements -
+          totalWithdrawals
+        ).toFixed(2);
+
+        const register = await storage.closeCashRegister(
+          openRegister.id,
+          companyId,
+          closingAmount,
+          expectedAmount,
+          notes
+        );
+
+        res.json(register);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to close cash register:", error);
+        res.status(500).json({ error: "Falha ao fechar caixa" });
       }
-
-      const { closingAmount, notes } = closeCashRegisterSchema.parse(req.body);
-
-      const movements = await storage.getCashMovements(openRegister.id);
-      const totalWithdrawals = movements
-        .filter((m) => m.type === "sangria")
-        .reduce((acc, m) => acc + parseFloat(m.amount), 0);
-      const totalSupplements = movements
-        .filter((m) => m.type === "suprimento")
-        .reduce((acc, m) => acc + parseFloat(m.amount), 0);
-
-      const allSales = await storage.getAllSales(companyId);
-      const openedAt = openRegister.openedAt;
-      const registerSales = allSales.filter(
-        (sale) => sale.createdAt && sale.createdAt >= openedAt!
-      );
-      const totalSales = registerSales.reduce(
-        (acc, sale) => acc + parseFloat(sale.total),
-        0
-      );
-
-      const expectedAmount = (
-        parseFloat(openRegister.openingAmount) +
-        totalSales +
-        totalSupplements -
-        totalWithdrawals
-      ).toFixed(2);
-
-      const register = await storage.closeCashRegister(
-        openRegister.id,
-        companyId,
-        closingAmount,
-        expectedAmount,
-        notes
-      );
-
-      res.json(register);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: error.errors });
-      }
-      console.error("Failed to close cash register:", error);
-      res.status(500).json({ error: "Falha ao fechar caixa" });
     }
-  });
+  );
 
   const cashMovementSchema = z.object({
     type: z.enum(["sangria", "suprimento"]),
@@ -1858,12 +1871,24 @@ export async function registerRoutes(
       if (!companyId || !userId)
         return res.status(401).json({ error: "Não autenticado" });
 
+      const { type, amount, reason } = cashMovementSchema.parse(req.body);
+
+      const requiredPermission =
+        type === "sangria" ? "pos:sangria" : "pos:suprimento";
+      const userPermissions = req.session?.userPermissions || [];
+      if (!userPermissions.includes(requiredPermission)) {
+        return res.status(403).json({
+          error:
+            type === "sangria"
+              ? "Sem permissão para realizar sangria"
+              : "Sem permissão para realizar suprimento",
+        });
+      }
+
       const openRegister = await storage.getOpenCashRegister(companyId);
       if (!openRegister) {
         return res.status(400).json({ error: "Nenhum caixa aberto" });
       }
-
-      const { type, amount, reason } = cashMovementSchema.parse(req.body);
 
       const user = await storage.getUser(userId);
       const userName = user?.name || "Operador";
@@ -1887,6 +1912,128 @@ export async function registerRoutes(
       res.status(500).json({ error: "Falha ao registrar movimentação" });
     }
   });
+
+  app.get(
+    "/api/cash-register/history",
+    requireAuth,
+    requirePermission("pos:cash_history"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const registers = await storage.getAllCashRegisters(companyId);
+        const movements = await storage.getAllCashMovementsHistory(companyId);
+        res.json({ registers, movements });
+      } catch (error) {
+        console.error("Failed to fetch cash register history:", error);
+        res.status(500).json({ error: "Falha ao buscar histórico de caixa" });
+      }
+    }
+  );
+
+  // ============================================
+  // POS TERMINALS ROUTES: Terminais PDV
+  // ============================================
+
+  app.get("/api/pos-terminals", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const terminals = await storage.getAllPosTerminals(companyId);
+      res.json(terminals);
+    } catch (error) {
+      console.error("Failed to fetch POS terminals:", error);
+      res.status(500).json({ error: "Falha ao buscar terminais PDV" });
+    }
+  });
+
+  const posTerminalSchema = z.object({
+    name: z.string().min(1, "Nome é obrigatório"),
+    description: z.string().optional(),
+    requiresOpening: z.boolean().default(true),
+    requiresClosing: z.boolean().default(true),
+    isActive: z.boolean().default(true),
+  });
+
+  app.post(
+    "/api/pos-terminals",
+    requireAuth,
+    requirePermission("settings:edit"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const validated = posTerminalSchema.parse(req.body);
+        const terminal = await storage.createPosTerminal({
+          ...validated,
+          companyId,
+        });
+        res.status(201).json(terminal);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to create POS terminal:", error);
+        res.status(500).json({ error: "Falha ao criar terminal PDV" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/pos-terminals/:id",
+    requireAuth,
+    requirePermission("settings:edit"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const id = parseInt(req.params.id);
+        const validated = posTerminalSchema.partial().parse(req.body);
+        const terminal = await storage.updatePosTerminal(
+          id,
+          companyId,
+          validated
+        );
+        if (!terminal) {
+          return res.status(404).json({ error: "Terminal não encontrado" });
+        }
+        res.json(terminal);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to update POS terminal:", error);
+        res.status(500).json({ error: "Falha ao atualizar terminal PDV" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/pos-terminals/:id",
+    requireAuth,
+    requirePermission("settings:edit"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const id = parseInt(req.params.id);
+        await storage.deletePosTerminal(id, companyId);
+        res.status(204).send();
+      } catch (error) {
+        console.error("Failed to delete POS terminal:", error);
+        res.status(500).json({ error: "Falha ao excluir terminal PDV" });
+      }
+    }
+  );
 
   return httpServer;
 }

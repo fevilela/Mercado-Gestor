@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth";
 
 type PaymentMethod = "pix" | "credito" | "debito" | null;
 type FiscalStatus = "idle" | "sending" | "success" | "pending_fiscal";
@@ -66,6 +67,7 @@ export default function POS() {
   const [sangriaReason, setSangriaReason] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { hasPermission } = useAuth();
 
   const { data: cashRegisterData, isLoading: isLoadingCashRegister } = useQuery(
     {
@@ -627,7 +629,7 @@ export default function POS() {
                 <FileCheck className="h-3 w-3 mr-1" /> Modo Offline
               </Badge>
             )}
-            {cashRegister && (
+            {cashRegister && hasPermission("pos:sangria") && (
               <Button
                 variant="secondary"
                 className="gap-2"
@@ -1209,10 +1211,16 @@ export default function POS() {
                   Voltar
                 </Button>
               </Link>
-              <Button size="lg" onClick={() => setShowOpenCashDialog(true)}>
-                <Wallet className="mr-2 h-4 w-4" />
-                Abrir Caixa
-              </Button>
+              {hasPermission("pos:cash_open") ? (
+                <Button size="lg" onClick={() => setShowOpenCashDialog(true)}>
+                  <Wallet className="mr-2 h-4 w-4" />
+                  Abrir Caixa
+                </Button>
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  Você não tem permissão para abrir o caixa
+                </div>
+              )}
             </div>
           </div>
         </div>

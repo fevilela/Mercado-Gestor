@@ -21,6 +21,10 @@ import {
   ScanBarcode,
   Users,
   ArrowRight,
+  Monitor,
+  Plus,
+  Trash2,
+  Edit2,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
@@ -57,6 +61,16 @@ interface CompanySettings {
   barcodeScannerEnabled?: boolean;
   barcodeScannerAutoAdd?: boolean;
   barcodeScannerBeep?: boolean;
+}
+
+interface PosTerminal {
+  id?: number;
+  name: string;
+  code: string;
+  isAutonomous: boolean;
+  requiresSangria: boolean;
+  requiresSuprimento: boolean;
+  isActive: boolean;
 }
 
 export default function Settings() {
@@ -96,9 +110,24 @@ export default function Settings() {
   const [printerStatus, setPrinterStatus] = useState<
     "idle" | "testing" | "connected"
   >("idle");
+  const [terminals, setTerminals] = useState<PosTerminal[]>([]);
+  const [editingTerminal, setEditingTerminal] = useState<PosTerminal | null>(
+    null
+  );
+  const [newTerminal, setNewTerminal] = useState<PosTerminal>({
+    name: "",
+    code: "",
+    isAutonomous: false,
+    requiresSangria: true,
+    requiresSuprimento: true,
+    isActive: true,
+  });
+  const [showNewTerminalForm, setShowNewTerminalForm] = useState(false);
+  const [savingTerminal, setSavingTerminal] = useState(false);
 
   useEffect(() => {
     fetchSettings();
+    fetchTerminals();
   }, []);
 
   const fetchSettings = async () => {
@@ -115,6 +144,115 @@ export default function Settings() {
       console.error("Failed to fetch settings:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTerminals = async () => {
+    try {
+      const response = await fetch("/api/pos-terminals");
+      if (response.ok) {
+        const data = await response.json();
+        setTerminals(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch terminals:", error);
+    }
+  };
+
+  const handleCreateTerminal = async () => {
+    setSavingTerminal(true);
+    try {
+      const response = await fetch("/api/pos-terminals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newTerminal),
+      });
+
+      if (response.ok) {
+        const terminal = await response.json();
+        setTerminals([...terminals, terminal]);
+        setNewTerminal({
+          name: "",
+          code: "",
+          isAutonomous: false,
+          requiresSangria: true,
+          requiresSuprimento: true,
+          isActive: true,
+        });
+        setShowNewTerminalForm(false);
+        toast({
+          title: "Sucesso!",
+          description: "Terminal cadastrado com sucesso.",
+        });
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || "Erro ao criar terminal");
+      }
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error.message || "Não foi possível criar o terminal.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingTerminal(false);
+    }
+  };
+
+  const handleUpdateTerminal = async (terminal: PosTerminal) => {
+    if (!terminal.id) return;
+    setSavingTerminal(true);
+    try {
+      const response = await fetch(`/api/pos-terminals/${terminal.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(terminal),
+      });
+
+      if (response.ok) {
+        const updated = await response.json();
+        setTerminals(terminals.map((t) => (t.id === updated.id ? updated : t)));
+        setEditingTerminal(null);
+        toast({
+          title: "Sucesso!",
+          description: "Terminal atualizado com sucesso.",
+        });
+      } else {
+        throw new Error("Erro ao atualizar terminal");
+      }
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "Não foi possível atualizar o terminal.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingTerminal(false);
+    }
+  };
+
+  const handleDeleteTerminal = async (id: number) => {
+    if (!confirm("Deseja realmente excluir este terminal?")) return;
+    try {
+      const response = await fetch(`/api/pos-terminals/${id}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        setTerminals(terminals.filter((t) => t.id !== id));
+        toast({
+          title: "Sucesso!",
+          description: "Terminal excluído com sucesso.",
+        });
+      } else {
+        throw new Error("Erro ao excluir terminal");
+      }
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "Não foi possível excluir o terminal.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -202,11 +340,12 @@ export default function Settings() {
         </div>
 
         <Tabs defaultValue="payments" className="space-y-4">
-          <TabsList>
+          <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="company">Dados da Empresa</TabsTrigger>
             <TabsTrigger value="fiscal">Fiscal & Tributário</TabsTrigger>
             <TabsTrigger value="payments">Pagamentos & TEF</TabsTrigger>
             <TabsTrigger value="equipment">Equipamentos</TabsTrigger>
+            <TabsTrigger value="terminals">Terminais PDV</TabsTrigger>
             <TabsTrigger value="users">Usuários</TabsTrigger>
           </TabsList>
 
@@ -844,6 +983,345 @@ export default function Settings() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="terminals">
+            <Card>
+              <CardHeader className="flex flex-row items-center gap-4 space-y-0">
+                <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
+                  <Monitor className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <CardTitle>Terminais PDV</CardTitle>
+                  <CardDescription>
+                    Configure os terminais de ponto de venda
+                  </CardDescription>
+                </div>
+                <Button
+                  onClick={() => setShowNewTerminalForm(true)}
+                  disabled={showNewTerminalForm}
+                  data-testid="button-add-terminal"
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Novo Terminal
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {showNewTerminalForm && (
+                  <div className="border rounded-lg p-4 space-y-4 bg-muted/50">
+                    <h4 className="font-medium">Novo Terminal</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="terminal-name">Nome</Label>
+                        <Input
+                          id="terminal-name"
+                          placeholder="Ex: Caixa 01"
+                          value={newTerminal.name}
+                          onChange={(e) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              name: e.target.value,
+                            })
+                          }
+                          data-testid="input-terminal-name"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="terminal-code">Código</Label>
+                        <Input
+                          id="terminal-code"
+                          placeholder="Ex: CX01"
+                          value={newTerminal.code}
+                          onChange={(e) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              code: e.target.value,
+                            })
+                          }
+                          data-testid="input-terminal-code"
+                        />
+                      </div>
+                    </div>
+                    <Separator />
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label>Caixa Autônomo</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Não requer abertura/fechamento diário
+                          </p>
+                        </div>
+                        <Switch
+                          checked={newTerminal.isAutonomous}
+                          onCheckedChange={(checked) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              isAutonomous: checked,
+                            })
+                          }
+                          data-testid="switch-terminal-autonomous"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label>Exigir Sangria</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Requer permissão pos:sangria
+                          </p>
+                        </div>
+                        <Switch
+                          checked={newTerminal.requiresSangria}
+                          onCheckedChange={(checked) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              requiresSangria: checked,
+                            })
+                          }
+                          data-testid="switch-terminal-sangria"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label>Exigir Suprimento</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Requer permissão pos:suprimento
+                          </p>
+                        </div>
+                        <Switch
+                          checked={newTerminal.requiresSuprimento}
+                          onCheckedChange={(checked) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              requiresSuprimento: checked,
+                            })
+                          }
+                          data-testid="switch-terminal-suprimento"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowNewTerminalForm(false)}
+                        data-testid="button-cancel-terminal"
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        onClick={handleCreateTerminal}
+                        disabled={
+                          savingTerminal ||
+                          !newTerminal.name ||
+                          !newTerminal.code
+                        }
+                        data-testid="button-save-terminal"
+                      >
+                        {savingTerminal ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Salvando...
+                          </>
+                        ) : (
+                          "Salvar Terminal"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {terminals.length === 0 && !showNewTerminalForm ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Monitor className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>Nenhum terminal cadastrado</p>
+                    <p className="text-sm">
+                      Clique em "Novo Terminal" para adicionar
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {terminals.map((terminal) => (
+                      <div
+                        key={terminal.id}
+                        className="border rounded-lg p-4 flex items-center justify-between"
+                        data-testid={`terminal-item-${terminal.id}`}
+                      >
+                        {editingTerminal?.id === terminal.id ? (
+                          <div className="flex-1 space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label>Nome</Label>
+                                <Input
+                                  value={editingTerminal.name}
+                                  onChange={(e) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      name: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Código</Label>
+                                <Input
+                                  value={editingTerminal.code}
+                                  onChange={(e) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      code: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-4">
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={editingTerminal.isAutonomous}
+                                  onCheckedChange={(checked) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      isAutonomous: checked,
+                                    })
+                                  }
+                                />
+                                <Label className="text-sm">Autônomo</Label>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={editingTerminal.requiresSangria}
+                                  onCheckedChange={(checked) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      requiresSangria: checked,
+                                    })
+                                  }
+                                />
+                                <Label className="text-sm">Sangria</Label>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={editingTerminal.requiresSuprimento}
+                                  onCheckedChange={(checked) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      requiresSuprimento: checked,
+                                    })
+                                  }
+                                />
+                                <Label className="text-sm">Suprimento</Label>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={editingTerminal.isActive}
+                                  onCheckedChange={(checked) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      isActive: checked,
+                                    })
+                                  }
+                                />
+                                <Label className="text-sm">Ativo</Label>
+                              </div>
+                            </div>
+                            <div className="flex gap-2 justify-end">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setEditingTerminal(null)}
+                              >
+                                Cancelar
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() =>
+                                  handleUpdateTerminal(editingTerminal)
+                                }
+                                disabled={savingTerminal}
+                              >
+                                {savingTerminal ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  "Salvar"
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-4">
+                              <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-medium">
+                                {terminal.code.substring(0, 2).toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="font-medium flex items-center gap-2">
+                                  {terminal.name}
+                                  {!terminal.isActive && (
+                                    <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground">
+                                      Inativo
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-sm text-muted-foreground flex items-center gap-2">
+                                  <span>Código: {terminal.code}</span>
+                                  {terminal.isAutonomous && (
+                                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                                      Autônomo
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setEditingTerminal(terminal)}
+                                data-testid={`button-edit-terminal-${terminal.id}`}
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() =>
+                                  terminal.id &&
+                                  handleDeleteTerminal(terminal.id)
+                                }
+                                className="text-destructive hover:text-destructive"
+                                data-testid={`button-delete-terminal-${terminal.id}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <Separator />
+                <div className="rounded-md bg-indigo-50 p-4 space-y-2">
+                  <h4 className="text-sm font-medium text-indigo-900">
+                    Sobre Terminais
+                  </h4>
+                  <ul className="text-xs text-indigo-700 space-y-1 list-disc list-inside">
+                    <li>Cada terminal representa um ponto de venda físico</li>
+                    <li>
+                      Terminais autônomos não requerem abertura/fechamento de
+                      caixa
+                    </li>
+                    <li>
+                      Configure permissões de sangria e suprimento por terminal
+                    </li>
+                    <li>
+                      Acesse o histórico de movimentações em Caixa &gt;
+                      Histórico
+                    </li>
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="users">

@@ -5,5 +5,6 @@ declare module "express-session" {
     userId: string;
     companyId: number;
     roleId: number;
+    userPermissions: string[];
   }
 }

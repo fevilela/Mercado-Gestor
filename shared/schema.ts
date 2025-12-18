@@ -345,6 +345,7 @@ export const companySettings = pgTable("company_settings", {
   barcodeScannerEnabled: boolean("barcode_scanner_enabled").default(true),
   barcodeScannerAutoAdd: boolean("barcode_scanner_auto_add").default(true),
   barcodeScannerBeep: boolean("barcode_scanner_beep").default(true),
+  cashRegisterRequired: boolean("cash_register_required").default(true),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
@@ -423,11 +424,33 @@ export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type Notification = typeof notifications.$inferSelect;
 
 // ============================================
+// POS TERMINALS: Terminais PDV
+// ============================================
+export const posTerminals = pgTable("pos_terminals", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  requiresOpening: boolean("requires_opening").default(true),
+  requiresClosing: boolean("requires_closing").default(true),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPosTerminalSchema = createInsertSchema(posTerminals).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertPosTerminal = z.infer<typeof insertPosTerminalSchema>;
+export type PosTerminal = typeof posTerminals.$inferSelect;
+
+// ============================================
 // CASH REGISTER: Controle de Caixa
 // ============================================
 export const cashRegisters = pgTable("cash_registers", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id").notNull(),
+  terminalId: integer("terminal_id"),
   userId: varchar("user_id").notNull(),
   userName: text("user_name").notNull(),
   openingAmount: decimal("opening_amount", {

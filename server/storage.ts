@@ -1,474 +1,592 @@
-import { sql } from "drizzle-orm";
+import { db } from "./db";
 import {
-  pgTable,
-  text,
-  varchar,
-  integer,
-  decimal,
-  timestamp,
-  boolean,
-  serial,
-  jsonb,
-} from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+  products,
+  productVariations,
+  productMedia,
+  kitItems,
+  customers,
+  suppliers,
+  sales,
+  saleItems,
+  companySettings,
+  payables,
+  receivables,
+  notifications,
+  inventoryMovements,
+  posTerminals,
+  cashRegisters,
+  cashMovements,
+  users,
+  type InsertProduct,
+  type InsertCustomer,
+  type InsertSupplier,
+  type InsertSale,
+  type InsertSaleItem,
+  type InsertCompanySettings,
+  type InsertPayable,
+  type InsertReceivable,
+  type InsertNotification,
+  type InsertInventoryMovement,
+  type InsertPosTerminal,
+  type InsertCashRegister,
+  type InsertCashMovement,
+} from "@shared/schema";
+import { eq, and, desc, sql } from "drizzle-orm";
 
-// ============================================
-// MULTI-TENANCY: Companies (Empresas)
-// ============================================
-export const companies = pgTable("companies", {
-  id: serial("id").primaryKey(),
-  cnpj: text("cnpj").notNull().unique(),
-  ie: text("ie"),
-  razaoSocial: text("razao_social").notNull(),
-  nomeFantasia: text("nome_fantasia"),
-  email: text("email"),
-  phone: text("phone"),
-  address: text("address"),
-  city: text("city"),
-  state: text("state"),
-  zipCode: text("zip_code"),
-  isActive: boolean("is_active").default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+export const storage = {
+  async getAllProducts(companyId: number) {
+    return await db
+      .select()
+      .from(products)
+      .where(eq(products.companyId, companyId))
+      .orderBy(desc(products.createdAt));
+  },
 
-export const insertCompanySchema = createInsertSchema(companies).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertCompany = z.infer<typeof insertCompanySchema>;
-export type Company = typeof companies.$inferSelect;
+  async getProduct(id: number, companyId: number) {
+    const [product] = await db
+      .select()
+      .from(products)
+      .where(and(eq(products.id, id), eq(products.companyId, companyId)))
+      .limit(1);
+    return product;
+  },
 
-// ============================================
-// RBAC: Roles (Perfis/Funções)
-// ============================================
-export const roles = pgTable("roles", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id").notNull(),
-  name: text("name").notNull(),
-  description: text("description"),
-  isSystemRole: boolean("is_system_role").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async getProductVariations(productId: number) {
+    return await db
+      .select()
+      .from(productVariations)
+      .where(eq(productVariations.productId, productId));
+  },
 
-export const insertRoleSchema = createInsertSchema(roles).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertRole = z.infer<typeof insertRoleSchema>;
-export type Role = typeof roles.$inferSelect;
+  async getProductMedia(productId: number) {
+    return await db
+      .select()
+      .from(productMedia)
+      .where(eq(productMedia.productId, productId));
+  },
 
-// ============================================
-// RBAC: Permissions (Permissões)
-// ============================================
-export const permissions = pgTable("permissions", {
-  id: serial("id").primaryKey(),
-  module: text("module").notNull(),
-  action: text("action").notNull(),
-  description: text("description"),
-});
+  async getKitItems(kitProductId: number) {
+    return await db
+      .select()
+      .from(kitItems)
+      .where(eq(kitItems.kitProductId, kitProductId));
+  },
 
-export const insertPermissionSchema = createInsertSchema(permissions).omit({
-  id: true,
-});
-export type InsertPermission = z.infer<typeof insertPermissionSchema>;
-export type Permission = typeof permissions.$inferSelect;
+  async deleteProduct(id: number, companyId: number) {
+    await db
+      .delete(products)
+      .where(and(eq(products.id, id), eq(products.companyId, companyId)));
+  },
 
-// ============================================
-// RBAC: Role Permissions (Permissões do Perfil)
-// ============================================
-export const rolePermissions = pgTable("role_permissions", {
-  id: serial("id").primaryKey(),
-  roleId: integer("role_id").notNull(),
-  permissionId: integer("permission_id").notNull(),
-});
+  async updateProductStock(
+    productId: number,
+    companyId: number,
+    quantity: number
+  ) {
+    const [product] = await db
+      .update(products)
+      .set({ stock: sql`${products.stock} + ${quantity}` })
+      .where(and(eq(products.id, productId), eq(products.companyId, companyId)))
+      .returning();
+    return product;
+  },
 
-export const insertRolePermissionSchema = createInsertSchema(
-  rolePermissions
-).omit({
-  id: true,
-});
-export type InsertRolePermission = z.infer<typeof insertRolePermissionSchema>;
-export type RolePermission = typeof rolePermissions.$inferSelect;
+  async getAllCustomers(companyId: number) {
+    return await db
+      .select()
+      .from(customers)
+      .where(eq(customers.companyId, companyId))
+      .orderBy(desc(customers.createdAt));
+  },
 
-// ============================================
-// USERS: Usuários (Funcionários)
-// ============================================
-export const users = pgTable("users", {
-  id: varchar("id")
-    .primaryKey()
-    .default(sql`gen_random_uuid()`),
-  companyId: integer("company_id").notNull(),
-  roleId: integer("role_id").notNull(),
-  username: text("username").notNull(),
-  email: text("email").notNull(),
-  password: text("password").notNull(),
-  name: text("name").notNull(),
-  phone: text("phone"),
-  isActive: boolean("is_active").default(true),
-  lastLogin: timestamp("last_login"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async createCustomer(data: InsertCustomer) {
+    const [customer] = await db.insert(customers).values(data).returning();
+    return customer;
+  },
 
-export const insertUserSchema = createInsertSchema(users).omit({
-  id: true,
-  lastLogin: true,
-  createdAt: true,
-});
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+  async updateCustomer(
+    id: number,
+    companyId: number,
+    data: Partial<InsertCustomer>
+  ) {
+    const [customer] = await db
+      .update(customers)
+      .set(data)
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)))
+      .returning();
+    return customer;
+  },
 
-// User with role information for frontend
-export type UserWithRole = User & { role: Role; permissions: string[] };
+  async deleteCustomer(id: number, companyId: number) {
+    await db
+      .delete(customers)
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)));
+  },
 
-export const products = pgTable("products", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id"),
-  name: text("name").notNull(),
-  ean: text("ean"),
-  sku: text("sku"),
-  category: text("category").notNull(),
-  unit: text("unit").notNull().default("UN"),
-  brand: text("brand"),
-  type: text("type"),
-  ncm: text("ncm"),
-  cest: text("cest"),
-  description: text("description"),
-  mainImageUrl: text("main_image_url"),
-  purchasePrice: decimal("purchase_price", { precision: 10, scale: 2 }),
-  margin: decimal("margin", { precision: 5, scale: 2 }),
-  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
-  promoPrice: decimal("promo_price", { precision: 10, scale: 2 }),
-  promoStart: timestamp("promo_start"),
-  promoEnd: timestamp("promo_end"),
-  stock: integer("stock").notNull().default(0),
-  minStock: integer("min_stock").default(10),
-  maxStock: integer("max_stock").default(100),
-  isKit: boolean("is_kit").default(false),
-  isActive: boolean("is_active").default(true),
-  supplierId: integer("supplier_id"),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
+  async getAllSuppliers(companyId: number) {
+    return await db
+      .select()
+      .from(suppliers)
+      .where(eq(suppliers.companyId, companyId))
+      .orderBy(desc(suppliers.createdAt));
+  },
 
-export const insertProductSchema = createInsertSchema(products).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-export type InsertProduct = z.infer<typeof insertProductSchema>;
-export type Product = typeof products.$inferSelect;
+  async createSupplier(data: InsertSupplier) {
+    const [supplier] = await db.insert(suppliers).values(data).returning();
+    return supplier;
+  },
 
-export const productVariations = pgTable("product_variations", {
-  id: serial("id").primaryKey(),
-  productId: integer("product_id").notNull(),
-  sku: text("sku"),
-  name: text("name").notNull(),
-  attributes: jsonb("attributes"),
-  extraPrice: decimal("extra_price", { precision: 10, scale: 2 }).default("0"),
-  stock: integer("stock").notNull().default(0),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async updateSupplier(
+    id: number,
+    companyId: number,
+    data: Partial<InsertSupplier>
+  ) {
+    const [supplier] = await db
+      .update(suppliers)
+      .set(data)
+      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyId)))
+      .returning();
+    return supplier;
+  },
 
-export const insertProductVariationSchema = createInsertSchema(
-  productVariations
-).omit({ id: true, createdAt: true });
-export type InsertProductVariation = z.infer<
-  typeof insertProductVariationSchema
->;
-export type ProductVariation = typeof productVariations.$inferSelect;
+  async deleteSupplier(id: number, companyId: number) {
+    await db
+      .delete(suppliers)
+      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyId)));
+  },
 
-export const productMedia = pgTable("product_media", {
-  id: serial("id").primaryKey(),
-  productId: integer("product_id").notNull(),
-  url: text("url").notNull(),
-  isPrimary: boolean("is_primary").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async getAllSales(companyId: number) {
+    return await db
+      .select()
+      .from(sales)
+      .where(eq(sales.companyId, companyId))
+      .orderBy(desc(sales.createdAt));
+  },
 
-export const insertProductMediaSchema = createInsertSchema(productMedia).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertProductMedia = z.infer<typeof insertProductMediaSchema>;
-export type ProductMedia = typeof productMedia.$inferSelect;
+  async getSalesStats(companyId: number) {
+    const [result] = await db
+      .select({
+        totalSales: sql<number>`COALESCE(SUM(${sales.total}), 0)`,
+        totalTransactions: sql<number>`COUNT(*)`,
+      })
+      .from(sales)
+      .where(eq(sales.companyId, companyId));
+    return result;
+  },
 
-export const kitItems = pgTable("kit_items", {
-  id: serial("id").primaryKey(),
-  kitProductId: integer("kit_product_id").notNull(),
-  productId: integer("product_id").notNull(),
-  quantity: integer("quantity").notNull().default(1),
-});
+  async getSale(id: number, companyId: number) {
+    const [sale] = await db
+      .select()
+      .from(sales)
+      .where(and(eq(sales.id, id), eq(sales.companyId, companyId)))
+      .limit(1);
+    return sale;
+  },
 
-export const insertKitItemSchema = createInsertSchema(kitItems).omit({
-  id: true,
-});
-export type InsertKitItem = z.infer<typeof insertKitItemSchema>;
-export type KitItem = typeof kitItems.$inferSelect;
+  async getSaleItems(saleId: number) {
+    return await db
+      .select()
+      .from(saleItems)
+      .where(eq(saleItems.saleId, saleId));
+  },
 
-export const customers = pgTable("customers", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id"),
-  name: text("name").notNull(),
-  email: text("email"),
-  phone: text("phone"),
-  cpfCnpj: text("cpf_cnpj"),
-  type: text("type").notNull().default("Regular"),
-  address: text("address"),
-  city: text("city"),
-  state: text("state"),
-  zipCode: text("zip_code"),
-  creditLimit: decimal("credit_limit", { precision: 10, scale: 2 }).default(
-    "0"
-  ),
-  loyaltyPoints: integer("loyalty_points").default(0),
-  notes: text("notes"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async getSaleItemsBatch(saleIds: number[]) {
+    if (saleIds.length === 0) {
+      return new Map();
+    }
+    const items = await db
+      .select()
+      .from(saleItems)
+      .where(
+        sql`${saleItems.saleId} IN (${sql.join(
+          saleIds.map((id) => sql`${id}`),
+          sql`, `
+        )})`
+      );
+    const map = new Map<number, typeof items>();
+    for (const item of items) {
+      const existing = map.get(item.saleId) || [];
+      existing.push(item);
+      map.set(item.saleId, existing);
+    }
+    return map;
+  },
 
-export const insertCustomerSchema = createInsertSchema(customers).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
-export type Customer = typeof customers.$inferSelect;
+  async createSale(saleData: InsertSale, items: InsertSaleItem[]) {
+    const [sale] = await db.insert(sales).values(saleData).returning();
+    if (items.length > 0) {
+      const itemsWithSaleId = items.map((item) => ({
+        ...item,
+        saleId: sale.id,
+      }));
+      await db.insert(saleItems).values(itemsWithSaleId);
+    }
+    return sale;
+  },
 
-export const suppliers = pgTable("suppliers", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id"),
-  name: text("name").notNull(),
-  contact: text("contact"),
-  phone: text("phone"),
-  email: text("email"),
-  cnpj: text("cnpj"),
-  address: text("address"),
-  city: text("city"),
-  state: text("state"),
-  zipCode: text("zip_code"),
-  paymentTerms: text("payment_terms"),
-  leadTime: integer("lead_time"),
-  rating: integer("rating").default(0),
-  notes: text("notes"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async updateSaleNfceStatus(
+    id: number,
+    companyId: number,
+    nfceStatus: string,
+    nfceProtocol?: string,
+    nfceKey?: string
+  ) {
+    const [sale] = await db
+      .update(sales)
+      .set({ nfceStatus, nfceProtocol, nfceKey })
+      .where(and(eq(sales.id, id), eq(sales.companyId, companyId)))
+      .returning();
+    return sale;
+  },
 
-export const insertSupplierSchema = createInsertSchema(suppliers).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
-export type Supplier = typeof suppliers.$inferSelect;
+  async getCompanySettings(companyId: number) {
+    const [settings] = await db
+      .select()
+      .from(companySettings)
+      .where(eq(companySettings.companyId, companyId))
+      .limit(1);
+    return settings;
+  },
 
-export const sales = pgTable("sales", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id"),
-  userId: varchar("user_id"),
-  customerId: integer("customer_id"),
-  customerName: text("customer_name").notNull().default("Consumidor Final"),
-  total: decimal("total", { precision: 10, scale: 2 }).notNull(),
-  itemsCount: integer("items_count").notNull(),
-  paymentMethod: text("payment_method").notNull(),
-  status: text("status").notNull().default("Concluído"),
-  nfceProtocol: text("nfce_protocol"),
-  nfceStatus: text("nfce_status").notNull().default("Pendente"),
-  nfceKey: text("nfce_key"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async updateCompanySettings(
+    companyId: number,
+    data: Partial<InsertCompanySettings>
+  ) {
+    const existing = await this.getCompanySettings(companyId);
+    if (existing) {
+      const [updated] = await db
+        .update(companySettings)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(companySettings.companyId, companyId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(companySettings)
+        .values({ ...data, companyId })
+        .returning();
+      return created;
+    }
+  },
 
-export const insertSaleSchema = createInsertSchema(sales).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertSale = z.infer<typeof insertSaleSchema>;
-export type Sale = typeof sales.$inferSelect;
+  async getAllPayables(companyId: number) {
+    return await db
+      .select()
+      .from(payables)
+      .where(eq(payables.companyId, companyId))
+      .orderBy(desc(payables.dueDate));
+  },
 
-export const saleItems = pgTable("sale_items", {
-  id: serial("id").primaryKey(),
-  saleId: integer("sale_id").notNull(),
-  productId: integer("product_id").notNull(),
-  productName: text("product_name").notNull(),
-  quantity: integer("quantity").notNull(),
-  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
-  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
-});
+  async getPayable(id: number, companyId: number) {
+    const [payable] = await db
+      .select()
+      .from(payables)
+      .where(and(eq(payables.id, id), eq(payables.companyId, companyId)))
+      .limit(1);
+    return payable;
+  },
 
-export const insertSaleItemSchema = createInsertSchema(saleItems).omit({
-  id: true,
-});
-export type InsertSaleItem = z.infer<typeof insertSaleItemSchema>;
-export type SaleItem = typeof saleItems.$inferSelect;
+  async createPayable(data: InsertPayable) {
+    const [payable] = await db.insert(payables).values(data).returning();
+    return payable;
+  },
 
-export const inventoryMovements = pgTable("inventory_movements", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id"),
-  productId: integer("product_id").notNull(),
-  variationId: integer("variation_id"),
-  type: text("type").notNull(),
-  quantity: integer("quantity").notNull(),
-  reason: text("reason"),
-  referenceId: integer("reference_id"),
-  referenceType: text("reference_type"),
-  notes: text("notes"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async updatePayable(
+    id: number,
+    companyId: number,
+    data: Partial<InsertPayable>
+  ) {
+    const [payable] = await db
+      .update(payables)
+      .set(data)
+      .where(and(eq(payables.id, id), eq(payables.companyId, companyId)))
+      .returning();
+    return payable;
+  },
 
-export const insertInventoryMovementSchema = createInsertSchema(
-  inventoryMovements
-).omit({ id: true, createdAt: true });
-export type InsertInventoryMovement = z.infer<
-  typeof insertInventoryMovementSchema
->;
-export type InventoryMovement = typeof inventoryMovements.$inferSelect;
+  async deletePayable(id: number, companyId: number) {
+    await db
+      .delete(payables)
+      .where(and(eq(payables.id, id), eq(payables.companyId, companyId)));
+  },
 
-export const companySettings = pgTable("company_settings", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id"),
-  cnpj: text("cnpj"),
-  ie: text("ie"),
-  razaoSocial: text("razao_social"),
-  nomeFantasia: text("nome_fantasia"),
-  fiscalEnabled: boolean("fiscal_enabled").default(false),
-  cscToken: text("csc_token"),
-  cscId: text("csc_id"),
-  stoneCode: text("stone_code"),
-  stoneEnabled: boolean("stone_enabled").default(false),
-  mpAccessToken: text("mp_access_token"),
-  mpTerminalId: text("mp_terminal_id"),
-  mpEnabled: boolean("mp_enabled").default(false),
-  printerEnabled: boolean("printer_enabled").default(false),
-  printerModel: text("printer_model"),
-  printerPort: text("printer_port"),
-  printerBaudRate: integer("printer_baud_rate").default(9600),
-  printerColumns: integer("printer_columns").default(48),
-  printerCutCommand: boolean("printer_cut_command").default(true),
-  printerBeepOnSale: boolean("printer_beep_on_sale").default(true),
-  barcodeScannerEnabled: boolean("barcode_scanner_enabled").default(true),
-  barcodeScannerAutoAdd: boolean("barcode_scanner_auto_add").default(true),
-  barcodeScannerBeep: boolean("barcode_scanner_beep").default(true),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
+  async getAllReceivables(companyId: number) {
+    return await db
+      .select()
+      .from(receivables)
+      .where(eq(receivables.companyId, companyId))
+      .orderBy(desc(receivables.dueDate));
+  },
 
-export const insertCompanySettingsSchema = createInsertSchema(
-  companySettings
-).omit({ id: true, updatedAt: true });
-export type InsertCompanySettings = z.infer<typeof insertCompanySettingsSchema>;
-export type CompanySettings = typeof companySettings.$inferSelect;
+  async getReceivable(id: number, companyId: number) {
+    const [receivable] = await db
+      .select()
+      .from(receivables)
+      .where(and(eq(receivables.id, id), eq(receivables.companyId, companyId)))
+      .limit(1);
+    return receivable;
+  },
 
-export const payables = pgTable("payables", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id"),
-  description: text("description").notNull(),
-  supplierId: integer("supplier_id"),
-  supplierName: text("supplier_name"),
-  category: text("category").notNull().default("Outros"),
-  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
-  dueDate: timestamp("due_date").notNull(),
-  paidDate: timestamp("paid_date"),
-  status: text("status").notNull().default("Pendente"),
-  notes: text("notes"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async createReceivable(data: InsertReceivable) {
+    const [receivable] = await db.insert(receivables).values(data).returning();
+    return receivable;
+  },
 
-export const insertPayableSchema = createInsertSchema(payables).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertPayable = z.infer<typeof insertPayableSchema>;
-export type Payable = typeof payables.$inferSelect;
+  async updateReceivable(
+    id: number,
+    companyId: number,
+    data: Partial<InsertReceivable>
+  ) {
+    const [receivable] = await db
+      .update(receivables)
+      .set(data)
+      .where(and(eq(receivables.id, id), eq(receivables.companyId, companyId)))
+      .returning();
+    return receivable;
+  },
 
-export const receivables = pgTable("receivables", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id"),
-  description: text("description").notNull(),
-  customerId: integer("customer_id"),
-  customerName: text("customer_name"),
-  saleId: integer("sale_id"),
-  category: text("category").notNull().default("Vendas"),
-  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
-  dueDate: timestamp("due_date").notNull(),
-  receivedDate: timestamp("received_date"),
-  status: text("status").notNull().default("Pendente"),
-  notes: text("notes"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async deleteReceivable(id: number, companyId: number) {
+    await db
+      .delete(receivables)
+      .where(and(eq(receivables.id, id), eq(receivables.companyId, companyId)));
+  },
 
-export const insertReceivableSchema = createInsertSchema(receivables).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertReceivable = z.infer<typeof insertReceivableSchema>;
-export type Receivable = typeof receivables.$inferSelect;
+  async getAllNotifications(companyId: number, userId?: string) {
+    if (userId) {
+      return await db
+        .select()
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.companyId, companyId),
+            eq(notifications.userId, userId)
+          )
+        )
+        .orderBy(desc(notifications.createdAt));
+    }
+    return await db
+      .select()
+      .from(notifications)
+      .where(eq(notifications.companyId, companyId))
+      .orderBy(desc(notifications.createdAt));
+  },
 
-// ============================================
-// NOTIFICATIONS: Sistema de Notificações
-// ============================================
-export const notifications = pgTable("notifications", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id").notNull(),
-  userId: varchar("user_id"),
-  type: text("type").notNull(),
-  title: text("title").notNull(),
-  message: text("message").notNull(),
-  referenceId: integer("reference_id"),
-  referenceType: text("reference_type"),
-  isRead: boolean("is_read").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async getUnreadNotificationsCount(companyId: number, userId?: string) {
+    const conditions = [
+      eq(notifications.companyId, companyId),
+      eq(notifications.isRead, false),
+    ];
+    if (userId) {
+      conditions.push(eq(notifications.userId, userId));
+    }
+    const [result] = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(notifications)
+      .where(and(...conditions));
+    return result.count;
+  },
 
-export const insertNotificationSchema = createInsertSchema(notifications).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertNotification = z.infer<typeof insertNotificationSchema>;
-export type Notification = typeof notifications.$inferSelect;
+  async createNotification(data: InsertNotification) {
+    const [notification] = await db
+      .insert(notifications)
+      .values(data)
+      .returning();
+    return notification;
+  },
 
-// ============================================
-// CASH REGISTER: Controle de Caixa
-// ============================================
-export const cashRegisters = pgTable("cash_registers", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id").notNull(),
-  userId: varchar("user_id").notNull(),
-  userName: text("user_name").notNull(),
-  openingAmount: decimal("opening_amount", {
-    precision: 10,
-    scale: 2,
-  }).notNull(),
-  closingAmount: decimal("closing_amount", { precision: 10, scale: 2 }),
-  expectedAmount: decimal("expected_amount", { precision: 10, scale: 2 }),
-  difference: decimal("difference", { precision: 10, scale: 2 }),
-  status: text("status").notNull().default("open"),
-  notes: text("notes"),
-  openedAt: timestamp("opened_at").defaultNow(),
-  closedAt: timestamp("closed_at"),
-});
+  async markNotificationAsRead(id: number, companyId: number) {
+    const [notification] = await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(
+        and(eq(notifications.id, id), eq(notifications.companyId, companyId))
+      )
+      .returning();
+    return notification;
+  },
 
-export const insertCashRegisterSchema = createInsertSchema(cashRegisters).omit({
-  id: true,
-  openedAt: true,
-  closedAt: true,
-});
-export type InsertCashRegister = z.infer<typeof insertCashRegisterSchema>;
-export type CashRegister = typeof cashRegisters.$inferSelect;
+  async markAllNotificationsAsRead(companyId: number, userId?: string) {
+    const conditions = [eq(notifications.companyId, companyId)];
+    if (userId) {
+      conditions.push(eq(notifications.userId, userId));
+    }
+    await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(and(...conditions));
+  },
 
-// ============================================
-// CASH MOVEMENTS: Movimentações de Caixa (Sangria, Suprimento, etc.)
-// ============================================
-export const cashMovements = pgTable("cash_movements", {
-  id: serial("id").primaryKey(),
-  cashRegisterId: integer("cash_register_id").notNull(),
-  companyId: integer("company_id").notNull(),
-  userId: varchar("user_id").notNull(),
-  userName: text("user_name").notNull(),
-  type: text("type").notNull(),
-  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
-  reason: text("reason"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+  async deleteNotification(id: number, companyId: number) {
+    await db
+      .delete(notifications)
+      .where(
+        and(eq(notifications.id, id), eq(notifications.companyId, companyId))
+      );
+  },
 
-export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({
-  id: true,
-  createdAt: true,
-});
-export type InsertCashMovement = z.infer<typeof insertCashMovementSchema>;
-export type CashMovement = typeof cashMovements.$inferSelect;
+  async getInventoryMovements(companyId: number, productId?: number) {
+    if (productId) {
+      return await db
+        .select()
+        .from(inventoryMovements)
+        .where(
+          and(
+            eq(inventoryMovements.companyId, companyId),
+            eq(inventoryMovements.productId, productId)
+          )
+        )
+        .orderBy(desc(inventoryMovements.createdAt));
+    }
+    return await db
+      .select()
+      .from(inventoryMovements)
+      .where(eq(inventoryMovements.companyId, companyId))
+      .orderBy(desc(inventoryMovements.createdAt));
+  },
+
+  async createInventoryMovement(data: InsertInventoryMovement) {
+    const [movement] = await db
+      .insert(inventoryMovements)
+      .values(data)
+      .returning();
+    return movement;
+  },
+
+  async getOpenCashRegister(companyId: number) {
+    const [register] = await db
+      .select()
+      .from(cashRegisters)
+      .where(
+        and(
+          eq(cashRegisters.companyId, companyId),
+          eq(cashRegisters.status, "open")
+        )
+      )
+      .orderBy(desc(cashRegisters.openedAt))
+      .limit(1);
+    return register;
+  },
+
+  async openCashRegister(data: InsertCashRegister) {
+    const [register] = await db.insert(cashRegisters).values(data).returning();
+    return register;
+  },
+
+  async closeCashRegister(
+    id: number,
+    companyId: number,
+    closingAmount: number | string,
+    expectedAmount: number | string,
+    notes?: string
+  ) {
+    const closingNum =
+      typeof closingAmount === "string"
+        ? parseFloat(closingAmount)
+        : closingAmount;
+    const expectedNum =
+      typeof expectedAmount === "string"
+        ? parseFloat(expectedAmount)
+        : expectedAmount;
+    const difference = closingNum - expectedNum;
+    const [register] = await db
+      .update(cashRegisters)
+      .set({
+        closingAmount: closingNum.toString(),
+        expectedAmount: expectedNum.toString(),
+        difference: difference.toString(),
+        status: "closed",
+        closedAt: new Date(),
+        notes,
+      })
+      .where(
+        and(eq(cashRegisters.id, id), eq(cashRegisters.companyId, companyId))
+      )
+      .returning();
+    return register;
+  },
+
+  async getCashMovements(cashRegisterId: number) {
+    return await db
+      .select()
+      .from(cashMovements)
+      .where(eq(cashMovements.cashRegisterId, cashRegisterId))
+      .orderBy(desc(cashMovements.createdAt));
+  },
+
+  async createCashMovement(data: InsertCashMovement) {
+    const [movement] = await db.insert(cashMovements).values(data).returning();
+    return movement;
+  },
+
+  async getUser(userId: string) {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    return user;
+  },
+
+  async getAllPosTerminals(companyId: number) {
+    return await db
+      .select()
+      .from(posTerminals)
+      .where(eq(posTerminals.companyId, companyId))
+      .orderBy(desc(posTerminals.createdAt));
+  },
+
+  async getPosTerminal(id: number, companyId: number) {
+    const [terminal] = await db
+      .select()
+      .from(posTerminals)
+      .where(
+        and(eq(posTerminals.id, id), eq(posTerminals.companyId, companyId))
+      )
+      .limit(1);
+    return terminal;
+  },
+
+  async createPosTerminal(data: InsertPosTerminal) {
+    const [terminal] = await db.insert(posTerminals).values(data).returning();
+    return terminal;
+  },
+
+  async updatePosTerminal(
+    id: number,
+    companyId: number,
+    data: Partial<InsertPosTerminal>
+  ) {
+    const [terminal] = await db
+      .update(posTerminals)
+      .set(data)
+      .where(
+        and(eq(posTerminals.id, id), eq(posTerminals.companyId, companyId))
+      )
+      .returning();
+    return terminal;
+  },
+
+  async deletePosTerminal(id: number, companyId: number) {
+    await db
+      .delete(posTerminals)
+      .where(
+        and(eq(posTerminals.id, id), eq(posTerminals.companyId, companyId))
+      );
+  },
+
+  async getAllCashRegisters(companyId: number) {
+    return await db
+      .select()
+      .from(cashRegisters)
+      .where(eq(cashRegisters.companyId, companyId))
+      .orderBy(desc(cashRegisters.openedAt));
+  },
+
+  async getAllCashMovementsHistory(companyId: number) {
+    return await db
+      .select()
+      .from(cashMovements)
+      .where(eq(cashMovements.companyId, companyId))
+      .orderBy(desc(cashMovements.createdAt));
+  },
+};
