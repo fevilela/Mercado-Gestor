@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Loader2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -13,20 +14,13 @@ import {
   CardFooter,
 } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Building2,
-  User,
-  Mail,
-  Lock,
-  Phone,
-  MapPin,
-  Loader2,
-} from "lucide-react";
+import { Building2, User, Mail, Lock, Phone, MapPin } from "lucide-react";
 
 export default function Register() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [step, setStep] = useState(1);
+  const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [formData, setFormData] = useState({
     cnpj: "",
     razaoSocial: "",
@@ -87,6 +81,45 @@ export default function Register() {
   const handleCNPJChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatCNPJ(e.target.value);
     setFormData((prev) => ({ ...prev, cnpj: formatted }));
+  };
+
+  const fetchCNPJData = async (e: React.FocusEvent<HTMLInputElement>) => {
+    const cnpj = e.target.value.replace(/\D/g, "");
+
+    if (cnpj.length !== 14) {
+      return;
+    }
+
+    setLoadingCNPJ(true);
+    try {
+      const response = await fetch(
+        `https://www.receitaws.com.br/v1/cnpj/${cnpj}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === "OK") {
+          setFormData((prev) => ({
+            ...prev,
+            razaoSocial: data.nome || "",
+            nomeFantasia: data.fantasia || "",
+            email: data.email || prev.email,
+            phone: data.telefone || prev.phone,
+            address: data.logradouro || "",
+            city: data.municipio || "",
+            state: data.uf || "",
+            zipCode: data.cep || "",
+          }));
+          toast({
+            title: "Dados encontrados!",
+            description: "Informações do CNPJ preenchidas automaticamente.",
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao buscar CNPJ:", error);
+    } finally {
+      setLoadingCNPJ(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -170,15 +203,23 @@ export default function Register() {
               <>
                 <div className="space-y-2">
                   <Label htmlFor="cnpj">CNPJ *</Label>
-                  <Input
-                    id="cnpj"
-                    name="cnpj"
-                    placeholder="00.000.000/0000-00"
-                    value={formData.cnpj}
-                    onChange={handleCNPJChange}
-                    required
-                    data-testid="input-cnpj"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="cnpj"
+                      name="cnpj"
+                      placeholder="00.000.000/0000-00"
+                      value={formData.cnpj}
+                      onChange={handleCNPJChange}
+                      onBlur={fetchCNPJData}
+                      required
+                      data-testid="input-cnpj"
+                    />
+                    {loadingCNPJ && (
+                      <div className="absolute right-3 top-3">
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="razaoSocial">Razao Social *</Label>

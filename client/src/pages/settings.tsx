@@ -29,6 +29,7 @@ import {
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
 import {
   Select,
   SelectContent,
@@ -75,6 +76,7 @@ interface PosTerminal {
 
 export default function Settings() {
   const { toast } = useToast();
+  const { company } = useAuth();
   const [stoneStatus, setStoneStatus] = useState<
     "idle" | "connecting" | "connected"
   >("idle");
@@ -84,10 +86,10 @@ export default function Settings() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<CompanySettings>({
-    cnpj: "",
+    cnpj: company?.cnpj || "",
     ie: "",
-    razaoSocial: "",
-    nomeFantasia: "",
+    razaoSocial: company?.razaoSocial || "",
+    nomeFantasia: company?.nomeFantasia || "",
     fiscalEnabled: false,
     cscToken: "",
     cscId: "",
@@ -1145,7 +1147,8 @@ export default function Settings() {
                         className="border rounded-lg p-4 flex items-center justify-between"
                         data-testid={`terminal-item-${terminal.id}`}
                       >
-                        {editingTerminal?.id === terminal.id ? (
+                        {editingTerminal?.id === terminal.id &&
+                        editingTerminal ? (
                           <div className="flex-1 space-y-4">
                             <div className="grid grid-cols-2 gap-4">
                               <div className="space-y-2">
@@ -1163,7 +1166,7 @@ export default function Settings() {
                               <div className="space-y-2">
                                 <Label>Código</Label>
                                 <Input
-                                  value={editingTerminal.code}
+                                  value={editingTerminal.code || ""}
                                   onChange={(e) =>
                                     setEditingTerminal({
                                       ...editingTerminal,
@@ -1176,7 +1179,9 @@ export default function Settings() {
                             <div className="flex flex-wrap gap-4">
                               <div className="flex items-center gap-2">
                                 <Switch
-                                  checked={editingTerminal.isAutonomous}
+                                  checked={
+                                    editingTerminal.isAutonomous || false
+                                  }
                                   onCheckedChange={(checked) =>
                                     setEditingTerminal({
                                       ...editingTerminal,
@@ -1188,7 +1193,9 @@ export default function Settings() {
                               </div>
                               <div className="flex items-center gap-2">
                                 <Switch
-                                  checked={editingTerminal.requiresSangria}
+                                  checked={
+                                    editingTerminal.requiresSangria || false
+                                  }
                                   onCheckedChange={(checked) =>
                                     setEditingTerminal({
                                       ...editingTerminal,
@@ -1200,7 +1207,9 @@ export default function Settings() {
                               </div>
                               <div className="flex items-center gap-2">
                                 <Switch
-                                  checked={editingTerminal.requiresSuprimento}
+                                  checked={
+                                    editingTerminal.requiresSuprimento || false
+                                  }
                                   onCheckedChange={(checked) =>
                                     setEditingTerminal({
                                       ...editingTerminal,
@@ -1212,7 +1221,7 @@ export default function Settings() {
                               </div>
                               <div className="flex items-center gap-2">
                                 <Switch
-                                  checked={editingTerminal.isActive}
+                                  checked={editingTerminal.isActive || false}
                                   onCheckedChange={(checked) =>
                                     setEditingTerminal({
                                       ...editingTerminal,
@@ -1233,9 +1242,11 @@ export default function Settings() {
                               </Button>
                               <Button
                                 size="sm"
-                                onClick={() =>
-                                  handleUpdateTerminal(editingTerminal)
-                                }
+                                onClick={() => {
+                                  if (editingTerminal) {
+                                    handleUpdateTerminal(editingTerminal);
+                                  }
+                                }}
                                 disabled={savingTerminal}
                               >
                                 {savingTerminal ? (
