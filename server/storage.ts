@@ -17,6 +17,9 @@ import {
   cashRegisters,
   cashMovements,
   users,
+  fiscalConfigs,
+  taxAliquots,
+  cfopCodes,
   type InsertProduct,
   type InsertCustomer,
   type InsertSupplier,
@@ -30,10 +33,31 @@ import {
   type InsertPosTerminal,
   type InsertCashRegister,
   type InsertCashMovement,
+  type InsertFiscalConfig,
+  type InsertTaxAliquot,
 } from "@shared/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, ilike } from "drizzle-orm";
 
 export const storage = {
+  async getFiscalDataByProductName(name: string, companyId: number) {
+    const [product] = await db
+      .select({
+        ncm: products.ncm,
+        serviceCode: products.serviceCode,
+        cest: products.cest,
+        origin: products.origin,
+      })
+      .from(products)
+      .where(
+        and(
+          eq(products.companyId, companyId),
+          ilike(products.name, `%${name}%`)
+        )
+      )
+      .limit(1);
+    return product || null;
+  },
+
   async getAllProducts(companyId: number) {
     return await db
       .select()
@@ -588,5 +612,63 @@ export const storage = {
       .from(cashMovements)
       .where(eq(cashMovements.companyId, companyId))
       .orderBy(desc(cashMovements.createdAt));
+  },
+
+  async getFiscalConfig(companyId: number) {
+    const [config] = await db
+      .select()
+      .from(fiscalConfigs)
+      .where(eq(fiscalConfigs.companyId, companyId))
+      .limit(1);
+    return config;
+  },
+
+  async createFiscalConfig(data: InsertFiscalConfig) {
+    const [config] = await db.insert(fiscalConfigs).values(data).returning();
+    return config;
+  },
+
+  async updateFiscalConfig(
+    companyId: number,
+    data: Partial<InsertFiscalConfig>
+  ) {
+    const [config] = await db
+      .update(fiscalConfigs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(fiscalConfigs.companyId, companyId))
+      .returning();
+    return config;
+  },
+
+  async getCfopCodes() {
+    return await db.select().from(cfopCodes).orderBy(cfopCodes.code);
+  },
+
+  async createCfopCode(data: any) {
+    const [code] = await db.insert(cfopCodes).values(data).returning();
+    return code;
+  },
+
+  async getTaxAliquots(companyId: number, state?: string) {
+    if (state) {
+      return await db
+        .select()
+        .from(taxAliquots)
+        .where(
+          and(
+            eq(taxAliquots.companyId, companyId),
+            eq(taxAliquots.state, state)
+          )
+        );
+    }
+    return await db
+      .select()
+      .from(taxAliquots)
+      .where(eq(taxAliquots.companyId, companyId));
+  },
+
+  async createTaxAliquot(data: InsertTaxAliquot) {
+    const [aliquot] = await db.insert(taxAliquots).values(data).returning();
+    return aliquot;
   },
 };

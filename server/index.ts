@@ -8,6 +8,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { authRouter, initializePermissions } from "./auth";
 import { pool } from "./db";
+import { seedFiscalData } from "./seed-fiscal";
 
 const app = express();
 const httpServer = createServer(app);
@@ -91,6 +92,8 @@ app.use((req, res, next) => {
 (async () => {
   await initializePermissions();
   log("Permissions initialized");
+
+  await seedFiscalData();
 
   await registerRoutes(httpServer, app);
 

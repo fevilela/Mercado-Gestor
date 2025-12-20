@@ -100,6 +100,28 @@ async function lookupOpenFoodFacts(
   }
 }
 
+async function lookupEANCode(ean: string): Promise<ProductLookupResult | null> {
+  try {
+    const response = await fetchWithTimeout(
+      `https://eancode.eu/api/product/${ean}/`,
+      5000
+    );
+    if (!response.ok) return null;
+
+    const data: any = await response.json();
+    if (!data.Name) return null;
+
+    return {
+      name: data.Name,
+      brand: data.Brand,
+      thumbnail: data.Image,
+    };
+  } catch (error) {
+    console.error("EANCode lookup failed:", error);
+    return null;
+  }
+}
+
 export async function lookupEAN(
   ean: string
 ): Promise<ProductLookupResult | null> {
@@ -108,10 +130,14 @@ export async function lookupEAN(
     throw new Error("Código EAN inválido");
   }
 
+  // Try multiple sources in order
   let result = await lookupBrasilAPI(ean);
   if (result) return result;
 
   result = await lookupOpenFoodFacts(ean);
+  if (result) return result;
+
+  result = await lookupEANCode(ean);
   if (result) return result;
 
   return null;

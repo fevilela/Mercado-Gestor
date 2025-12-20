@@ -43,7 +43,9 @@ const productFormSchema = z.object({
   brand: z.string().optional(),
   type: z.string().optional(),
   ncm: z.string().optional(),
+  serviceCode: z.string().optional(),
   cest: z.string().optional(),
+  origin: z.string().default("nacional"),
   description: z.string().optional(),
   mainImageUrl: z.string().optional(),
   purchasePrice: z.string().optional(),
@@ -155,7 +157,9 @@ export default function ProductForm({
       brand: "",
       type: "",
       ncm: "",
+      serviceCode: "",
       cest: "",
+      origin: "nacional",
       description: "",
       mainImageUrl: "",
       purchasePrice: "",
@@ -174,6 +178,7 @@ export default function ProductForm({
   const watchMargin = form.watch("margin");
   const watchPrice = form.watch("price");
   const watchIsKit = form.watch("isKit");
+  const watchProductName = form.watch("name");
 
   const lookupEanProduct = useCallback(
     async (ean: string) => {
@@ -203,18 +208,59 @@ export default function ProductForm({
           }
           toast.success("Produto encontrado!");
         } else if (res.status === 404) {
-          setEanLookupError("Produto não encontrado na base de dados");
+          setEanLookupError(
+            "EAN não encontrado. Dica: Digite o nome do produto para busca automática de NCM e origem"
+          );
         } else {
-          setEanLookupError("Erro ao buscar produto");
+          setEanLookupError("Erro ao buscar produto. Tente novamente");
         }
       } catch (error) {
-        setEanLookupError("Erro de conexão");
+        setEanLookupError("Erro de conexão. Verifique sua internet");
       } finally {
         setIsLookingUpEan(false);
       }
     },
     [form]
   );
+
+  const lookupFiscalDataByName = useCallback(
+    async (productName: string) => {
+      if (!productName || productName.length < 2) return;
+
+      try {
+        const res = await fetch(
+          `/api/products/fiscal/${encodeURIComponent(productName)}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ncm && !form.getValues("ncm")) {
+            form.setValue("ncm", data.ncm);
+          }
+          if (data.serviceCode && !form.getValues("serviceCode")) {
+            form.setValue("serviceCode", data.serviceCode);
+          }
+          if (data.cest && !form.getValues("cest")) {
+            form.setValue("cest", data.cest);
+          }
+          if (data.origin && !form.getValues("origin")) {
+            form.setValue("origin", data.origin);
+          }
+        }
+      } catch (error) {
+        // Silent fail for auto-lookup
+      }
+    },
+    [form]
+  );
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (watchProductName && watchProductName.length > 2 && !editProduct) {
+        lookupFiscalDataByName(watchProductName);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [watchProductName, editProduct, lookupFiscalDataByName]);
 
   useEffect(() => {
     if (watchPurchasePrice && watchMargin) {
@@ -598,20 +644,51 @@ export default function ProductForm({
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="ncm">NCM</Label>
+                    <Label htmlFor="ncm">NCM (Produto)</Label>
                     <Input
                       id="ncm"
                       {...form.register("ncm")}
                       placeholder="1006.30.21"
+                      data-testid="input-ncm"
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="serviceCode">
+                      Código de Serviço (LC 116)
+                    </Label>
+                    <Input
+                      id="serviceCode"
+                      {...form.register("serviceCode")}
+                      placeholder="01.01"
+                      data-testid="input-service-code"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="cest">CEST</Label>
                     <Input
                       id="cest"
                       {...form.register("cest")}
                       placeholder="17.001.00"
+                      data-testid="input-cest"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="origin">Origem da Mercadoria</Label>
+                    <Select
+                      value={form.watch("origin") || "nacional"}
+                      onValueChange={(value) => form.setValue("origin", value)}
+                    >
+                      <SelectTrigger data-testid="select-origin">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="nacional">Nacional</SelectItem>
+                        <SelectItem value="importada">Importada</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 

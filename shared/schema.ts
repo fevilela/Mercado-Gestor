@@ -20,8 +20,11 @@ export const companies = pgTable("companies", {
   id: serial("id").primaryKey(),
   cnpj: text("cnpj").notNull().unique(),
   ie: text("ie"),
+  im: text("im"),
   razaoSocial: text("razao_social").notNull(),
   nomeFantasia: text("nome_fantasia"),
+  cnae: text("cnae"),
+  regimeTributario: text("regime_tributario").default("Simples Nacional"),
   email: text("email"),
   phone: text("phone"),
   address: text("address"),
@@ -132,7 +135,9 @@ export const products = pgTable("products", {
   brand: text("brand"),
   type: text("type"),
   ncm: text("ncm"),
+  serviceCode: text("service_code"),
   cest: text("cest"),
+  origin: text("origin").default("nacional"),
   description: text("description"),
   mainImageUrl: text("main_image_url"),
   purchasePrice: decimal("purchase_price", { precision: 10, scale: 2 }),
@@ -214,6 +219,8 @@ export const customers = pgTable("customers", {
   phone: text("phone"),
   cpfCnpj: text("cpf_cnpj"),
   type: text("type").notNull().default("Regular"),
+  personType: text("person_type").default("Física"),
+  isIcmsContributor: boolean("is_icms_contributor").default(false),
   address: text("address"),
   city: text("city"),
   state: text("state"),
@@ -241,6 +248,8 @@ export const suppliers = pgTable("suppliers", {
   phone: text("phone"),
   email: text("email"),
   cnpj: text("cnpj"),
+  personType: text("person_type").default("Jurídica"),
+  isIcmsContributor: boolean("is_icms_contributor").default(true),
   address: text("address"),
   city: text("city"),
   state: text("state"),
@@ -499,3 +508,95 @@ export const insertCashMovementSchema = createInsertSchema(cashMovements).omit({
 });
 export type InsertCashMovement = z.infer<typeof insertCashMovementSchema>;
 export type CashMovement = typeof cashMovements.$inferSelect;
+
+// ============================================
+// FISCAL SYSTEM: CFOP (Código Fiscal de Operações e Prestações)
+// ============================================
+export const cfopCodes = pgTable("cfop_codes", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  description: text("description").notNull(),
+  type: text("type").notNull(),
+  operationType: text("operation_type").notNull(),
+  scope: text("scope").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCfopSchema = createInsertSchema(cfopCodes).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCfop = z.infer<typeof insertCfopSchema>;
+export type CfopCode = typeof cfopCodes.$inferSelect;
+
+// ============================================
+// FISCAL SYSTEM: Tax Regime Configuration
+// ============================================
+export const fiscalConfigs = pgTable("fiscal_configs", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().unique(),
+  regimeTributario: text("regime_tributario")
+    .notNull()
+    .default("Simples Nacional"),
+  nfeEnabled: boolean("nfe_enabled").default(false),
+  nfceEnabled: boolean("nfce_enabled").default(true),
+  nfseEnabled: boolean("nfse_enabled").default(false),
+  defaultCfop: text("default_cfop"),
+  ibptTaxEnabled: boolean("ibpt_tax_enabled").default(false),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertFiscalConfigSchema = createInsertSchema(fiscalConfigs).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertFiscalConfig = z.infer<typeof insertFiscalConfigSchema>;
+export type FiscalConfig = typeof fiscalConfigs.$inferSelect;
+
+// ============================================
+// FISCAL SYSTEM: Tax Aliquots by State
+// ============================================
+export const taxAliquots = pgTable("tax_aliquots", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  state: text("state").notNull(),
+  productId: integer("product_id"),
+  icmsAliquot: decimal("icms_aliquot", { precision: 5, scale: 2 }).default("0"),
+  icmsReduction: decimal("icms_reduction", { precision: 5, scale: 2 }).default(
+    "0"
+  ),
+  ipiAliquot: decimal("ipi_aliquot", { precision: 5, scale: 2 }).default("0"),
+  pisAliquot: decimal("pis_aliquot", { precision: 5, scale: 2 }).default("0"),
+  cofinsAliquot: decimal("cofins_aliquot", { precision: 5, scale: 2 }).default(
+    "0"
+  ),
+  issAliquot: decimal("iss_aliquot", { precision: 5, scale: 2 }).default("0"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertTaxAliquotSchema = createInsertSchema(taxAliquots).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertTaxAliquot = z.infer<typeof insertTaxAliquotSchema>;
+export type TaxAliquot = typeof taxAliquots.$inferSelect;
+
+// ============================================
+// FISCAL SYSTEM: CST/CSOSN Codes
+// ============================================
+export const cstCodes = pgTable("cst_codes", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  description: text("description").notNull(),
+  codeType: text("code_type").notNull(),
+  taxType: text("tax_type").notNull(),
+  regime: text("regime").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCstSchema = createInsertSchema(cstCodes).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertCst = z.infer<typeof insertCstSchema>;
+export type CstCode = typeof cstCodes.$inferSelect;

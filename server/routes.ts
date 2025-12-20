@@ -20,6 +20,8 @@ import {
   insertPayableSchema,
   insertReceivableSchema,
   insertNotificationSchema,
+  insertFiscalConfigSchema,
+  insertTaxAliquotSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
@@ -762,6 +764,29 @@ export async function registerRoutes(
         return res.status(400).json({ error: error.message });
       }
       res.status(500).json({ error: "Falha ao buscar produto" });
+    }
+  });
+
+  app.get("/api/products/fiscal/:name", requireAuth, async (req, res) => {
+    try {
+      const { name } = req.params;
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Não autenticado" });
+      }
+
+      const result = await storage.getFiscalDataByProductName(name, companyId);
+      if (!result) {
+        return res
+          .status(404)
+          .json({ error: "Nenhum produto similar encontrado" });
+      }
+      res.json(result);
+    } catch (error) {
+      if (error instanceof Error) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: "Falha ao buscar dados fiscais" });
     }
   });
 
@@ -2076,6 +2101,144 @@ export async function registerRoutes(
       res.status(500).json({ error: "Erro ao buscar dados do CNPJ" });
     }
   });
+
+  // ============================================
+  // FISCAL SYSTEM: Configuration
+  // ============================================
+  app.get(
+    "/api/fiscal-config",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        let config = await storage.getFiscalConfig(companyId);
+        if (!config) {
+          config = await storage.createFiscalConfig({ companyId });
+        }
+        res.json(config);
+      } catch (error) {
+        console.error("Failed to fetch fiscal config:", error);
+        res.status(500).json({ error: "Failed to fetch fiscal config" });
+      }
+    }
+  );
+
+  app.put(
+    "/api/fiscal-config",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const validated = insertFiscalConfigSchema.partial().parse(req.body);
+        const config = await storage.updateFiscalConfig(companyId, validated);
+        res.json(config);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to update fiscal config:", error);
+        res.status(500).json({ error: "Failed to update fiscal config" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/cfop-codes",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const codes = await storage.getCfopCodes();
+        res.json(codes);
+      } catch (error) {
+        console.error("Failed to fetch CFOP codes:", error);
+        res.status(500).json({ error: "Failed to fetch CFOP codes" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/cfop-codes",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const { code, description, type, operationType, scope } = req.body;
+
+        if (!code || !description || !type || !operationType || !scope) {
+          return res
+            .status(400)
+            .json({ error: "Campos obrigatórios ausentes" });
+        }
+
+        const newCode = await storage.createCfopCode({
+          code,
+          description,
+          type,
+          operationType,
+          scope,
+        });
+        res.status(201).json(newCode);
+      } catch (error) {
+        console.error("Failed to create CFOP code:", error);
+        res.status(500).json({ error: "Failed to create CFOP code" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/tax-aliquots",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const state = req.query.state as string | undefined;
+        const aliquots = await storage.getTaxAliquots(companyId, state);
+        res.json(aliquots);
+      } catch (error) {
+        console.error("Failed to fetch tax aliquots:", error);
+        res.status(500).json({ error: "Failed to fetch tax aliquots" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/tax-aliquots",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const validated = insertTaxAliquotSchema.parse({
+          ...req.body,
+          companyId,
+        });
+        const aliquot = await storage.createTaxAliquot(validated);
+        res.status(201).json(aliquot);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to create tax aliquot:", error);
+        res.status(500).json({ error: "Failed to create tax aliquot" });
+      }
+    }
+  );
 
   return httpServer;
 }

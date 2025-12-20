@@ -14,6 +14,7 @@ import {
   ChevronDown,
   User,
   History,
+  FileText,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -87,6 +88,12 @@ const sidebarItems = [
     label: "Usuários",
     href: "/users",
     permissions: ["users:view", "users:manage"],
+  },
+  {
+    icon: FileText,
+    label: "Fiscal",
+    href: "/fiscal-config",
+    permissions: ["fiscal:view", "fiscal:manage"],
   },
   {
     icon: Settings,
