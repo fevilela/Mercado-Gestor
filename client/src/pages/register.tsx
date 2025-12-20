@@ -92,31 +92,35 @@ export default function Register() {
 
     setLoadingCNPJ(true);
     try {
-      const response = await fetch(
-        `https://www.receitaws.com.br/v1/cnpj/${cnpj}`
-      );
+      const response = await fetch(`/api/lookup-cnpj?cnpj=${cnpj}`);
       if (response.ok) {
         const data = await response.json();
-        if (data.status === "OK") {
-          setFormData((prev) => ({
-            ...prev,
-            razaoSocial: data.nome || "",
-            nomeFantasia: data.fantasia || "",
-            email: data.email || prev.email,
-            phone: data.telefone || prev.phone,
-            address: data.logradouro || "",
-            city: data.municipio || "",
-            state: data.uf || "",
-            zipCode: data.cep || "",
-          }));
-          toast({
-            title: "Dados encontrados!",
-            description: "Informações do CNPJ preenchidas automaticamente.",
-          });
-        }
+        setFormData((prev) => ({
+          ...prev,
+          razaoSocial: data.razaoSocial || "",
+          nomeFantasia: data.nomeFantasia || "",
+          email: data.email || prev.email,
+          phone: data.phone || prev.phone,
+          address: data.address || "",
+          city: data.city || "",
+          state: data.state || "",
+          zipCode: data.zipCode || "",
+        }));
+        toast({
+          title: "Dados encontrados!",
+          description: "Informações do CNPJ preenchidas automaticamente.",
+        });
+      } else {
+        throw new Error("CNPJ não encontrado");
       }
     } catch (error) {
       console.error("Erro ao buscar CNPJ:", error);
+      toast({
+        title: "Aviso",
+        description:
+          "Não foi possível buscar os dados do CNPJ. Preencha manualmente.",
+        variant: "destructive",
+      });
     } finally {
       setLoadingCNPJ(false);
     }

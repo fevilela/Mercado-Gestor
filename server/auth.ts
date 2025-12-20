@@ -193,6 +193,11 @@ const DEFAULT_PERMISSIONS = [
   },
   {
     module: "settings",
+    action: "edit",
+    description: "Editar configurações gerais",
+  },
+  {
+    module: "settings",
     action: "company",
     description: "Editar dados da empresa",
   },
@@ -962,6 +967,49 @@ authRouter.get("/permissions", async (req, res) => {
     res.json(allPermissions);
   } catch (error) {
     res.status(500).json({ error: "Erro ao buscar permissões" });
+  }
+});
+
+authRouter.post("/refresh-session", async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: "Não autenticado" });
+  }
+
+  try {
+    // Reinicializar permissões globais
+    await initializePermissions();
+
+    // Se o usuário tem companyId, atualizar os roles da empresa
+    if (req.session.companyId) {
+      // Verificar se admin role precisa ser atualizado
+      const adminRole = await db
+        .select()
+        .from(roles)
+        .where(eq(roles.companyId, req.session.companyId))
+        .limit(1);
+
+      if (adminRole.length > 0) {
+        // Buscar todas as permissões que devem estar no role admin
+        const allPermissions = await db.select().from(permissions);
+        const permissionIds = allPermissions.map((p) => p.id);
+
+        // Adicionar permissões que faltam
+        for (const permId of permissionIds) {
+          await db
+            .insert(rolePermissions)
+            .values({
+              roleId: adminRole[0].id,
+              permissionId: permId,
+            })
+            .catch(() => {}); // Ignorar duplicatas
+        }
+      }
+    }
+
+    res.json({ message: "Sessão atualizada com sucesso" });
+  } catch (error) {
+    console.error("Refresh session error:", error);
+    res.status(500).json({ error: "Erro ao atualizar sessão" });
   }
 });
 

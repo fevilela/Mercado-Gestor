@@ -2035,5 +2035,47 @@ export async function registerRoutes(
     }
   );
 
+  // ============================================
+  // CNPJ LOOKUP: Buscar dados de empresa por CNPJ
+  // ============================================
+  app.get("/api/lookup-cnpj", async (req, res) => {
+    try {
+      const cnpj = req.query.cnpj as string;
+
+      if (!cnpj || cnpj.length < 14) {
+        return res.status(400).json({ error: "CNPJ inválido" });
+      }
+
+      const cleanCNPJ = cnpj.replace(/\D/g, "");
+      const response = await fetch(
+        `https://www.receitaws.com.br/v1/cnpj/${cleanCNPJ}`
+      );
+
+      if (!response.ok) {
+        return res.status(404).json({ error: "CNPJ não encontrado" });
+      }
+
+      const data = await response.json();
+
+      if (data.status !== "OK") {
+        return res.status(404).json({ error: "CNPJ não encontrado" });
+      }
+
+      res.json({
+        razaoSocial: data.nome || "",
+        nomeFantasia: data.fantasia || "",
+        email: data.email || "",
+        phone: data.telefone || "",
+        address: data.logradouro || "",
+        city: data.municipio || "",
+        state: data.uf || "",
+        zipCode: data.cep || "",
+      });
+    } catch (error) {
+      console.error("Erro ao buscar CNPJ:", error);
+      res.status(500).json({ error: "Erro ao buscar dados do CNPJ" });
+    }
+  });
+
   return httpServer;
 }
