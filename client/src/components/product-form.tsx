@@ -35,16 +35,16 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 const productFormSchema = z.object({
+  ean: z.string().min(1, "Código EAN é obrigatório"),
   name: z.string().min(1, "Nome é obrigatório"),
-  ean: z.string().optional(),
   sku: z.string().optional(),
   category: z.string().min(1, "Categoria é obrigatória"),
   unit: z.string().default("UN"),
   brand: z.string().optional(),
   type: z.string().optional(),
-  ncm: z.string().optional(),
+  ncm: z.string().min(1, "NCM é obrigatório"),
   serviceCode: z.string().optional(),
-  cest: z.string().optional(),
+  cest: z.string().min(1, "CEST é obrigatório"),
   origin: z.string().default("nacional"),
   description: z.string().optional(),
   mainImageUrl: z.string().optional(),
@@ -149,8 +149,8 @@ export default function ProductForm({
   const form = useForm<ProductFormData>({
     resolver: zodResolver(productFormSchema),
     defaultValues: {
-      name: "",
       ean: "",
+      name: "",
       sku: "",
       category: "",
       unit: "UN",
@@ -203,13 +203,37 @@ export default function ProductForm({
           if (data.ncm && !form.getValues("ncm")) {
             form.setValue("ncm", data.ncm);
           }
+          if (data.cest && !form.getValues("cest")) {
+            form.setValue("cest", data.cest);
+          }
           if (data.thumbnail && !form.getValues("mainImageUrl")) {
             form.setValue("mainImageUrl", data.thumbnail);
           }
           toast.success("Produto encontrado!");
+
+          // Try to lookup fiscal data by the product name
+          const productName = data.name || form.getValues("name");
+          if (productName && productName.length > 2) {
+            try {
+              const fiscalRes = await fetch(
+                `/api/products/fiscal/${encodeURIComponent(productName)}`
+              );
+              if (fiscalRes.ok) {
+                const fiscalData = await fiscalRes.json();
+                if (fiscalData.ncm && !form.getValues("ncm")) {
+                  form.setValue("ncm", fiscalData.ncm);
+                }
+                if (fiscalData.cest && !form.getValues("cest")) {
+                  form.setValue("cest", fiscalData.cest);
+                }
+              }
+            } catch (error) {
+              // Silent fail
+            }
+          }
         } else if (res.status === 404) {
           setEanLookupError(
-            "EAN não encontrado. Dica: Digite o nome do produto para busca automática de NCM e origem"
+            "EAN não encontrado em nossas bases (BrasilAPI, OpenFoodFacts, EANCode). Você pode preencher os dados manualmente. Dica: Digite o nome do produto para busca automática de NCM e origem"
           );
         } else {
           setEanLookupError("Erro ao buscar produto. Tente novamente");
@@ -292,8 +316,8 @@ export default function ProductForm({
   useEffect(() => {
     if (editProduct) {
       form.reset({
-        name: editProduct.name || "",
         ean: editProduct.ean || "",
+        name: editProduct.name || "",
         sku: editProduct.sku || "",
         category: editProduct.category || "",
         unit: editProduct.unit || "UN",
@@ -517,6 +541,48 @@ export default function ProductForm({
               </TabsList>
 
               <TabsContent value="basic" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="ean">Código de Barras (EAN) *</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="ean"
+                      {...form.register("ean")}
+                      placeholder="7891234567890"
+                      data-testid="input-ean"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          lookupEanProduct(form.getValues("ean") || "");
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() =>
+                        lookupEanProduct(form.getValues("ean") || "")
+                      }
+                      disabled={isLookingUpEan}
+                      data-testid="button-ean-lookup"
+                    >
+                      {isLookingUpEan ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Search className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                  {form.formState.errors.ean && (
+                    <p className="text-sm text-destructive">
+                      {form.formState.errors.ean.message}
+                    </p>
+                  )}
+                  {eanLookupError && (
+                    <p className="text-sm text-amber-600">{eanLookupError}</p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="name">Nome do Produto *</Label>
@@ -560,42 +626,6 @@ export default function ProductForm({
 
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="ean">Código de Barras (EAN)</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        id="ean"
-                        {...form.register("ean")}
-                        placeholder="7891234567890"
-                        data-testid="input-ean"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            lookupEanProduct(form.getValues("ean") || "");
-                          }
-                        }}
-                      />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        onClick={() =>
-                          lookupEanProduct(form.getValues("ean") || "")
-                        }
-                        disabled={isLookingUpEan}
-                        data-testid="button-ean-lookup"
-                      >
-                        {isLookingUpEan ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Search className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                    {eanLookupError && (
-                      <p className="text-sm text-amber-600">{eanLookupError}</p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
                     <Label htmlFor="sku">SKU</Label>
                     <Input
                       id="sku"
@@ -621,9 +651,6 @@ export default function ProductForm({
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="brand">Marca</Label>
                     <Input
@@ -632,47 +659,15 @@ export default function ProductForm({
                       placeholder="Ex: Tio João"
                     />
                   </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="type">Tipo</Label>
                     <Input
                       id="type"
                       {...form.register("type")}
                       placeholder="Ex: Grãos"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="ncm">NCM (Produto)</Label>
-                    <Input
-                      id="ncm"
-                      {...form.register("ncm")}
-                      placeholder="1006.30.21"
-                      data-testid="input-ncm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="serviceCode">
-                      Código de Serviço (LC 116)
-                    </Label>
-                    <Input
-                      id="serviceCode"
-                      {...form.register("serviceCode")}
-                      placeholder="01.01"
-                      data-testid="input-service-code"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="cest">CEST</Label>
-                    <Input
-                      id="cest"
-                      {...form.register("cest")}
-                      placeholder="17.001.00"
-                      data-testid="input-cest"
                     />
                   </div>
                   <div className="space-y-2">
@@ -690,6 +685,49 @@ export default function ProductForm({
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="ncm">NCM (Produto) *</Label>
+                    <Input
+                      id="ncm"
+                      {...form.register("ncm")}
+                      placeholder="1006.30.21"
+                      data-testid="input-ncm"
+                    />
+                    {form.formState.errors.ncm && (
+                      <p className="text-sm text-destructive">
+                        {form.formState.errors.ncm.message}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="cest">CEST *</Label>
+                    <Input
+                      id="cest"
+                      {...form.register("cest")}
+                      placeholder="17.001.00"
+                      data-testid="input-cest"
+                    />
+                    {form.formState.errors.cest && (
+                      <p className="text-sm text-destructive">
+                        {form.formState.errors.cest.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="serviceCode">
+                    Código de Serviço (LC 116)
+                  </Label>
+                  <Input
+                    id="serviceCode"
+                    {...form.register("serviceCode")}
+                    placeholder="01.01"
+                    data-testid="input-service-code"
+                  />
                 </div>
 
                 <div className="space-y-2">

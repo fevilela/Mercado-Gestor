@@ -344,7 +344,9 @@ export default function Inventory() {
   };
 
   const filteredProducts = products.filter((product: any) => {
-    const search = searchTerm.toLowerCase();
+    if (!searchTerm) return true;
+    const search = searchTerm.toLowerCase().trim();
+    if (!search) return true;
     return (
       product.name.toLowerCase().includes(search) ||
       (product.ean && product.ean.toLowerCase().includes(search)) ||
@@ -408,7 +410,8 @@ export default function Inventory() {
           <div className="relative w-full sm:w-96">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Buscar por nome, código de barras ou SKU..."
+              data-testid="input-search-products"
+              placeholder="Buscar por nome, código de barras, EAN ou SKU..."
               className="pl-9"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
