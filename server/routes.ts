@@ -34,6 +34,7 @@ import {
 } from "./middleware";
 import { CFOPValidator } from "./cfop-validator";
 import { CSOSNCalculator } from "./csosn-calculator";
+import fiscalRouter from "./fiscal-routes";
 import "./types";
 
 function parseNFeXML(xmlContent: string): Array<{
@@ -119,6 +120,39 @@ export async function registerRoutes(
       } catch (error) {
         console.error("Failed to fetch products:", error);
         res.status(500).json({ error: "Failed to fetch products" });
+      }
+    }
+  );
+
+  app.get("/api/cfop-codes", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const cfopCodes = await storage.getCfopCodes(companyId);
+      res.json(cfopCodes);
+    } catch (error) {
+      console.error("Failed to fetch CFOP codes:", error);
+      res.status(500).json({ error: "Failed to fetch CFOP codes" });
+    }
+  });
+
+  app.get(
+    "/api/products/search/:query",
+    requireAuth,
+    requirePermission("inventory:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const { query } = req.params;
+        const products = await storage.searchProducts(query, companyId, 10);
+        res.json(products);
+      } catch (error) {
+        console.error("Failed to search products:", error);
+        res.status(500).json({ error: "Failed to search products" });
       }
     }
   );
@@ -374,6 +408,30 @@ export async function registerRoutes(
         res.status(204).send();
       } catch (error) {
         res.status(500).json({ error: "Failed to delete product" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/customers/search/:query",
+    requireAuth,
+    requirePermission("customers:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const { query } = req.params;
+        const customersList = await storage.searchCustomers(
+          query,
+          companyId,
+          10
+        );
+        res.json(customersList);
+      } catch (error) {
+        console.error("Failed to search customers:", error);
+        res.status(500).json({ error: "Failed to search customers" });
       }
     }
   );
@@ -2150,20 +2208,18 @@ export async function registerRoutes(
     }
   );
 
-  app.get(
-    "/api/cfop-codes",
-    requireAuth,
-    requirePermission("fiscal:view"),
-    async (req, res) => {
-      try {
-        const codes = await storage.getCfopCodes();
-        res.json(codes);
-      } catch (error) {
-        console.error("Failed to fetch CFOP codes:", error);
-        res.status(500).json({ error: "Failed to fetch CFOP codes" });
-      }
+  app.get("/api/cfop-codes-legacy", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+      const codes = await storage.getCfopCodes(companyId);
+      res.json(codes);
+    } catch (error) {
+      console.error("Failed to fetch CFOP codes:", error);
+      res.status(500).json({ error: "Failed to fetch CFOP codes" });
     }
-  );
+  });
 
   app.post(
     "/api/cfop-codes",
@@ -2455,6 +2511,11 @@ export async function registerRoutes(
       }
     }
   );
+
+  // ============================================
+  // Fiscal Documents Routes (NF-e, NFC-e, NFS-e, CT-e, MDF-e)
+  // ============================================
+  app.use("/api/fiscal", requireAuth, fiscalRouter);
 
   return httpServer;
 }

@@ -21,6 +21,7 @@ import {
   taxAliquots,
   cfopCodes,
   companies,
+  cstCodes,
   type InsertProduct,
   type InsertCustomer,
   type InsertSupplier,
@@ -57,6 +58,88 @@ export const storage = {
       )
       .limit(1);
     return product || null;
+  },
+
+  async searchProducts(query: string, companyId: number, limit: number = 10) {
+    return await db
+      .select({
+        id: products.id,
+        name: products.name,
+        ean: products.ean,
+        price: products.price,
+        purchasePrice: products.purchasePrice,
+        ncm: products.ncm,
+        csosnCode: products.csosnCode,
+        cstIcms: products.cstIcms,
+        cstIpi: products.cstIpi,
+        cstPisCofins: products.cstPisCofins,
+        origin: products.origin,
+        unit: products.unit,
+        category: products.category,
+        serviceCode: products.serviceCode,
+        cest: products.cest,
+      })
+      .from(products)
+      .where(
+        and(
+          eq(products.companyId, companyId),
+          eq(products.isActive, true),
+          ilike(products.name, `%${query}%`)
+        )
+      )
+      .limit(limit);
+  },
+
+  async getCfopCodes(companyId: number) {
+    return await db
+      .select({
+        id: cfopCodes.id,
+        code: cfopCodes.code,
+        description: cfopCodes.description,
+        type: cfopCodes.type,
+        operationType: cfopCodes.operationType,
+        scope: cfopCodes.scope,
+      })
+      .from(cfopCodes)
+      .orderBy(cfopCodes.code);
+  },
+
+  async getTaxAliquotsByProduct(
+    productId: number,
+    companyId: number,
+    state: string
+  ) {
+    const [aliquot] = await db
+      .select()
+      .from(taxAliquots)
+      .where(
+        and(
+          eq(taxAliquots.companyId, companyId),
+          eq(taxAliquots.productId, productId),
+          eq(taxAliquots.state, state)
+        )
+      )
+      .limit(1);
+    return aliquot || null;
+  },
+
+  async searchCustomers(query: string, companyId: number, limit: number = 10) {
+    return await db
+      .select({
+        id: customers.id,
+        name: customers.name,
+        cpfCnpj: customers.cpfCnpj,
+        personType: customers.personType,
+        isIcmsContributor: customers.isIcmsContributor,
+      })
+      .from(customers)
+      .where(
+        and(
+          eq(customers.companyId, companyId),
+          ilike(customers.name, `%${query}%`)
+        )
+      )
+      .limit(limit);
   },
 
   async getAllProducts(companyId: number) {
@@ -666,10 +749,6 @@ export const storage = {
       .where(eq(fiscalConfigs.companyId, companyId))
       .returning();
     return config;
-  },
-
-  async getCfopCodes() {
-    return await db.select().from(cfopCodes).orderBy(cfopCodes.code);
   },
 
   async getCfopCodeById(id: number) {

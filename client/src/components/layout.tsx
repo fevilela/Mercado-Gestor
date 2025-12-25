@@ -67,6 +67,12 @@ const sidebarItems = [
     permissions: ["pos:cash_history"],
   },
   {
+    icon: FileText,
+    label: "Documentos Fiscais",
+    href: "/fiscal-documents",
+    permissions: ["fiscal:view", "fiscal:manage"],
+  },
+  {
     icon: Users,
     label: "Clientes & Fornecedores",
     href: "/contacts",

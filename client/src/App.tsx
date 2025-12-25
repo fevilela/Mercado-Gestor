@@ -19,6 +19,7 @@ import Users from "@/pages/users";
 import Profile from "@/pages/profile";
 import CashHistory from "@/pages/cash-history";
 import FiscalConfig from "@/pages/fiscal-config";
+import FiscalDocuments from "@/pages/fiscal-documents";
 import { Loader2 } from "lucide-react";
 
 function ProtectedRoute({
@@ -109,6 +110,9 @@ function Router() {
       </Route>
       <Route path="/fiscal-config">
         <ProtectedRoute component={FiscalConfig} />
+      </Route>
+      <Route path="/fiscal-documents">
+        <ProtectedRoute component={FiscalDocuments} />
       </Route>
       <Route component={NotFound} />
     </Switch>
