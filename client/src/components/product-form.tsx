@@ -673,12 +673,24 @@ export default function ProductForm({
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="type">Tipo</Label>
-                    <Input
-                      id="type"
-                      {...form.register("type")}
-                      placeholder="Ex: Grãos"
-                    />
+                    <Label htmlFor="csosnCode">CSOSN *</Label>
+                    <Select
+                      value={form.watch("csosnCode")}
+                      onValueChange={(value) =>
+                        form.setValue("csosnCode", value)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione o CSOSN" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {csosns.map((c: any) => (
+                          <SelectItem key={c.code} value={c.code}>
+                            {c.code} - {c.description}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="origin">Origem da Mercadoria</Label>

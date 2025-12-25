@@ -45,6 +45,8 @@ interface CompanySettings {
   razaoSocial?: string;
   nomeFantasia?: string;
   regimeTributario?: string;
+  cnae?: string;
+  im?: string;
   fiscalEnabled?: boolean;
   cscToken?: string;
   cscId?: string;
@@ -63,6 +65,12 @@ interface CompanySettings {
   barcodeScannerEnabled?: boolean;
   barcodeScannerAutoAdd?: boolean;
   barcodeScannerBeep?: boolean;
+  cashRegisterRequired?: boolean;
+  nfeEnabled?: boolean;
+  nfceEnabled?: boolean;
+  nfseEnabled?: boolean;
+  cteEnabled?: boolean;
+  mdfeEnabled?: boolean;
 }
 
 interface PosTerminal {
@@ -92,6 +100,8 @@ export default function Settings() {
     razaoSocial: company?.razaoSocial || "",
     nomeFantasia: company?.nomeFantasia || "",
     regimeTributario: "Simples Nacional",
+    cnae: "",
+    im: "",
     fiscalEnabled: false,
     cscToken: "",
     cscId: "",
@@ -107,6 +117,11 @@ export default function Settings() {
     printerColumns: 48,
     printerCutCommand: true,
     printerBeepOnSale: true,
+    nfeEnabled: false,
+    nfceEnabled: true,
+    nfseEnabled: false,
+    cteEnabled: false,
+    mdfeEnabled: false,
     barcodeScannerEnabled: true,
     barcodeScannerAutoAdd: true,
     barcodeScannerBeep: true,
@@ -382,6 +397,28 @@ export default function Settings() {
                     />
                   </div>
                 </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="im">Inscrição Municipal</Label>
+                    <Input
+                      id="im"
+                      placeholder="Ex: 123456789"
+                      value={settings.im || ""}
+                      onChange={(e) => updateSetting("im", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="cnae">CNAE</Label>
+                    <Input
+                      id="cnae"
+                      placeholder="Ex: 4711302"
+                      value={settings.cnae || ""}
+                      onChange={(e) => updateSetting("cnae", e.target.value)}
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="name">Razão Social</Label>
                   <Input
@@ -441,6 +478,77 @@ export default function Settings() {
                     "Salvar Alterações"
                   )}
                 </Button>
+                <div className="space-y-4 pt-4 border-t">
+                  <h3 className="text-lg font-medium">
+                    Documentos Fiscais Eletrônicos
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NF-e (Modelo 55)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Vendas e Operações Interestaduais
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfeEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfeEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NFC-e (Modelo 65)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Venda ao Consumidor Final
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfceEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfceEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NFS-e</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Prestação de Serviços
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfseEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfseEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>CT-e / MDF-e</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Transporte e Manifesto
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Switch
+                          checked={settings.cteEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("cteEnabled", checked)
+                          }
+                        />
+                        <Switch
+                          checked={settings.mdfeEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("mdfeEnabled", checked)
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -515,6 +623,77 @@ export default function Settings() {
                       "Salvar Alterações"
                     )}
                   </Button>
+                </div>
+                <div className="space-y-4 pt-4 border-t">
+                  <h3 className="text-lg font-medium">
+                    Documentos Fiscais Eletrônicos
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NF-e (Modelo 55)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Vendas e Operações Interestaduais
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfeEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfeEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NFC-e (Modelo 65)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Venda ao Consumidor Final
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfceEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfceEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NFS-e</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Prestação de Serviços
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfseEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfseEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>CT-e / MDF-e</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Transporte e Manifesto
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Switch
+                          checked={settings.cteEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("cteEnabled", checked)
+                          }
+                        />
+                        <Switch
+                          checked={settings.mdfeEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("mdfeEnabled", checked)
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -599,6 +778,77 @@ export default function Settings() {
                       "Salvar Alterações"
                     )}
                   </Button>
+                  <div className="space-y-4 pt-4 border-t">
+                    <h3 className="text-lg font-medium">
+                      Documentos Fiscais Eletrônicos
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NF-e (Modelo 55)</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Vendas e Operações Interestaduais
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfeEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfeEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NFC-e (Modelo 65)</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Venda ao Consumidor Final
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfceEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfceEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NFS-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Prestação de Serviços
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfseEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfseEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>CT-e / MDF-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Transporte e Manifesto
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Switch
+                            checked={settings.cteEnabled}
+                            onCheckedChange={(checked) =>
+                              updateSetting("cteEnabled", checked)
+                            }
+                          />
+                          <Switch
+                            checked={settings.mdfeEnabled}
+                            onCheckedChange={(checked) =>
+                              updateSetting("mdfeEnabled", checked)
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -681,6 +931,77 @@ export default function Settings() {
                       "Salvar Alterações"
                     )}
                   </Button>
+                  <div className="space-y-4 pt-4 border-t">
+                    <h3 className="text-lg font-medium">
+                      Documentos Fiscais Eletrônicos
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NF-e (Modelo 55)</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Vendas e Operações Interestaduais
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfeEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfeEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NFC-e (Modelo 65)</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Venda ao Consumidor Final
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfceEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfceEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NFS-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Prestação de Serviços
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfseEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfseEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>CT-e / MDF-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Transporte e Manifesto
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Switch
+                            checked={settings.cteEnabled}
+                            onCheckedChange={(checked) =>
+                              updateSetting("cteEnabled", checked)
+                            }
+                          />
+                          <Switch
+                            checked={settings.mdfeEnabled}
+                            onCheckedChange={(checked) =>
+                              updateSetting("mdfeEnabled", checked)
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -708,6 +1029,77 @@ export default function Settings() {
                   <Button variant="outline" size="sm">
                     Baixar Instalador (.exe)
                   </Button>
+                  <div className="space-y-4 pt-4 border-t">
+                    <h3 className="text-lg font-medium">
+                      Documentos Fiscais Eletrônicos
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NF-e (Modelo 55)</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Vendas e Operações Interestaduais
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfeEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfeEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NFC-e (Modelo 65)</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Venda ao Consumidor Final
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfceEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfceEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NFS-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Prestação de Serviços
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfseEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfseEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>CT-e / MDF-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Transporte e Manifesto
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Switch
+                            checked={settings.cteEnabled}
+                            onCheckedChange={(checked) =>
+                              updateSetting("cteEnabled", checked)
+                            }
+                          />
+                          <Switch
+                            checked={settings.mdfeEnabled}
+                            onCheckedChange={(checked) =>
+                              updateSetting("mdfeEnabled", checked)
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -910,6 +1302,77 @@ export default function Settings() {
                       "Salvar Alterações"
                     )}
                   </Button>
+                  <div className="space-y-4 pt-4 border-t">
+                    <h3 className="text-lg font-medium">
+                      Documentos Fiscais Eletrônicos
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NF-e (Modelo 55)</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Vendas e Operações Interestaduais
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfeEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfeEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NFC-e (Modelo 65)</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Venda ao Consumidor Final
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfceEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfceEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NFS-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Prestação de Serviços
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfseEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfseEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>CT-e / MDF-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Transporte e Manifesto
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Switch
+                            checked={settings.cteEnabled}
+                            onCheckedChange={(checked) =>
+                              updateSetting("cteEnabled", checked)
+                            }
+                          />
+                          <Switch
+                            checked={settings.mdfeEnabled}
+                            onCheckedChange={(checked) =>
+                              updateSetting("mdfeEnabled", checked)
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -1011,6 +1474,77 @@ export default function Settings() {
                       "Salvar Alterações"
                     )}
                   </Button>
+                  <div className="space-y-4 pt-4 border-t">
+                    <h3 className="text-lg font-medium">
+                      Documentos Fiscais Eletrônicos
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NF-e (Modelo 55)</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Vendas e Operações Interestaduais
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfeEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfeEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NFC-e (Modelo 65)</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Venda ao Consumidor Final
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfceEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfceEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>NFS-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Prestação de Serviços
+                          </p>
+                        </div>
+                        <Switch
+                          checked={settings.nfseEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("nfseEnabled", checked)
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label>CT-e / MDF-e</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Transporte e Manifesto
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Switch
+                            checked={settings.cteEnabled}
+                            onCheckedChange={(checked) =>
+                              updateSetting("cteEnabled", checked)
+                            }
+                          />
+                          <Switch
+                            checked={settings.mdfeEnabled}
+                            onCheckedChange={(checked) =>
+                              updateSetting("mdfeEnabled", checked)
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -1360,6 +1894,77 @@ export default function Settings() {
                     </li>
                   </ul>
                 </div>
+                <div className="space-y-4 pt-4 border-t">
+                  <h3 className="text-lg font-medium">
+                    Documentos Fiscais Eletrônicos
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NF-e (Modelo 55)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Vendas e Operações Interestaduais
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfeEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfeEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NFC-e (Modelo 65)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Venda ao Consumidor Final
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfceEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfceEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NFS-e</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Prestação de Serviços
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfseEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfseEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>CT-e / MDF-e</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Transporte e Manifesto
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Switch
+                          checked={settings.cteEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("cteEnabled", checked)
+                          }
+                        />
+                        <Switch
+                          checked={settings.mdfeEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("mdfeEnabled", checked)
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -1391,6 +1996,77 @@ export default function Settings() {
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
                   </Link>
+                </div>
+                <div className="space-y-4 pt-4 border-t">
+                  <h3 className="text-lg font-medium">
+                    Documentos Fiscais Eletrônicos
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NF-e (Modelo 55)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Vendas e Operações Interestaduais
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfeEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfeEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NFC-e (Modelo 65)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Venda ao Consumidor Final
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfceEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfceEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NFS-e</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Prestação de Serviços
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfseEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfseEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>CT-e / MDF-e</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Transporte e Manifesto
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Switch
+                          checked={settings.cteEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("cteEnabled", checked)
+                          }
+                        />
+                        <Switch
+                          checked={settings.mdfeEnabled}
+                          onCheckedChange={(checked) =>
+                            updateSetting("mdfeEnabled", checked)
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>

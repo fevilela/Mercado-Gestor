@@ -20,6 +20,7 @@ import {
   fiscalConfigs,
   taxAliquots,
   cfopCodes,
+  companies,
   type InsertProduct,
   type InsertCustomer,
   type InsertSupplier,
@@ -277,6 +278,33 @@ export const storage = {
     data: Partial<InsertCompanySettings>
   ) {
     const existing = await this.getCompanySettings(companyId);
+    console.log(
+      `Updating settings for company ${companyId}. Existing: ${!!existing}. Data:`,
+      data
+    );
+
+    // Also update the main company table if relevant fields are present
+    if (
+      data.razaoSocial ||
+      data.nomeFantasia ||
+      data.cnpj ||
+      data.ie ||
+      data.regimeTributario
+    ) {
+      const companyData: any = {};
+      if (data.razaoSocial) companyData.razaoSocial = data.razaoSocial;
+      if (data.nomeFantasia) companyData.nomeFantasia = data.nomeFantasia;
+      if (data.cnpj) companyData.cnpj = data.cnpj;
+      if (data.ie) companyData.ie = data.ie;
+      if (data.regimeTributario)
+        companyData.regimeTributario = data.regimeTributario;
+
+      await db
+        .update(companies)
+        .set(companyData)
+        .where(eq(companies.id, companyId));
+    }
+
     if (existing) {
       const [updated] = await db
         .update(companySettings)
