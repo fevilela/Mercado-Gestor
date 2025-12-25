@@ -32,6 +32,8 @@ import {
   getCompanyId,
   getUserId,
 } from "./middleware";
+import { CFOPValidator } from "./cfop-validator";
+import { CSOSNCalculator } from "./csosn-calculator";
 import "./types";
 
 function parseNFeXML(xmlContent: string): Array<{
@@ -2190,6 +2192,222 @@ export async function registerRoutes(
       } catch (error) {
         console.error("Failed to create CFOP code:", error);
         res.status(500).json({ error: "Failed to create CFOP code" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/cfop-codes/validate",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const {
+          cfopCode,
+          direction,
+          scope,
+          operationType,
+          originState,
+          destinyState,
+          customerType,
+        } = req.body;
+
+        if (!cfopCode || !direction || !scope) {
+          return res.status(400).json({
+            error: "Campos obrigatórios: cfopCode, direction, scope",
+          });
+        }
+
+        const result = await CFOPValidator.validateCFOP(cfopCode, {
+          direction,
+          scope,
+          operationType: operationType || "venda",
+          originState,
+          destinyState,
+          customerType,
+        });
+
+        res.json(result);
+      } catch (error) {
+        console.error("Failed to validate CFOP:", error);
+        res.status(500).json({ error: "Failed to validate CFOP" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/cfop-codes/suggest",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const { direction, scope, operationType } = req.body;
+
+        if (!direction || !scope) {
+          return res
+            .status(400)
+            .json({ error: "Campos obrigatórios: direction, scope" });
+        }
+
+        const cfops = await CFOPValidator.getValidCFOPsForContext({
+          direction,
+          scope,
+          operationType: operationType || "venda",
+        });
+
+        res.json(cfops);
+      } catch (error) {
+        console.error("Failed to suggest CFOPs:", error);
+        res.status(500).json({ error: "Failed to suggest CFOPs" });
+      }
+    }
+  );
+
+  app.put(
+    "/api/cfop-codes/:id",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { code, description, type, operationType, scope } = req.body;
+
+        const cfopId = parseInt(id, 10);
+        if (isNaN(cfopId)) {
+          return res.status(400).json({ error: "ID inválido" });
+        }
+
+        const cfop = await storage.getCfopCodeById(cfopId);
+        if (!cfop) {
+          return res.status(404).json({ error: "CFOP não encontrado" });
+        }
+
+        const updateData: any = {};
+        if (code !== undefined) updateData.code = code;
+        if (description !== undefined) updateData.description = description;
+        if (type !== undefined) updateData.type = type;
+        if (operationType !== undefined)
+          updateData.operationType = operationType;
+        if (scope !== undefined) updateData.scope = scope;
+
+        const updatedCfop = await storage.updateCfopCode(cfopId, updateData);
+        res.json(updatedCfop);
+      } catch (error) {
+        console.error("Failed to update CFOP code:", error);
+        res.status(500).json({ error: "Failed to update CFOP code" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/cfop-codes/:id",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const cfopId = parseInt(id, 10);
+        if (isNaN(cfopId)) {
+          return res.status(400).json({ error: "ID inválido" });
+        }
+
+        const cfop = await storage.getCfopCodeById(cfopId);
+        if (!cfop) {
+          return res.status(404).json({ error: "CFOP não encontrado" });
+        }
+
+        await storage.deleteCfopCode(cfopId);
+        res.json({ message: "CFOP deletado com sucesso" });
+      } catch (error) {
+        console.error("Failed to delete CFOP code:", error);
+        res.status(500).json({ error: "Failed to delete CFOP code" });
+      }
+    }
+  );
+
+  // ============= CSOSN Endpoints (Simples Nacional) =============
+
+  app.get(
+    "/api/csosn-codes",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const csosns = await CSOSNCalculator.getAllCSOSNs();
+        res.json(csosns);
+      } catch (error) {
+        console.error("Failed to fetch CSOSN codes:", error);
+        res.status(500).json({ error: "Failed to fetch CSOSN codes" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/csosn-codes/validate",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const { cfopCode, csosnCode, direction } = req.body;
+
+        if (!cfopCode || !csosnCode || !direction) {
+          return res.status(400).json({
+            error: "Campos obrigatórios: cfopCode, csosnCode, direction",
+          });
+        }
+
+        const result = await CSOSNCalculator.validateCSOSNxCFOP({
+          cfopCode,
+          csosnCode,
+          direction,
+        });
+
+        res.json(result);
+      } catch (error) {
+        console.error("Failed to validate CSOSN:", error);
+        res.status(500).json({ error: "Failed to validate CSOSN" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/csosn-codes/calculate-icms",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const {
+          baseValue,
+          csosnCode,
+          companyState,
+          destinationState,
+          icmsAliquot,
+          icmsReduction,
+        } = req.body;
+
+        if (!baseValue || !csosnCode || !companyState) {
+          return res.status(400).json({
+            error: "Campos obrigatórios: baseValue, csosnCode, companyState",
+          });
+        }
+
+        const result = await CSOSNCalculator.calculateICMS({
+          baseValue: parseFloat(baseValue),
+          csosnCode,
+          companyState,
+          destinationState,
+          icmsAliquot: icmsAliquot ? parseFloat(icmsAliquot) : undefined,
+          icmsReduction: icmsReduction ? parseFloat(icmsReduction) : undefined,
+        });
+
+        res.json(result);
+      } catch (error) {
+        console.error("Failed to calculate ICMS:", error);
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Failed to calculate ICMS",
+        });
       }
     }
   );

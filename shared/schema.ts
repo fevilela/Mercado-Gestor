@@ -137,6 +137,7 @@ export const products = pgTable("products", {
   ncm: text("ncm"),
   serviceCode: text("service_code"),
   cest: text("cest"),
+  csosnCode: text("csosn_code"),
   origin: text("origin").default("nacional"),
   description: text("description"),
   mainImageUrl: text("main_image_url"),

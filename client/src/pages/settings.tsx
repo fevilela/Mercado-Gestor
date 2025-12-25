@@ -44,6 +44,7 @@ interface CompanySettings {
   ie?: string;
   razaoSocial?: string;
   nomeFantasia?: string;
+  regimeTributario?: string;
   fiscalEnabled?: boolean;
   cscToken?: string;
   cscId?: string;
@@ -90,6 +91,7 @@ export default function Settings() {
     ie: "",
     razaoSocial: company?.razaoSocial || "",
     nomeFantasia: company?.nomeFantasia || "",
+    regimeTributario: "Simples Nacional",
     fiscalEnabled: false,
     cscToken: "",
     cscId: "",
@@ -401,6 +403,33 @@ export default function Settings() {
                       updateSetting("nomeFantasia", e.target.value)
                     }
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="regime">Regime Tributário</Label>
+                  <Select
+                    value={settings.regimeTributario || "Simples Nacional"}
+                    onValueChange={(value) =>
+                      updateSetting("regimeTributario", value)
+                    }
+                  >
+                    <SelectTrigger id="regime" data-testid="select-regime">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Simples Nacional">
+                        Simples Nacional
+                      </SelectItem>
+                      <SelectItem value="Lucro Real">Lucro Real</SelectItem>
+                      <SelectItem value="Lucro Presumido">
+                        Lucro Presumido
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {settings.regimeTributario === "Simples Nacional"
+                      ? "Será usado CSOSN para ICMS e PIS/COFINS integrados"
+                      : "Será usado CST para ICMS com PIS/COFINS separados"}
+                  </p>
                 </div>
                 <Button onClick={handleSaveSettings} disabled={saving}>
                   {saving ? (

@@ -644,8 +644,34 @@ export const storage = {
     return await db.select().from(cfopCodes).orderBy(cfopCodes.code);
   },
 
+  async getCfopCodeById(id: number) {
+    const [code] = await db
+      .select()
+      .from(cfopCodes)
+      .where(eq(cfopCodes.id, id))
+      .limit(1);
+    return code;
+  },
+
   async createCfopCode(data: any) {
     const [code] = await db.insert(cfopCodes).values(data).returning();
+    return code;
+  },
+
+  async updateCfopCode(id: number, data: any) {
+    const [code] = await db
+      .update(cfopCodes)
+      .set(data)
+      .where(eq(cfopCodes.id, id))
+      .returning();
+    return code;
+  },
+
+  async deleteCfopCode(id: number) {
+    const [code] = await db
+      .delete(cfopCodes)
+      .where(eq(cfopCodes.id, id))
+      .returning();
     return code;
   },
 

@@ -45,6 +45,7 @@ const productFormSchema = z.object({
   ncm: z.string().min(1, "NCM é obrigatório"),
   serviceCode: z.string().optional(),
   cest: z.string().min(1, "CEST é obrigatório"),
+  csosnCode: z.string().optional(),
   origin: z.string().default("nacional"),
   description: z.string().optional(),
   mainImageUrl: z.string().optional(),
@@ -141,6 +142,15 @@ export default function ProductForm({
     queryKey: ["/api/products"],
     queryFn: async () => {
       const res = await fetch("/api/products");
+      if (!res.ok) throw new Error("Failed to fetch");
+      return res.json();
+    },
+  });
+
+  const { data: csosns = [] } = useQuery({
+    queryKey: ["/api/csosn-codes"],
+    queryFn: async () => {
+      const res = await fetch("/api/csosn-codes");
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
