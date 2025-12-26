@@ -156,6 +156,25 @@ export const products = pgTable("products", {
   isKit: boolean("is_kit").default(false),
   isActive: boolean("is_active").default(true),
   supplierId: integer("supplier_id"),
+  // ===== Tributação (Impostos) =====
+  icmsAliquot: decimal("icms_aliquot", { precision: 5, scale: 2 }).default("0"),
+  icmsReduction: decimal("icms_reduction", { precision: 5, scale: 2 }).default(
+    "0"
+  ),
+  ipiAliquot: decimal("ipi_aliquot", { precision: 5, scale: 2 }).default("0"),
+  pisAliquot: decimal("pis_aliquot", { precision: 5, scale: 2 }).default("0"),
+  pisCalculationMethod: text("pis_calculation_method").default("percentage"),
+  cofinsAliquot: decimal("cofins_aliquot", { precision: 5, scale: 2 }).default(
+    "0"
+  ),
+  cofinsCalculationMethod: text("cofins_calculation_method").default(
+    "percentage"
+  ),
+  issAliquot: decimal("iss_aliquot", { precision: 5, scale: 2 }).default("0"),
+  irrfAliquot: decimal("irrf_aliquot", { precision: 5, scale: 2 }).default("0"),
+  ibptTaxRate: decimal("ibpt_tax_rate", { precision: 5, scale: 2 }).default(
+    "0"
+  ),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -303,6 +322,29 @@ export const saleItems = pgTable("sale_items", {
   quantity: integer("quantity").notNull(),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
+  // ===== Tributação do Item =====
+  ncm: text("ncm"),
+  csosn: text("csosn"),
+  cstIcms: text("cst_icms"),
+  cstIpi: text("cst_ipi"),
+  cstPisCofins: text("cst_pis_cofins"),
+  icmsAliquot: decimal("icms_aliquot", { precision: 5, scale: 2 }).default("0"),
+  icmsValue: decimal("icms_value", { precision: 10, scale: 2 }).default("0"),
+  ipiAliquot: decimal("ipi_aliquot", { precision: 5, scale: 2 }).default("0"),
+  ipiValue: decimal("ipi_value", { precision: 10, scale: 2 }).default("0"),
+  pisAliquot: decimal("pis_aliquot", { precision: 5, scale: 2 }).default("0"),
+  pisValue: decimal("pis_value", { precision: 10, scale: 2 }).default("0"),
+  cofinsAliquot: decimal("cofins_aliquot", { precision: 5, scale: 2 }).default(
+    "0"
+  ),
+  cofinsValue: decimal("cofins_value", { precision: 10, scale: 2 }).default(
+    "0"
+  ),
+  issAliquot: decimal("iss_aliquot", { precision: 5, scale: 2 }).default("0"),
+  issValue: decimal("iss_value", { precision: 10, scale: 2 }).default("0"),
+  irrfAliquot: decimal("irrf_aliquot", { precision: 5, scale: 2 }).default("0"),
+  irrfValue: decimal("irrf_value", { precision: 10, scale: 2 }).default("0"),
+  totalTaxes: decimal("total_taxes", { precision: 10, scale: 2 }).default("0"),
 });
 
 export const insertSaleItemSchema = createInsertSchema(saleItems).omit({
@@ -610,3 +652,245 @@ export const insertCstSchema = createInsertSchema(cstCodes).omit({
 });
 export type InsertCst = z.infer<typeof insertCstSchema>;
 export type CstCode = typeof cstCodes.$inferSelect;
+
+// ============================================
+// SEFAZ INTEGRATION: NF-e Submissions
+// ============================================
+export const nfeSubmissions = pgTable("nfe_submissions", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  saleId: integer("sale_id"),
+  nfeNumber: text("nfe_number"),
+  nfeSeries: text("nfe_series"),
+  status: text("status").notNull().default("draft"), // draft, sent, authorized, cancelled, denied
+  submissionProtocol: text("submission_protocol"),
+  submissionStatus: text("submission_status"), // pending, processing, completed, error
+  submissionTimestamp: timestamp("submission_timestamp"),
+  authorizedProtocol: text("authorized_protocol"),
+  authorizedTimestamp: timestamp("authorized_timestamp"),
+  denialReason: text("denial_reason"),
+  xmlContent: text("xml_content"),
+  xmlSignature: text("xml_signature"),
+  environment: text("environment").default("homologacao"), // homologacao or producao
+  contingencyMode: boolean("contingency_mode").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertNfeSubmissionSchema = createInsertSchema(
+  nfeSubmissions
+).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertNfeSubmission = z.infer<typeof insertNfeSubmissionSchema>;
+export type NfeSubmission = typeof nfeSubmissions.$inferSelect;
+
+// ============================================
+// SEFAZ INTEGRATION: NF-e Cancellations
+// ============================================
+export const nfeCancellations = pgTable("nfe_cancellations", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  nfeSubmissionId: integer("nfe_submission_id").notNull(),
+  nfeNumber: text("nfe_number").notNull(),
+  nfeSeries: text("nfe_series").notNull(),
+  cancellationReason: text("cancellation_reason").notNull(),
+  cancellationProtocol: text("cancellation_protocol"),
+  cancellationStatus: text("cancellation_status").notNull().default("pending"), // pending, authorized, denied
+  cancellationTimestamp: timestamp("cancellation_timestamp"),
+  authorizedProtocol: text("authorized_protocol"),
+  authorizedTimestamp: timestamp("authorized_timestamp"),
+  denialReason: text("denial_reason"),
+  requestedAt: timestamp("requested_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertNfeCancellationSchema = createInsertSchema(
+  nfeCancellations
+).omit({
+  id: true,
+  requestedAt: true,
+  createdAt: true,
+});
+export type InsertNfeCancellation = z.infer<typeof insertNfeCancellationSchema>;
+export type NfeCancellation = typeof nfeCancellations.$inferSelect;
+
+// ============================================
+// SEFAZ INTEGRATION: Correction Letters (Carta de Correção)
+// ============================================
+export const nfeCorrectionLetters = pgTable("nfe_correction_letters", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  nfeSubmissionId: integer("nfe_submission_id").notNull(),
+  nfeNumber: text("nfe_number").notNull(),
+  nfeSeries: text("nfe_series").notNull(),
+  correctionReason: text("correction_reason").notNull(),
+  originalContent: text("original_content"),
+  correctedContent: text("corrected_content").notNull(),
+  correctionProtocol: text("correction_protocol"),
+  status: text("status").notNull().default("pending"), // pending, authorized, denied
+  authorizedProtocol: text("authorized_protocol"),
+  authorizedTimestamp: timestamp("authorized_timestamp"),
+  denialReason: text("denial_reason"),
+  requestedAt: timestamp("requested_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertNfeCorrectionLetterSchema = createInsertSchema(
+  nfeCorrectionLetters
+).omit({
+  id: true,
+  requestedAt: true,
+  createdAt: true,
+});
+export type InsertNfeCorrectionLetter = z.infer<
+  typeof insertNfeCorrectionLetterSchema
+>;
+export type NfeCorrectionLetter = typeof nfeCorrectionLetters.$inferSelect;
+
+// ============================================
+// SEFAZ INTEGRATION: Number Inutilization
+// ============================================
+export const nfeNumberInutilization = pgTable("nfe_number_inutilization", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  nfeSeries: text("nfe_series").notNull(),
+  startNumber: integer("start_number").notNull(),
+  endNumber: integer("end_number").notNull(),
+  reason: text("reason").notNull(),
+  inutilizationProtocol: text("inutilization_protocol"),
+  status: text("status").notNull().default("pending"), // pending, authorized, denied
+  authorizedProtocol: text("authorized_protocol"),
+  authorizedTimestamp: timestamp("authorized_timestamp"),
+  denialReason: text("denial_reason"),
+  requestedAt: timestamp("requested_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertNfeNumberInutilizationSchema = createInsertSchema(
+  nfeNumberInutilization
+).omit({
+  id: true,
+  requestedAt: true,
+  createdAt: true,
+});
+export type InsertNfeNumberInutilization = z.infer<
+  typeof insertNfeNumberInutilizationSchema
+>;
+export type NfeNumberInutilization = typeof nfeNumberInutilization.$inferSelect;
+
+// ============================================
+// SEFAZ INTEGRATION: Contingency Mode
+// ============================================
+export const nfeContingency = pgTable("nfe_contingency", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  contingencyMode: text("contingency_mode").notNull(), // offline, svc, svc_rs, svc_an
+  reason: text("reason").notNull(),
+  description: text("description"),
+  startedAt: timestamp("started_at").notNull(),
+  endedAt: timestamp("ended_at"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertNfeContingencySchema = createInsertSchema(
+  nfeContingency
+).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertNfeContingency = z.infer<typeof insertNfeContingencySchema>;
+export type NfeContingency = typeof nfeContingency.$inferSelect;
+
+// ============================================
+// SEFAZ INTEGRATION: SEFAZ Configuration
+// ============================================
+export const sefazConfigs = pgTable("sefaz_configs", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().unique(),
+  certificatePath: text("certificate_path"),
+  certificatePassword: text("certificate_password"),
+  environment: text("environment").notNull().default("homologacao"), // homologacao or producao
+  sefazUrl: text("sefaz_url"),
+  sefazTimeOut: integer("sefaz_timeout").default(30),
+  autoSubmit: boolean("auto_submit").default(false),
+  proxySefaz: text("proxy_sefaz"),
+  isEnabled: boolean("is_enabled").default(true),
+  lastConnectionTest: timestamp("last_connection_test"),
+  connectionStatus: text("connection_status").default("unknown"), // connected, disconnected, error
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSefazConfigSchema = createInsertSchema(sefazConfigs).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertSefazConfig = z.infer<typeof insertSefazConfigSchema>;
+export type SefazConfig = typeof sefazConfigs.$inferSelect;
+
+// ============================================
+// DIGITAL CERTIFICATES: e-CNPJ Management
+// ============================================
+export const digitalCertificates = pgTable("digital_certificates", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().unique(),
+  certificateData: text("certificate_data").notNull(), // Base64 encoded P12/PFX
+  certificatePassword: text("certificate_password").notNull(), // Encrypted password
+  cnpj: text("cnpj").notNull(),
+  subjectName: text("subject_name"),
+  issuer: text("issuer"),
+  validFrom: timestamp("valid_from"),
+  validUntil: timestamp("valid_until"),
+  certificateType: text("certificate_type").default("e-CNPJ"), // e-CNPJ, e-CPF
+  isActive: boolean("is_active").default(true),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertDigitalCertificateSchema = createInsertSchema(
+  digitalCertificates
+).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertDigitalCertificate = z.infer<
+  typeof insertDigitalCertificateSchema
+>;
+export type DigitalCertificate = typeof digitalCertificates.$inferSelect;
+
+// ============================================
+// FISCAL NUMBERING: Numeração Sequencial Autorizada (NSA)
+// ============================================
+export const sequentialNumbering = pgTable("sequential_numbering", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  documentType: text("document_type").notNull(), // NF-e, NFC-e, NFS-e, CT-e, MDF-e
+  series: integer("series").notNull(), // Série do documento
+  rangeStart: integer("range_start").notNull(), // Número inicial autorizado
+  rangeEnd: integer("range_end").notNull(), // Número final autorizado
+  currentNumber: integer("current_number").notNull(), // Próximo número a usar
+  authorization: text("authorization"), // Protocolo de autorização SEFAZ
+  authorizedAt: timestamp("authorized_at"), // Data da autorização
+  expiresAt: timestamp("expires_at"), // Data de expiração
+  environment: text("environment").notNull().default("homologacao"), // homologacao or producao
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSequentialNumberingSchema = createInsertSchema(
+  sequentialNumbering
+).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertSequentialNumbering = z.infer<
+  typeof insertSequentialNumberingSchema
+>;
+export type SequentialNumbering = typeof sequentialNumbering.$inferSelect;

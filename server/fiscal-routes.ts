@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, Request, Response } from "express";
 import {
   NFeSalesValidationSchema,
   NFCeValidationSchema,
@@ -11,6 +11,11 @@ import {
 } from "./fiscal-documents";
 import { CFOPValidator } from "./cfop-validator";
 import { CSOSNCalculator } from "./csosn-calculator";
+import { TaxCalculator } from "./tax-calculator";
+import { SefazService } from "./sefaz-service";
+import { XMLSignatureService } from "./xml-signature";
+import { storage } from "./storage";
+import { requireAuth, getCompanyId } from "./middleware";
 
 const router = Router();
 
@@ -70,39 +75,64 @@ router.post("/nfe/validate", async (req, res) => {
 
 router.post("/nfe/calculate-taxes", async (req, res) => {
   try {
-    const { items, baseValue } = req.body;
+    const { items } = req.body;
 
     const calculations = [];
+    let totalICMS = 0;
+    let totalIPI = 0;
+    let totalPIS = 0;
+    let totalCOFINS = 0;
+    let totalISS = 0;
+    let totalIRRF = 0;
+    let totalTaxes = 0;
+    let baseValue = 0;
 
     for (const item of items) {
-      const result = await CSOSNCalculator.calculateICMS({
-        baseValue: item.totalValue,
-        csosnCode: item.csosn,
-        companyState: "SP", // Pegar do usuário logado
-        icmsAliquot: 18, // Pegar do estado de destino
+      const taxes = TaxCalculator.calculateAllTaxes(
+        item.quantity,
+        item.unitPrice,
+        item.icmsAliquot || 18,
+        item.icmsReduction || 0,
+        item.ipiAliquot || 0,
+        item.pisAliquot || 0,
+        item.cofinsAliquot || 0,
+        item.issAliquot || 0,
+        item.irrfAliquot || 0
+      );
+
+      const subtotal = item.quantity * item.unitPrice;
+      baseValue += subtotal;
+      totalICMS += taxes.icmsValue;
+      totalIPI += taxes.ipiValue;
+      totalPIS += taxes.pisValue;
+      totalCOFINS += taxes.cofinsValue;
+      totalISS += taxes.issValue;
+      totalIRRF += taxes.irrfValue;
+      totalTaxes += taxes.totalTaxes;
+
+      calculations.push({
+        productId: item.productId,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        subtotal,
+        ...taxes,
       });
-
-      calculations.push(result);
     }
-
-    const totals = {
-      baseValue: items.reduce(
-        (sum: number, item: any) => sum + item.totalValue,
-        0
-      ),
-      icmsTotal: calculations.reduce(
-        (sum: number, calc: any) => sum + calc.totalICMS,
-        0
-      ),
-      icmsSTTotal: calculations.reduce(
-        (sum: number, calc: any) => sum + calc.icmsSTTax,
-        0
-      ),
-    };
 
     res.json({
       calculations,
-      totals,
+      totals: {
+        baseValue: Math.round(baseValue * 100) / 100,
+        icmsTotal: Math.round(totalICMS * 100) / 100,
+        ipiTotal: Math.round(totalIPI * 100) / 100,
+        pisTotal: Math.round(totalPIS * 100) / 100,
+        cofinsTotal: Math.round(totalCOFINS * 100) / 100,
+        issTotal: Math.round(totalISS * 100) / 100,
+        irrfTotal: Math.round(totalIRRF * 100) / 100,
+        totalTaxes: Math.round(totalTaxes * 100) / 100,
+        grossTotal: Math.round((baseValue + totalTaxes) * 100) / 100,
+      },
     });
   } catch (error) {
     res.status(400).json({
@@ -346,5 +376,289 @@ router.get("/csosn/all", async (req, res) => {
     });
   }
 });
+
+// ============================================
+// SEFAZ INTEGRATION ROUTES
+// ============================================
+
+// Listar notas fiscais pendentes de envio
+router.get("/nfe/pending", async (req, res) => {
+  try {
+    res.json([]);
+  } catch (error) {
+    res.status(400).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Erro ao buscar NF-es pendentes",
+    });
+  }
+});
+
+// Submeter NF-e para SEFAZ
+router.post("/sefaz/submit", async (req, res) => {
+  try {
+    const { xmlContent, environment = "homologacao" } = req.body;
+
+    if (!xmlContent) {
+      return res.status(400).json({ error: "XML content é obrigatório" });
+    }
+
+    const sefazService = new SefazService({
+      environment: environment as "homologacao" | "producao",
+      certificatePath: "",
+      certificatePassword: "",
+    });
+
+    const result = await sefazService.submitNFe(xmlContent);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Erro ao submeter NF-e",
+    });
+  }
+});
+
+// Cancelar NF-e
+router.post("/sefaz/cancel", async (req, res) => {
+  try {
+    const {
+      nfeNumber,
+      nfeSeries,
+      reason,
+      environment = "homologacao",
+    } = req.body;
+
+    if (!nfeNumber || !nfeSeries || !reason) {
+      return res.status(400).json({
+        error: "nfeNumber, nfeSeries e reason são obrigatórios",
+      });
+    }
+
+    const sefazService = new SefazService({
+      environment: environment as "homologacao" | "producao",
+      certificatePath: "",
+      certificatePassword: "",
+    });
+
+    const result = await sefazService.cancelNFe(nfeNumber, nfeSeries, reason);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Erro ao cancelar NF-e",
+    });
+  }
+});
+
+// Enviar Carta de Correção
+router.post("/sefaz/correction-letter", async (req, res) => {
+  try {
+    const {
+      nfeNumber,
+      nfeSeries,
+      correctionReason,
+      correctedContent,
+      environment = "homologacao",
+    } = req.body;
+
+    if (!nfeNumber || !nfeSeries || !correctionReason || !correctedContent) {
+      return res.status(400).json({
+        error:
+          "nfeNumber, nfeSeries, correctionReason e correctedContent são obrigatórios",
+      });
+    }
+
+    const sefazService = new SefazService({
+      environment: environment as "homologacao" | "producao",
+      certificatePath: "",
+      certificatePassword: "",
+    });
+
+    const result = await sefazService.sendCorrectionLetter(
+      nfeNumber,
+      nfeSeries,
+      {
+        correctionReason,
+        correctedContent,
+      }
+    );
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Erro ao enviar Carta de Correção",
+    });
+  }
+});
+
+// Inutilizar Numeração
+router.post("/sefaz/inutilize", async (req, res) => {
+  try {
+    const {
+      series,
+      startNumber,
+      endNumber,
+      reason,
+      environment = "homologacao",
+    } = req.body;
+
+    if (!series || !startNumber || !endNumber || !reason) {
+      return res.status(400).json({
+        error: "series, startNumber, endNumber e reason são obrigatórios",
+      });
+    }
+
+    const sefazService = new SefazService({
+      environment: environment as "homologacao" | "producao",
+      certificatePath: "",
+      certificatePassword: "",
+    });
+
+    const result = await sefazService.inutilizeNumbers(
+      series,
+      parseInt(startNumber),
+      parseInt(endNumber),
+      reason
+    );
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      error:
+        error instanceof Error ? error.message : "Erro ao inutilizar numeração",
+    });
+  }
+});
+
+// Ativar Modo Contingência
+router.post("/sefaz/contingency", async (req, res) => {
+  try {
+    const { mode = "offline" } = req.body;
+
+    if (!["offline", "svc", "svc_rs", "svc_an"].includes(mode)) {
+      return res.status(400).json({
+        error: "Modo de contingência inválido (offline, svc, svc_rs, svc_an)",
+      });
+    }
+
+    const sefazService = new SefazService({
+      environment: "homologacao",
+      certificatePath: "",
+      certificatePassword: "",
+    });
+
+    const result = await sefazService.activateContingencyMode(
+      mode as "offline" | "svc" | "svc_rs" | "svc_an"
+    );
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Erro ao ativar modo contingência",
+    });
+  }
+});
+
+// Consultar Status de Autorização
+router.get("/sefaz/status/:protocol", async (req, res) => {
+  try {
+    const { protocol } = req.params;
+
+    if (!protocol) {
+      return res.status(400).json({ error: "Protocol é obrigatório" });
+    }
+
+    const sefazService = new SefazService({
+      environment: "homologacao",
+      certificatePath: "",
+      certificatePassword: "",
+    });
+
+    const result = await sefazService.checkAuthorizationStatus(protocol);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      error:
+        error instanceof Error ? error.message : "Erro ao consultar status",
+    });
+  }
+});
+
+// Testar Conexão com SEFAZ
+router.post(
+  "/sefaz/test-connection",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const { environment = "homologacao" } = req.body;
+      const companyId = getCompanyId(req);
+
+      if (!companyId) {
+        return res.status(401).json({ error: "Não autenticado" });
+      }
+
+      // Em PRODUÇÃO, certificado é obrigatório
+      if (environment === "producao") {
+        const certificate = await storage.getDigitalCertificate(companyId);
+        if (!certificate) {
+          return res.status(400).json({
+            error:
+              "Certificado digital não configurado. Instale um certificado e-CNPJ antes de testar em PRODUÇÃO.",
+            certificateRequired: true,
+          });
+        }
+
+        // Validar se certificado ainda é válido
+        const validation = await storage.validateDigitalCertificate(companyId);
+        if (!validation.isValid) {
+          return res.status(400).json({
+            error: validation.message,
+            certificateRequired: true,
+          });
+        }
+      } else {
+        // Em HOMOLOGAÇÃO, certificado é opcional para testes
+        const certificate = await storage.getDigitalCertificate(companyId);
+        if (certificate) {
+          const validation = await storage.validateDigitalCertificate(
+            companyId
+          );
+          if (!validation.isValid) {
+            return res.status(400).json({
+              error: validation.message,
+              certificateRequired: false,
+              message:
+                "Certificado inválido, mas você pode continuar testando em homologação sem certificado",
+            });
+          }
+        }
+      }
+
+      const sefazService = new SefazService({
+        environment: environment as "homologacao" | "producao",
+        certificatePath: "",
+        certificatePassword: "",
+      });
+
+      const result = await sefazService.testConnection();
+      res.json({
+        ...result,
+        environment,
+        message:
+          environment === "homologacao"
+            ? "Teste de conexão em HOMOLOGAÇÃO (sem assinatura obrigatória)"
+            : "Teste de conexão em PRODUÇÃO (certificado obrigatório)",
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error ? error.message : "Erro ao testar conexão",
+      });
+    }
+  }
+);
 
 export default router;

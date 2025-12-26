@@ -15,6 +15,8 @@ import {
   User,
   History,
   FileText,
+  Zap,
+  Shield,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -70,6 +72,24 @@ const sidebarItems = [
     icon: FileText,
     label: "Documentos Fiscais",
     href: "/fiscal-documents",
+    permissions: ["fiscal:view", "fiscal:manage"],
+  },
+  {
+    icon: Zap,
+    label: "SEFAZ (NF-e)",
+    href: "/sefaz",
+    permissions: ["fiscal:view", "fiscal:manage"],
+  },
+  {
+    icon: Shield,
+    label: "Certificado Digital",
+    href: "/certificates",
+    permissions: ["fiscal:view", "fiscal:manage"],
+  },
+  {
+    icon: FileText,
+    label: "Numeração Sequencial (NSA)",
+    href: "/sequential-numbering",
     permissions: ["fiscal:view", "fiscal:manage"],
   },
   {

@@ -22,6 +22,8 @@ import {
   cfopCodes,
   companies,
   cstCodes,
+  digitalCertificates,
+  sequentialNumbering,
   type InsertProduct,
   type InsertCustomer,
   type InsertSupplier,
@@ -37,6 +39,9 @@ import {
   type InsertCashMovement,
   type InsertFiscalConfig,
   type InsertTaxAliquot,
+  type InsertDigitalCertificate,
+  type DigitalCertificate,
+  type InsertSequentialNumbering,
 } from "@shared/schema";
 import { eq, and, desc, sql, ilike } from "drizzle-orm";
 
@@ -803,5 +808,180 @@ export const storage = {
   async createTaxAliquot(data: InsertTaxAliquot) {
     const [aliquot] = await db.insert(taxAliquots).values(data).returning();
     return aliquot;
+  },
+
+  // ============================================
+  // DIGITAL CERTIFICATES
+  // ============================================
+  async getDigitalCertificate(companyId: number) {
+    const [cert] = await db
+      .select()
+      .from(digitalCertificates)
+      .where(eq(digitalCertificates.companyId, companyId))
+      .limit(1);
+    return cert;
+  },
+
+  async createOrUpdateDigitalCertificate(data: InsertDigitalCertificate) {
+    const existing = await this.getDigitalCertificate(data.companyId);
+
+    if (existing) {
+      const [cert] = await db
+        .update(digitalCertificates)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(digitalCertificates.companyId, data.companyId))
+        .returning();
+      return cert;
+    } else {
+      const [cert] = await db
+        .insert(digitalCertificates)
+        .values(data)
+        .returning();
+      return cert;
+    }
+  },
+
+  async deleteDigitalCertificate(companyId: number) {
+    const [cert] = await db
+      .delete(digitalCertificates)
+      .where(eq(digitalCertificates.companyId, companyId))
+      .returning();
+    return cert;
+  },
+
+  async validateDigitalCertificate(companyId: number): Promise<{
+    isValid: boolean;
+    message: string;
+    daysUntilExpiration?: number;
+  }> {
+    const cert = await this.getDigitalCertificate(companyId);
+
+    if (!cert) {
+      return {
+        isValid: false,
+        message: "Certificado digital não configurado",
+      };
+    }
+
+    const now = new Date();
+    if (cert.validUntil && new Date(cert.validUntil) < now) {
+      return {
+        isValid: false,
+        message: "Certificado digital expirado",
+      };
+    }
+
+    const daysUntilExpiration = cert.validUntil
+      ? Math.ceil(
+          (new Date(cert.validUntil).getTime() - now.getTime()) /
+            (1000 * 60 * 60 * 24)
+        )
+      : 0;
+
+    if (daysUntilExpiration < 30) {
+      return {
+        isValid: true,
+        message: `Certificado expira em ${daysUntilExpiration} dias`,
+        daysUntilExpiration,
+      };
+    }
+
+    return {
+      isValid: true,
+      message: "Certificado digital válido",
+      daysUntilExpiration,
+    };
+  },
+
+  // ============================================
+  // SEQUENTIAL NUMBERING
+  // ============================================
+  async getSequentialNumbering(
+    companyId: number,
+    documentType: string,
+    series: number
+  ) {
+    const [numbering] = await db
+      .select()
+      .from(sequentialNumbering)
+      .where(
+        and(
+          eq(sequentialNumbering.companyId, companyId),
+          eq(sequentialNumbering.documentType, documentType),
+          eq(sequentialNumbering.series, series)
+        )
+      )
+      .limit(1);
+    return numbering;
+  },
+
+  async createSequentialNumbering(data: InsertSequentialNumbering) {
+    const [numbering] = await db
+      .insert(sequentialNumbering)
+      .values(data)
+      .returning();
+    return numbering;
+  },
+
+  async updateSequentialNumbering(
+    id: number,
+    data: Partial<InsertSequentialNumbering>
+  ) {
+    const [numbering] = await db
+      .update(sequentialNumbering)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(sequentialNumbering.id, id))
+      .returning();
+    return numbering;
+  },
+
+  async getNextDocumentNumber(
+    companyId: number,
+    documentType: string,
+    series: number
+  ): Promise<{
+    number: number;
+    numbering: typeof sequentialNumbering.$inferSelect;
+  }> {
+    const numbering = await this.getSequentialNumbering(
+      companyId,
+      documentType,
+      series
+    );
+
+    if (!numbering) {
+      throw new Error(
+        `Numeração sequencial não configurada para ${documentType} série ${series}`
+      );
+    }
+
+    if (!numbering.isActive) {
+      throw new Error(
+        `Numeração expirada para ${documentType} série ${series}`
+      );
+    }
+
+    if (numbering.currentNumber > numbering.rangeEnd) {
+      throw new Error(
+        `Numeração esgotada! Máximo: ${numbering.rangeEnd}. Solicite nova autorização ao SEFAZ.`
+      );
+    }
+
+    const nextNumber = numbering.currentNumber;
+
+    // Incrementar contador
+    await this.updateSequentialNumbering(numbering.id, {
+      currentNumber: nextNumber + 1,
+    });
+
+    return { number: nextNumber, numbering };
+  },
+
+  async listSequentialNumbering(companyId: number) {
+    return await db
+      .select()
+      .from(sequentialNumbering)
+      .where(eq(sequentialNumbering.companyId, companyId))
+      .orderBy(sequentialNumbering.documentType, sequentialNumbering.series);
   },
 };

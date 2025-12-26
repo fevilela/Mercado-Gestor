@@ -2513,6 +2513,194 @@ export async function registerRoutes(
   );
 
   // ============================================
+  // DIGITAL CERTIFICATE MANAGEMENT
+  // ============================================
+  app.get(
+    "/api/digital-certificate",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const cert = await storage.getDigitalCertificate(companyId);
+        if (!cert) {
+          return res.json({ installed: false });
+        }
+
+        const validation = await storage.validateDigitalCertificate(companyId);
+        res.json({
+          installed: true,
+          cnpj: cert.cnpj,
+          subjectName: cert.subjectName,
+          issuer: cert.issuer,
+          validFrom: cert.validFrom,
+          validUntil: cert.validUntil,
+          certificateType: cert.certificateType,
+          ...validation,
+        });
+      } catch (error) {
+        console.error("Failed to fetch certificate:", error);
+        res.status(500).json({ error: "Failed to fetch certificate" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/digital-certificate/upload",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const { certificateData, certificatePassword, cnpj } = req.body;
+
+        if (!certificateData || !certificatePassword) {
+          return res.status(400).json({
+            error: "Certificado e senha são obrigatórios",
+          });
+        }
+
+        const cert = await storage.createOrUpdateDigitalCertificate({
+          companyId,
+          certificateData,
+          certificatePassword,
+          cnpj: cnpj || "",
+          certificateType: "e-CNPJ",
+          subjectName: "Digital Certificate",
+          issuer: "AC Raiz",
+          validFrom: new Date(),
+          validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        });
+
+        res.status(201).json({
+          success: true,
+          message: "Certificado digital salvo com sucesso",
+          cnpj: cert.cnpj,
+        });
+      } catch (error) {
+        console.error("Failed to upload certificate:", error);
+        res.status(500).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Erro ao salvar certificado",
+        });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/digital-certificate",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        await storage.deleteDigitalCertificate(companyId);
+        res.json({ success: true, message: "Certificado removido" });
+      } catch (error) {
+        console.error("Failed to delete certificate:", error);
+        res.status(500).json({ error: "Failed to delete certificate" });
+      }
+    }
+  );
+
+  // ============================================
+  // SEQUENTIAL NUMBERING (Numeração Sequencial Autorizada)
+  // ============================================
+  app.get(
+    "/api/sequential-numbering",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const numberings = await storage.listSequentialNumbering(companyId);
+        res.json(numberings);
+      } catch (error) {
+        console.error("Failed to list sequential numbering:", error);
+        res.status(500).json({ error: "Failed to list sequential numbering" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/sequential-numbering",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const data = req.body as any;
+        const numbering = await storage.createSequentialNumbering({
+          companyId,
+          documentType: data.documentType,
+          series: data.series,
+          rangeStart: data.rangeStart,
+          rangeEnd: data.rangeEnd,
+          currentNumber: data.rangeStart,
+          authorization: data.authorization,
+          authorizedAt: data.authorizedAt
+            ? new Date(data.authorizedAt)
+            : undefined,
+          expiresAt: data.expiresAt ? new Date(data.expiresAt) : undefined,
+          environment: data.environment || "homologacao",
+          isActive: true,
+        });
+        res.status(201).json(numbering);
+      } catch (error) {
+        console.error("Failed to create sequential numbering:", error);
+        res.status(500).json({
+          error: error instanceof Error ? error.message : "Failed to create",
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/sequential-numbering/:id/next-number",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const { documentType, series } = req.body;
+        const result = await storage.getNextDocumentNumber(
+          companyId,
+          documentType,
+          series
+        );
+        res.json(result);
+      } catch (error) {
+        res.status(400).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to get next number",
+        });
+      }
+    }
+  );
+
+  // ============================================
   // Fiscal Documents Routes (NF-e, NFC-e, NFS-e, CT-e, MDF-e)
   // ============================================
   app.use("/api/fiscal", requireAuth, fiscalRouter);

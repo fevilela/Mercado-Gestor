@@ -20,6 +20,9 @@ import Profile from "@/pages/profile";
 import CashHistory from "@/pages/cash-history";
 import FiscalConfig from "@/pages/fiscal-config";
 import FiscalDocuments from "@/pages/fiscal-documents";
+import SefazIntegration from "@/pages/sefaz-integration";
+import { CertificateConfig } from "@/pages/certificate-config";
+import SequentialNumberingConfig from "@/pages/sequential-numbering-config";
 import { Loader2 } from "lucide-react";
 
 function ProtectedRoute({
@@ -113,6 +116,15 @@ function Router() {
       </Route>
       <Route path="/fiscal-documents">
         <ProtectedRoute component={FiscalDocuments} />
+      </Route>
+      <Route path="/sefaz">
+        <ProtectedRoute component={SefazIntegration} />
+      </Route>
+      <Route path="/certificates">
+        <ProtectedRoute component={CertificateConfig} />
+      </Route>
+      <Route path="/sequential-numbering">
+        <ProtectedRoute component={SequentialNumberingConfig} />
       </Route>
       <Route component={NotFound} />
     </Switch>
