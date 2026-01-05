@@ -46,6 +46,7 @@ waitForPort = 3000
 [agent]
 mockupState = "FULLSTACK"
 integrations = ["javascript_database:1.0.0"]
+expertMode = true
 
 [userenv]
 
