@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+  <infNFe Id="NFe35190800000000000000550010000000011000000010" versao="4.00">
+    <ide>
+      <cUF>35</cUF>
+      <natOp>VENDA</natOp>
+      <mod>55</mod>
+      <serie>1</serie>
+      <nNF>1</nNF>
+      <dhEmi>2024-01-01T10:00:00-03:00</dhEmi>
+      <tpNF>1</tpNF>
+      <idDest>1</idDest>
+      <cMunFG>3550308</cMunFG>
+      <tpImp>1</tpImp>
+      <tpEmis>1</tpEmis>
+      <tpAmb>2</tpAmb>
+      <finNFe>1</finNFe>
+      <indFinal>1</indFinal>
+      <indPres>1</indPres>
+      <procEmi>0</procEmi>
+      <verProc>TESTE</verProc>
+    </ide>
+  </infNFe>
+<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/><SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/><Reference URI="#NFe35190800000000000000550010000000011000000010"><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/></Transforms><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/><DigestValue>KtV6iSm0Q4wswyd0+51dTnfKqgc=</DigestValue></Reference></SignedInfo><SignatureValue>ATW8mE2+nG9IiUHHiHUeSyWtu3jteDbGl9SFEXy6Wrlm+POaQmrU2BeTxXGDD/QG379xn8JVJ8uWIJvvD3CiVBMXtHGIC5LOvnh+Vb6OkSWJvWCE4Qmr2rEQ1IwEVOonlIDW4+K3pX2k/eCA5+5AgmOqjsPsECGjf5fpiESNp6aZC5STJ/ELJcWMyLDZ/AxEymrd54lv1e4UNsac/AXJzaSMLPPZUJCPul3aXaQfh4oWUMnbFq0iujHcmtHn5QLi+6i34xwtVPBX85Ndv4Sixg0Zt8wiccbNoI1S4GTFhTC7mVa/ML/yPejk65KmXNPPuxGAG1LBmw5Y/MALtXwnwg==</SignatureValue></Signature></NFe>

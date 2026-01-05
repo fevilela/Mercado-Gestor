@@ -20,6 +20,7 @@ import Profile from "@/pages/profile";
 import CashHistory from "@/pages/cash-history";
 import FiscalConfig from "@/pages/fiscal-config";
 import FiscalDocuments from "@/pages/fiscal-documents";
+import NFEEmissao from "@/pages/nfe-emissao";
 import SefazIntegration from "@/pages/sefaz-integration";
 import { CertificateConfig } from "@/pages/certificate-config";
 import SequentialNumberingConfig from "@/pages/sequential-numbering-config";
@@ -116,6 +117,9 @@ function Router() {
       </Route>
       <Route path="/fiscal-documents">
         <ProtectedRoute component={FiscalDocuments} />
+      </Route>
+      <Route path="/nfe-emissao">
+        <ProtectedRoute component={NFEEmissao} />
       </Route>
       <Route path="/sefaz">
         <ProtectedRoute component={SefazIntegration} />

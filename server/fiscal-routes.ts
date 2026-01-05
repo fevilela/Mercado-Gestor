@@ -381,6 +381,59 @@ router.get("/csosn/all", async (req, res) => {
 // SEFAZ INTEGRATION ROUTES
 // ============================================
 
+// Gerar NF-e com assinatura automática
+router.post("/nfe/generate", requireAuth, async (req, res) => {
+  try {
+    const { config, series = "1", environment = "homologacao" } = req.body;
+    const companyId = getCompanyId(req);
+
+    if (!config) {
+      return res
+        .status(400)
+        .json({ error: "Configuração de NF-e é obrigatória" });
+    }
+
+    if (!companyId) {
+      return res.status(401).json({ error: "Empresa não identificada" });
+    }
+
+    // Obter certificado da empresa
+    const { CertificateService } = await import("./certificate-service");
+    const certService = new CertificateService();
+    const certificateBuffer = await certService.getCertificate(companyId);
+    const certificatePassword = await certService.getCertificatePassword(
+      companyId
+    );
+
+    if (!certificateBuffer || !certificatePassword) {
+      return res.status(400).json({
+        error: "Certificado digital não configurado para esta empresa",
+      });
+    }
+
+    // Gerar XML com assinatura
+    const { NFEGenerator } = await import("./nfe-generator");
+    const nfeResult = NFEGenerator.generateXML(
+      config,
+      series,
+      certificateBuffer,
+      certificatePassword
+    );
+
+    res.json({
+      success: true,
+      xml: nfeResult.xml,
+      signed: nfeResult.signed,
+      message: `NF-e ${nfeResult.signed ? "assinada ✓" : "gerada"}`,
+      readyForSubmission: nfeResult.signed,
+    });
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Erro ao gerar NF-e",
+    });
+  }
+});
+
 // Listar notas fiscais pendentes de envio
 router.get("/nfe/pending", async (req, res) => {
   try {
@@ -395,23 +448,67 @@ router.get("/nfe/pending", async (req, res) => {
   }
 });
 
-// Submeter NF-e para SEFAZ
-router.post("/sefaz/submit", async (req, res) => {
+// Submeter NF-e para SEFAZ com assinatura automática
+router.post("/sefaz/submit", requireAuth, async (req, res) => {
   try {
     const { xmlContent, environment = "homologacao" } = req.body;
+    const companyId = getCompanyId(req);
 
     if (!xmlContent) {
       return res.status(400).json({ error: "XML content é obrigatório" });
     }
 
+    if (!companyId) {
+      return res.status(401).json({ error: "Empresa não identificada" });
+    }
+
+    // Obter certificado da empresa
+    const { CertificateService } = await import("./certificate-service");
+    const certService = new CertificateService();
+    const certificateBuffer = await certService.getCertificate(companyId);
+    const certificatePassword = await certService.getCertificatePassword(
+      companyId
+    );
+
+    if (!certificateBuffer || !certificatePassword) {
+      return res.status(400).json({
+        error: "Certificado digital não configurado para esta empresa",
+      });
+    }
+
+    // Assinar XML com certificado
+    let signedXml = xmlContent;
+    let signed = false;
+    try {
+      const { signedXml: signed_content } = XMLSignatureService.signNFe(
+        xmlContent,
+        certificateBuffer,
+        certificatePassword
+      );
+      signedXml = signed_content;
+      signed = true;
+    } catch (signError) {
+      console.error("Erro ao assinar XML:", signError);
+      return res.status(400).json({
+        error: `Falha ao assinar XML: ${
+          signError instanceof Error ? signError.message : "Desconhecido"
+        }`,
+      });
+    }
+
+    // Submeter para SEFAZ
     const sefazService = new SefazService({
       environment: environment as "homologacao" | "producao",
       certificatePath: "",
-      certificatePassword: "",
+      certificatePassword: certificatePassword,
     });
 
-    const result = await sefazService.submitNFe(xmlContent);
-    res.json(result);
+    const result = await sefazService.submitNFe(signedXml);
+    res.json({
+      ...result,
+      signed,
+      message: `NF-e assinada ${signed ? "✓" : "✗"} e enviada para SEFAZ`,
+    });
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : "Erro ao submeter NF-e",
