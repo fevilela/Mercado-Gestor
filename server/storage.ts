@@ -24,6 +24,12 @@ import {
   cstCodes,
   digitalCertificates,
   sequentialNumbering,
+  nfeCancellations,
+  nfeCorrectionLetters,
+  nfeNumberInutilization,
+  type InsertNfeCancellation,
+  type InsertNfeCorrectionLetter,
+  type InsertNfeNumberInutilization,
   type InsertProduct,
   type InsertCustomer,
   type InsertSupplier,
@@ -983,5 +989,29 @@ export const storage = {
       .from(sequentialNumbering)
       .where(eq(sequentialNumbering.companyId, companyId))
       .orderBy(sequentialNumbering.documentType, sequentialNumbering.series);
+  },
+
+  async getCompanyById(id: number) {
+    const [company] = await db
+      .select()
+      .from(companies)
+      .where(eq(companies.id, id))
+      .limit(1);
+    return company || null;
+  },
+
+  async createNfeCancellation(data: InsertNfeCancellation) {
+    const [record] = await db.insert(nfeCancellations).values(data).returning();
+    return record;
+  },
+
+  async createNfeCorrectionLetter(data: InsertNfeCorrectionLetter) {
+    const [record] = await db.insert(nfeCorrectionLetters).values(data).returning();
+    return record;
+  },
+
+  async createNfeNumberInutilization(data: InsertNfeNumberInutilization) {
+    const [record] = await db.insert(nfeNumberInutilization).values(data).returning();
+    return record;
   },
 };

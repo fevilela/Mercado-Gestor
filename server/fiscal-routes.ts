@@ -14,11 +14,36 @@ import { CSOSNCalculator } from "./csosn-calculator";
 import { TaxCalculator } from "./tax-calculator";
 import { TaxMatrixService } from "./tax-matrix";
 import { SefazService } from "./sefaz-service";
+import { XMLSignatureService } from "./xml-signature";
+import { NFCeContingencyService } from "./nfce-contingency";
 import { storage } from "./storage";
 import { requireAuth, getCompanyId } from "./middleware";
-import { CEST_REGEX, isCestRequired } from "@shared/schema";
+
+const CEST_REGEX = /^\d{7}$/;
+const isCestRequired = (ncm?: string) => Boolean(ncm);
+const nfceContingency = new NFCeContingencyService();
 
 const router = Router();
+
+// Adiciona flags de contingencia no XML NFC-e
+const applyNFCeContingencyFlags = (xmlContent: string) => {
+  const now = new Date().toISOString();
+  let updated = xmlContent.replace(
+    /<tpEmis>.*?<\/tpEmis>/,
+    "<tpEmis>9</tpEmis>"
+  );
+  if (updated === xmlContent) {
+    updated = updated.replace(
+      /<ide>/,
+      `<ide><tpEmis>9</tpEmis><dhCont>${now}</dhCont>`
+    );
+  } else {
+    updated = updated.replace(/<dhCont>.*?<\/dhCont>/, `<dhCont>${now}</dhCont>`);
+  }
+  return updated.includes("<dhCont>")
+    ? updated
+    : updated.replace(/<ide>/, `<ide><dhCont>${now}</dhCont>`);
+};
 
 // ============================================
 // NF-e (Modelo 55) Routes
@@ -264,6 +289,56 @@ router.post("/nfce/validate", async (req, res) => {
     });
   }
 });
+
+// Salva NFC-e em contingencia (offline)
+router.post("/nfce/contingency/save", requireAuth, async (req, res) => {
+  try {
+    const { xmlContent } = req.body;
+    if (!xmlContent) {
+      return res.status(400).json({ error: "XML content e obrigatorio" });
+    }
+
+    const flaggedXml = applyNFCeContingencyFlags(xmlContent);
+    const saved = nfceContingency.enqueue(flaggedXml);
+
+    res.json({
+      success: true,
+      message: "NFC-e salva em contingencia offline",
+      id: saved.id,
+      createdAt: saved.createdAt,
+    });
+  } catch (error) {
+    res.status(400).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Erro ao salvar NFC-e em contingencia",
+    });
+  }
+});
+
+// Lista NFC-e pendentes de reenvio
+router.get("/nfce/contingency/pending", requireAuth, async (_req, res) => {
+  res.json(nfceContingency.listPending());
+});
+
+// Dispara reenvio manual imediato
+router.post("/nfce/contingency/resend", requireAuth, async (_req, res) => {
+  try {
+    await nfceContingency.resendAll();
+    res.json({ success: true, message: "Reenvio de NFC-e em contingencia iniciado" });
+  } catch (error) {
+    res.status(400).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Erro ao reenviar NFC-e em contingencia",
+    });
+  }
+});
+
+// Iniciar rotina de reenvio automatico (handler deve ser configurado em tempo de execucao)
+nfceContingency.startAutoResend();
 
 // ============================================
 // NFS-e Routes
@@ -512,7 +587,7 @@ router.post("/nfe/generate", requireAuth, async (req, res) => {
       success: true,
       xml: nfeResult.xml,
       signed: nfeResult.signed,
-      message: `NF-e ${nfeResult.signed ? "assinada ✓" : "gerada"}`,
+      message: `NF-e ${nfeResult.signed ? "assinada" : "gerada"}`,
       readyForSubmission: nfeResult.signed,
     });
   } catch (error) {
@@ -537,46 +612,44 @@ router.get("/nfe/pending", async (req, res) => {
 });
 
 // Submeter NF-e para SEFAZ com assinatura automática
+// Submeter NF-e para SEFAZ com assinatura automatica
 router.post("/sefaz/submit", requireAuth, async (req, res) => {
   try {
-    const { xmlContent, environment = "homologacao" } = req.body;
+    const { xmlContent, environment = "homologacao", uf } = req.body;
+    const companyId = getCompanyId(req);
 
     if (!xmlContent) {
-      return res.status(400).json({ error: "XML content é obrigatório" });
+      return res.status(400).json({ error: "XML content e obrigatorio" });
     }
 
     if (!uf) {
-      return res.status(400).json({ error: "UF é obrigatória" });
+      return res.status(400).json({ error: "UF e obrigatoria" });
     }
 
     if (!companyId) {
-      return res.status(401).json({ error: "Empresa não identificada" });
+      return res.status(401).json({ error: "Empresa nao identificada" });
     }
 
-    // Obter certificado da empresa
     const { CertificateService } = await import("./certificate-service");
     const certService = new CertificateService();
     const certificateBuffer = await certService.getCertificate(companyId);
-    const certificatePassword = await certService.getCertificatePassword(
-      companyId
-    );
+    const certificatePassword = await certService.getCertificatePassword(companyId);
 
     if (!certificateBuffer || !certificatePassword) {
       return res.status(400).json({
-        error: "Certificado digital não configurado para esta empresa",
+        error: "Certificado digital nao configurado para esta empresa",
       });
     }
 
-    // Assinar XML com certificado
     let signedXml = xmlContent;
     let signed = false;
     try {
-      const { signedXml: signed_content } = XMLSignatureService.signNFe(
+      const certificateBase64 = certificateBuffer.toString("base64");
+      signedXml = XMLSignatureService.signXML(
         xmlContent,
-        certificateBuffer,
+        certificateBase64,
         certificatePassword
       );
-      signedXml = signed_content;
       signed = true;
     } catch (signError) {
       console.error("Erro ao assinar XML:", signError);
@@ -587,7 +660,6 @@ router.post("/sefaz/submit", requireAuth, async (req, res) => {
       });
     }
 
-    // Submeter para SEFAZ
     const sefazService = new SefazService({
       environment: environment as "homologacao" | "producao",
       uf,
@@ -599,7 +671,7 @@ router.post("/sefaz/submit", requireAuth, async (req, res) => {
     res.json({
       ...result,
       signed,
-      message: `NF-e assinada ${signed ? "✓" : "✗"} e enviada para SEFAZ`,
+      message: `NF-e ${signed ? "assinada" : "gerada"} e enviada para SEFAZ`,
     });
   } catch (error) {
     res.status(400).json({

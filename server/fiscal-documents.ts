@@ -208,7 +208,7 @@ export interface MDFeDocument {
 export const NFeItemSchema = z.object({
   productId: z.number(),
   description: z.string(),
-  ncm: z.string().regex(/^\d{8}$/),
+  ncm: z.string().length(8),
   cfop: z.string().regex(/^\d{4}$/),
   csosn: z.string().regex(/^\d{3}$/),
   quantity: z.number().positive(),

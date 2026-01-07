@@ -179,63 +179,11 @@ export const products = pgTable("products", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-export const NCM_REGEX = /^\d{8}$/;
-export const CEST_REGEX = /^\d{7}$/;
-export const CEST_REQUIRED_PREFIXES = [
-  "22",
-  "24",
-  "25",
-  "27",
-  "28",
-  "29",
-  "30",
-  "31",
-  "32",
-  "33",
-  "34",
-  "35",
-  "36",
-  "37",
-  "38",
-  "39",
-];
-
-export const isCestRequired = (ncm?: string | null): boolean => {
-  if (!ncm) return false;
-  return CEST_REQUIRED_PREFIXES.some((prefix) => ncm.startsWith(prefix));
-};
-
-export const insertProductSchema = createInsertSchema(products)
-  .omit({
-    id: true,
-    createdAt: true,
-    updatedAt: true,
-  })
-  .superRefine((data, ctx) => {
-    if (data.ncm && !NCM_REGEX.test(data.ncm)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "NCM deve conter 8 dígitos",
-        path: ["ncm"],
-      });
-    }
-
-    if (data.cest && !CEST_REGEX.test(data.cest)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "CEST deve conter 7 dígitos",
-        path: ["cest"],
-      });
-    }
-
-    if (isCestRequired(data.ncm) && !data.cest) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "CEST é obrigatório para o NCM informado",
-        path: ["cest"],
-      });
-    }
-  });
+export const insertProductSchema = createInsertSchema(products).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
 export type InsertProduct = z.infer<typeof insertProductSchema>;
 export type Product = typeof products.$inferSelect;
 
