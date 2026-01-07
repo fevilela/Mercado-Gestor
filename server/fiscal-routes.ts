@@ -95,7 +95,7 @@ router.post("/nfe/validate", requireAuth, async (req, res) => {
         });
       }
 
-      const ncm = item.ncm || product.ncm;
+      const ncm = item.ncm || product.ncm || undefined;
       const cest = product.cest;
 
       if (isCestRequired(ncm) && !cest) {

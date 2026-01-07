@@ -237,12 +237,12 @@ export class NFEGenerator {
   </infNFe>
 </NFe>`;
 
-    // Se certificado fornecido, assinar XML
     if (certificateBuffer && certificatePassword) {
       try {
-        const { signedXml } = XMLSignatureService.signNFe(
+        const certificateBase64 = certificateBuffer.toString("base64");
+        const signedXml = XMLSignatureService.signXML(
           xml,
-          certificateBuffer,
+          certificateBase64,
           certificatePassword
         );
         return { xml: signedXml, signed: true };
