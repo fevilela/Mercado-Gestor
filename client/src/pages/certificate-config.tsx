@@ -45,10 +45,14 @@ export function CertificateConfig() {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: async (formData: FormData) => {
+    mutationFn: async (payload: {
+      certificateData: string;
+      certificatePassword: string;
+    }) => {
       const response = await fetch("/api/digital-certificate/upload", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -107,14 +111,18 @@ export function CertificateConfig() {
 
     setIsUploading(true);
     const fileContent = await certificateFile.arrayBuffer();
-    const base64Content = Buffer.from(fileContent).toString("base64");
-
-    const formData = new FormData();
-    formData.append("certificateData", base64Content);
-    formData.append("certificatePassword", certificatePassword);
+    const bytes = new Uint8Array(fileContent);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Content = btoa(binary);
 
     try {
-      await uploadMutation.mutateAsync(formData);
+      await uploadMutation.mutateAsync({
+        certificateData: base64Content,
+        certificatePassword,
+      });
     } finally {
       setIsUploading(false);
     }
@@ -206,7 +214,7 @@ export function CertificateConfig() {
               {certificate.daysUntilExpiration &&
                 certificate.daysUntilExpiration < 30 && (
                   <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 flex gap-2">
-                    <AlertTriangle className="h-5 w-5 flex-shrink-0 text-yellow-600" />
+                    <AlertTriangle className="h-5 w-5 shrink-0 text-yellow-600" />
                     <div>
                       <p className="font-medium text-yellow-900">
                         Certificado próximo do vencimento

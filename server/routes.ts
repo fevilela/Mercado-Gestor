@@ -35,6 +35,7 @@ import {
 import { CFOPValidator } from "./cfop-validator";
 import { CSOSNCalculator } from "./csosn-calculator";
 import fiscalRouter from "./fiscal-routes";
+import { XMLSignatureService } from "./xml-signature";
 import { authorizePayment } from "./payment-service";
 import "./types";
 
@@ -2685,16 +2686,21 @@ export async function registerRoutes(
           });
         }
 
+        const certInfo = XMLSignatureService.extractCertificateInfo(
+          certificateData,
+          certificatePassword
+        );
+
         const cert = await storage.createOrUpdateDigitalCertificate({
           companyId,
           certificateData,
           certificatePassword,
-          cnpj: cnpj || "",
+          cnpj: certInfo.cnpj || cnpj || "",
           certificateType: "e-CNPJ",
-          subjectName: "Digital Certificate",
-          issuer: "AC Raiz",
-          validFrom: new Date(),
-          validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+          subjectName: certInfo.subjectName,
+          issuer: certInfo.issuer,
+          validFrom: certInfo.validFrom,
+          validUntil: certInfo.validUntil,
         });
 
         res.status(201).json({

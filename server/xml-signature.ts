@@ -2,6 +2,10 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as forge from "node-forge";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const forgeLib: any = (forge as any).asn1 ? forge : require("node-forge");
 
 /**
  * XML Signature Service for NF-e documents
@@ -32,10 +36,10 @@ export class XMLSignatureService {
       const binaryBuffer = certificateBuffer.toString("binary");
 
       // Parse PKCS#12 using forge's ASN.1 parser and pkcs12 module
-      const asn1 = forge.asn1.fromDer(binaryBuffer);
+      const asn1 = forgeLib.asn1.fromDer(binaryBuffer);
 
       // Use the correct forge.pkcs12 API: pkcs12FromAsn1
-      const pkcs12 = (forge as any).pkcs12;
+      const pkcs12 = (forgeLib as any).pkcs12;
       const p12 = pkcs12.pkcs12FromAsn1(asn1, certificatePassword);
 
       // Extract the certificate chain and key
@@ -44,9 +48,9 @@ export class XMLSignatureService {
 
       if (p12.bags && p12.bags.length > 0) {
         for (const bag of p12.bags) {
-          if (bag.type === forge.pki.oids.pkcs8ShroudedKeyBag) {
+          if (bag.type === forgeLib.pki.oids.pkcs8ShroudedKeyBag) {
             privateKey = bag.key;
-          } else if (bag.type === forge.pki.oids.certBag && !certificate) {
+          } else if (bag.type === forgeLib.pki.oids.certBag && !certificate) {
             certificate = bag.cert;
           }
         }
@@ -57,16 +61,16 @@ export class XMLSignatureService {
       }
 
       // Create signature of the XML content using RSA-SHA256
-      const md = forge.md.sha256.create();
+      const md = forgeLib.md.sha256.create();
       md.update(xmlContent);
       const signature = privateKey.sign(md);
-      const signatureBase64 = forge.util.encode64(signature);
+      const signatureBase64 = forgeLib.util.encode64(signature);
 
       // Convert certificate to base64 for inclusion in signature
-      const certDer = forge.asn1.toDer(
-        forge.pki.certificateToAsn1(certificate)
+      const certDer = forgeLib.asn1.toDer(
+        forgeLib.pki.certificateToAsn1(certificate)
       );
-      const certBase64 = forge.util.encode64(certDer.getBytes());
+      const certBase64 = forgeLib.util.encode64(certDer.getBytes());
 
       // Create the XML Signature element
       const signatureElement = `
@@ -80,7 +84,7 @@ export class XMLSignatureService {
             <Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#" />
           </Transforms>
           <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256" />
-          <DigestValue>${forge.util.encode64(
+          <DigestValue>${forgeLib.util.encode64(
             md.digest().getBytes()
           )}</DigestValue>
         </Reference>
@@ -123,38 +127,91 @@ export class XMLSignatureService {
       const binaryBuffer = certificateBuffer.toString("binary");
 
       // Parse PKCS#12 using forge's ASN.1 parser
-      const asn1 = forge.asn1.fromDer(binaryBuffer);
+      const asn1 = forgeLib.asn1.fromDer(binaryBuffer);
 
       // Use the correct forge.pkcs12 API: pkcs12FromAsn1
-      const pkcs12 = (forge as any).pkcs12;
+      const pkcs12 = (forgeLib as any).pkcs12;
       const p12 = pkcs12.pkcs12FromAsn1(asn1, certificatePassword);
 
-      // Extract the first certificate from bags
-      if (!p12.bags || p12.bags.length === 0) {
+      const bags =
+        p12.getBags({ bagType: forgeLib.pki.oids.certBag })[
+          forgeLib.pki.oids.certBag
+        ] || [];
+      const certificates = bags.map((bag: any) => bag.cert).filter(Boolean);
+
+      if (certificates.length === 0) {
         throw new Error("No certificates found in P12");
       }
 
-      let certificate: any = null;
-      for (const bag of p12.bags) {
-        if (bag.type === forge.pki.oids.certBag) {
-          certificate = bag.cert;
-          break;
+      const collectAsn1Strings = (node: any, out: string[]) => {
+        if (!node) return;
+        if (typeof node.value === "string") {
+          out.push(node.value);
+          return;
         }
-      }
+        if (Array.isArray(node.value)) {
+          for (const child of node.value) collectAsn1Strings(child, out);
+        }
+      };
+
+      const extractCnpjFromText = (value?: string | null) => {
+        if (!value) return null;
+        const digits = value.replace(/\D/g, "");
+        if (digits.length < 14) return null;
+        return digits.slice(0, 14);
+      };
+
+      const extractCnpjFromCert = (cert: any) => {
+        const san = cert.getExtension("subjectAltName");
+        if (san?.altNames?.length) {
+          for (const alt of san.altNames) {
+            if (alt.type === 0 && alt.typeId === "2.16.76.1.3.3") {
+              try {
+                if (typeof alt.value === "string") {
+                  const asn1Value = forgeLib.asn1.fromDer(alt.value);
+                  const values: string[] = [];
+                  collectAsn1Strings(asn1Value, values);
+                  const fromAlt = extractCnpjFromText(values.join(" "));
+                  if (fromAlt) return fromAlt;
+                }
+              } catch {
+                const fallback = extractCnpjFromText(alt.value);
+                if (fallback) return fallback;
+              }
+            }
+          }
+        }
+
+        for (const attr of cert.subject.attributes || []) {
+          if (attr.type === "2.16.76.1.3.3") {
+            const fromAttr = extractCnpjFromText(attr.value);
+            if (fromAttr) return fromAttr;
+          }
+          if (attr.shortName === "serialNumber" || attr.name === "serialNumber") {
+            const fromSerial = extractCnpjFromText(attr.value);
+            if (fromSerial) return fromSerial;
+          }
+          if (attr.shortName === "CN" || attr.name === "commonName") {
+            const fromCn = extractCnpjFromText(attr.value);
+            if (fromCn) return fromCn;
+          }
+        }
+
+        return null;
+      };
+
+      let certificate =
+        certificates.find((cert: any) => extractCnpjFromCert(cert)) ||
+        certificates.find(
+          (cert: any) => !cert.getExtension("basicConstraints")?.cA
+        ) ||
+        certificates[0];
 
       if (!certificate) {
         throw new Error("Could not extract certificate from P12");
       }
 
-      // Extract CNPJ from certificate subject
-      let cnpj = "00000000000000";
-      if (certificate.subject.getField("CN")) {
-        const cn = certificate.subject.getField("CN").value;
-        const cnpjMatch = cn.match(/(\d{14})/);
-        if (cnpjMatch) {
-          cnpj = cnpjMatch[1];
-        }
-      }
+      const cnpj = extractCnpjFromCert(certificate) || "00000000000000";
 
       // Get subject name and issuer
       const subjectName = certificate.subject.attributes
