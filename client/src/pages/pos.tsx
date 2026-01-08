@@ -43,6 +43,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 
 type PaymentMethod = "pix" | "credito" | "debito" | null;
+type PaymentStatus = "idle" | "processing" | "approved" | "declined" | "error";
+type PaymentResult = {
+  status: "approved" | "declined" | "processing";
+  nsu?: string | null;
+  brand?: string | null;
+  provider?: string | null;
+  authorizationCode?: string | null;
+  providerReference?: string | null;
+};
 type FiscalStatus = "idle" | "sending" | "success" | "pending_fiscal";
 
 export default function POS() {
@@ -52,6 +61,8 @@ export default function POS() {
   const [isFinishing, setIsFinishing] = useState(false);
   const [fiscalStatus, setFiscalStatus] = useState<FiscalStatus>("idle");
   const [selectedPayment, setSelectedPayment] = useState<PaymentMethod>(null);
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("idle");
+  const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(null);
   const [showCatalog, setShowCatalog] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>("Todos");
   const [showCancelDialog, setShowCancelDialog] = useState(false);
@@ -372,12 +383,90 @@ export default function POS() {
     }
   };
 
+  const handleSelectPayment = async (method: PaymentMethod) => {
+    if (!method) return;
+    if (cart.length === 0) {
+      toast({
+        title: "Carrinho vazio",
+        description: "Adicione itens antes de selecionar o pagamento.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSelectedPayment(method);
+    setPaymentStatus("processing");
+    setPaymentResult(null);
+
+    try {
+      const res = await fetch("/api/payments/authorize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: parseFloat(total.toFixed(2)),
+          method,
+        }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Falha no pagamento");
+      }
+
+      const result: PaymentResult = await res.json();
+      setPaymentResult(result);
+      if (result.status === "approved") {
+        setPaymentStatus("approved");
+        toast({
+          title: "Pagamento aprovado",
+          description: result.brand
+            ? `Bandeira: ${result.brand}`
+            : "Pagamento autorizado.",
+          className: "bg-emerald-500 text-white border-none",
+        });
+        return;
+      }
+
+      if (result.status === "declined") {
+        setPaymentStatus("declined");
+        toast({
+          title: "Pagamento negado",
+          description: "Tente outra forma de pagamento.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setPaymentStatus("processing");
+      toast({
+        title: "Pagamento em andamento",
+        description: "Aguardando confirmacao do terminal.",
+      });
+    } catch (error) {
+      setPaymentStatus("error");
+      toast({
+        title: "Erro no pagamento",
+        description: error instanceof Error ? error.message : "Falha no pagamento",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleFinishSale = async () => {
     if (!selectedPayment) {
       toast({
         title: "Selecione a forma de pagamento",
         description:
           "Escolha PIX, Cartão de Crédito ou Cartão de Débito para continuar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (paymentStatus !== "approved" || !paymentResult) {
+      toast({
+        title: "Pagamento pendente",
+        description: "A venda so pode ser finalizada com pagamento aprovado.",
         variant: "destructive",
       });
       return;
@@ -402,6 +491,14 @@ export default function POS() {
         unitPrice: item.product.price,
         subtotal: (parseFloat(item.product.price) * item.qty).toFixed(2),
       })),
+      payment: {
+        status: paymentResult.status,
+        nsu: paymentResult.nsu || null,
+        brand: paymentResult.brand || null,
+        provider: paymentResult.provider || null,
+        authorizationCode: paymentResult.authorizationCode || null,
+        providerReference: paymentResult.providerReference || null,
+      },
     };
 
     try {
@@ -444,6 +541,8 @@ export default function POS() {
     setIsFinishing(false);
     setFiscalStatus("idle");
     setSelectedPayment(null);
+    setPaymentStatus("idle");
+    setPaymentResult(null);
   };
 
   const handleCancelSale = () => {
@@ -453,6 +552,8 @@ export default function POS() {
     setShowCancelReceipt(true);
     setCart([]);
     setSelectedPayment(null);
+    setPaymentStatus("idle");
+    setPaymentResult(null);
     toast({
       title: "Venda Cancelada",
       description: "A venda foi cancelada com sucesso.",
@@ -472,6 +573,19 @@ export default function POS() {
     0
   );
   const total = subtotal;
+
+  const lastTotalRef = useRef(total);
+
+  useEffect(() => {
+    if (lastTotalRef.current !== total) {
+      lastTotalRef.current = total;
+      if (paymentStatus !== "idle") {
+        setPaymentStatus("idle");
+        setPaymentResult(null);
+        setSelectedPayment(null);
+      }
+    }
+  }, [paymentStatus, total]);
 
   const uniqueCategories = products
     .map((p: any) => String(p.category))
@@ -779,7 +893,8 @@ export default function POS() {
                   ? "bg-purple-600 hover:bg-purple-700 ring-2 ring-purple-300 ring-offset-2"
                   : "bg-purple-600/70 hover:bg-purple-600"
               }`}
-              onClick={() => setSelectedPayment("pix")}
+              onClick={() => handleSelectPayment("pix")}
+              disabled={cart.length === 0 || paymentStatus === "processing"}
               data-testid="button-payment-pix"
             >
               <QrCode className="h-5 w-5" />
@@ -791,7 +906,8 @@ export default function POS() {
                   ? "bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300 ring-offset-2"
                   : "bg-blue-600/70 hover:bg-blue-600"
               }`}
-              onClick={() => setSelectedPayment("credito")}
+              onClick={() => handleSelectPayment("credito")}
+              disabled={cart.length === 0 || paymentStatus === "processing"}
               data-testid="button-payment-credit"
             >
               <CreditCard className="h-5 w-5" />
@@ -803,7 +919,8 @@ export default function POS() {
                   ? "bg-emerald-600 hover:bg-emerald-700 ring-2 ring-emerald-300 ring-offset-2"
                   : "bg-emerald-600/70 hover:bg-emerald-600"
               }`}
-              onClick={() => setSelectedPayment("debito")}
+              onClick={() => handleSelectPayment("debito")}
+              disabled={cart.length === 0 || paymentStatus === "processing"}
               data-testid="button-payment-debit"
             >
               <CreditCard className="h-5 w-5" />
@@ -812,11 +929,29 @@ export default function POS() {
           </div>
 
           {selectedPayment && (
-            <div className="text-center text-sm text-muted-foreground">
-              Forma de pagamento:{" "}
-              <span className="font-medium text-foreground">
-                {getPaymentMethodLabel(selectedPayment)}
-              </span>
+            <div className="text-center text-sm text-muted-foreground space-y-1">
+              <div>
+                Forma de pagamento:{" "}
+                <span className="font-medium text-foreground">
+                  {getPaymentMethodLabel(selectedPayment)}
+                </span>
+              </div>
+              {paymentStatus === "processing" && (
+                <div>Processando pagamento...</div>
+              )}
+              {paymentStatus === "approved" && (
+                <div className="text-emerald-600">
+                  Pagamento aprovado
+                  {paymentResult?.nsu ? ` • NSU ${paymentResult.nsu}` : ""}
+                  {paymentResult?.brand ? ` • ${paymentResult.brand}` : ""}
+                </div>
+              )}
+              {paymentStatus === "declined" && (
+                <div className="text-red-600">Pagamento negado</div>
+              )}
+              {paymentStatus === "error" && (
+                <div className="text-red-600">Erro no pagamento</div>
+              )}
             </div>
           )}
 
@@ -835,7 +970,7 @@ export default function POS() {
             <Button
               size="lg"
               className="h-12 text-lg font-bold gap-2"
-              disabled={cart.length === 0}
+              disabled={cart.length === 0 || paymentStatus !== "approved"}
               onClick={handleFinishSale}
               data-testid="button-finish-sale"
             >

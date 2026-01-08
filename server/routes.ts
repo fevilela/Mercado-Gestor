@@ -35,6 +35,7 @@ import {
 import { CFOPValidator } from "./cfop-validator";
 import { CSOSNCalculator } from "./csosn-calculator";
 import fiscalRouter from "./fiscal-routes";
+import { authorizePayment } from "./payment-service";
 import "./types";
 
 function parseNFeXML(xmlContent: string): Array<{
@@ -219,7 +220,7 @@ export async function registerRoutes(
   app.post(
     "/api/products",
     requireAuth,
-    requirePermission("inventory:manage"),
+    requirePermission("inventory:create"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -289,7 +290,7 @@ export async function registerRoutes(
   app.patch(
     "/api/products/:id",
     requireAuth,
-    requirePermission("inventory:manage"),
+    requirePermission("inventory:edit"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -396,7 +397,7 @@ export async function registerRoutes(
   app.delete(
     "/api/products/:id",
     requireAuth,
-    requirePermission("inventory:manage"),
+    requirePermission("inventory:delete"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -672,10 +673,55 @@ export async function registerRoutes(
     }
   );
 
+  const paymentInfoSchema = z.object({
+    status: z.enum(["approved", "declined", "processing"]),
+    nsu: z.string().optional().nullable(),
+    brand: z.string().optional().nullable(),
+    provider: z.string().optional().nullable(),
+    authorizationCode: z.string().optional().nullable(),
+    providerReference: z.string().optional().nullable(),
+  });
+
   const createSaleRequestSchema = z.object({
     sale: insertSaleSchema,
     items: z.array(insertSaleItemSchema.omit({ saleId: true })),
+    payment: paymentInfoSchema,
   });
+
+  const paymentAuthorizeSchema = z.object({
+    amount: z.number().positive(),
+    method: z.enum(["pix", "credito", "debito"]),
+  });
+
+  app.post(
+    "/api/payments/authorize",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { amount, method } = paymentAuthorizeSchema.parse(req.body);
+        const settings = await storage.getCompanySettings(companyId);
+        const result = await authorizePayment({
+          amount,
+          method,
+          settings,
+          description: `Venda PDV ${companyId}`,
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error: error instanceof Error ? error.message : "Erro no pagamento",
+        });
+      }
+    }
+  );
 
   app.post(
     "/api/sales",
@@ -688,7 +734,12 @@ export async function registerRoutes(
         if (!companyId)
           return res.status(401).json({ error: "Não autenticado" });
 
-        const { sale, items } = createSaleRequestSchema.parse(req.body);
+        const { sale, items, payment } = createSaleRequestSchema.parse(
+          req.body
+        );
+        if (payment.status !== "approved") {
+          return res.status(402).json({ error: "Pagamento nao autorizado" });
+        }
 
         const settings = await storage.getCompanySettings(companyId);
         const isFiscalConfigured = !!(
@@ -702,6 +753,12 @@ export async function registerRoutes(
           ...sale,
           companyId,
           userId,
+          paymentStatus: payment.status,
+          paymentNsu: payment.nsu || null,
+          paymentBrand: payment.brand || null,
+          paymentProvider: payment.provider || null,
+          paymentAuthorization: payment.authorizationCode || null,
+          paymentReference: payment.providerReference || null,
           nfceStatus: isFiscalConfigured ? "Autorizada" : "Pendente Fiscal",
           status: isFiscalConfigured ? "Concluído" : "Aguardando Emissão",
         };
@@ -811,17 +868,79 @@ export async function registerRoutes(
 
   app.get("/api/ean/:code", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId)
+        return res.status(401).json({ error: "Nao autenticado" });
+
       const { code } = req.params;
-      const result = await lookupEAN(code);
+      const normalized = String(code || "").replace(/\s+/g, "");
+      if (!normalized) {
+        return res.status(404).json({ error: "Produto nao encontrado" });
+      }
+
+      const localProduct = await storage.getProductByEAN(
+        companyId,
+        normalized
+      );
+      if (localProduct) {
+        return res.json({
+          name: localProduct.name,
+          brand: localProduct.brand,
+          description: localProduct.description,
+          thumbnail: localProduct.mainImageUrl,
+          ncm: localProduct.ncm,
+          cest: localProduct.cest,
+        });
+      }
+
+      const result = await lookupEAN(normalized);
       if (!result) {
-        return res.status(404).json({ error: "Produto não encontrado" });
+        return res.status(404).json({ error: "Produto nao encontrado" });
       }
-      res.json(result);
+
+      let savedProduct: typeof products.$inferSelect | null = null;
+      try {
+        const [created] = await db
+          .insert(products)
+          .values({
+            companyId,
+            name: result.name,
+            ean: normalized,
+            brand: result.brand || null,
+            description: result.description || null,
+            ncm: result.ncm || null,
+            mainImageUrl: result.thumbnail || null,
+            category: "Importado",
+            unit: "UN",
+            price: "0",
+            stock: 0,
+          })
+          .returning();
+        savedProduct = created || null;
+      } catch (error) {
+        savedProduct = null;
+      }
+
+      if (savedProduct) {
+        return res.json({
+          name: savedProduct.name,
+          brand: savedProduct.brand,
+          description: savedProduct.description,
+          thumbnail: savedProduct.mainImageUrl,
+          ncm: savedProduct.ncm,
+          cest: savedProduct.cest,
+        });
+      }
+
+      res.json({
+        name: result.name,
+        brand: result.brand,
+        description: result.description,
+        thumbnail: result.thumbnail,
+        ncm: result.ncm,
+      });
     } catch (error) {
-      if (error instanceof Error) {
-        return res.status(400).json({ error: error.message });
-      }
-      res.status(500).json({ error: "Falha ao buscar produto" });
+      res.status(404).json({ error: "Produto nao encontrado" });
     }
   });
 
@@ -859,7 +978,7 @@ export async function registerRoutes(
   app.post(
     "/api/inventory/adjust",
     requireAuth,
-    requirePermission("inventory:manage"),
+    requirePermission("inventory:adjust"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -2707,3 +2826,5 @@ export async function registerRoutes(
 
   return httpServer;
 }
+
+

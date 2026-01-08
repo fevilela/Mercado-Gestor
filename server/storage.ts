@@ -170,6 +170,15 @@ export const storage = {
     return product;
   },
 
+  async getProductByEAN(companyId: number, ean: string) {
+    const [product] = await db
+      .select()
+      .from(products)
+      .where(and(eq(products.companyId, companyId), eq(products.ean, ean)))
+      .limit(1);
+    return product || null;
+  },
+
   async getProductVariations(productId: number) {
     return await db
       .select()
