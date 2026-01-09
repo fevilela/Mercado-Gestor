@@ -37,6 +37,7 @@ import { CSOSNCalculator } from "./csosn-calculator";
 import fiscalRouter from "./fiscal-routes";
 import { XMLSignatureService } from "./xml-signature";
 import { authorizePayment } from "./payment-service";
+import { getFiscalCertificateStatus } from "./fiscal-certificate";
 import "./types";
 
 function parseNFeXML(xmlContent: string): Array<{
@@ -743,6 +744,12 @@ export async function registerRoutes(
         }
 
         const settings = await storage.getCompanySettings(companyId);
+        if (settings?.fiscalEnabled) {
+          const fiscalStatus = await getFiscalCertificateStatus(companyId);
+          if (!fiscalStatus.isValid) {
+            return res.status(403).json({ error: fiscalStatus.message });
+          }
+        }
         const isFiscalConfigured = !!(
           settings &&
           settings.fiscalEnabled &&
@@ -790,6 +797,7 @@ export async function registerRoutes(
     status: z.string(),
     protocol: z.string().optional(),
     key: z.string().optional(),
+    error: z.string().nullable().optional(),
   });
 
   app.patch(
@@ -803,7 +811,7 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const id = parseInt(req.params.id);
-        const { status, protocol, key } = updateNfceStatusSchema.parse(
+        const { status, protocol, key, error } = updateNfceStatusSchema.parse(
           req.body
         );
         const sale = await storage.updateSaleNfceStatus(
@@ -811,7 +819,8 @@ export async function registerRoutes(
           companyId,
           status,
           protocol,
-          key
+          key,
+          error ?? null
         );
         if (!sale) {
           return res.status(404).json({ error: "Sale not found" });

@@ -310,6 +310,7 @@ export const sales = pgTable("sales", {
   nfceProtocol: text("nfce_protocol"),
   nfceStatus: text("nfce_status").notNull().default("Pendente"),
   nfceKey: text("nfce_key"),
+  nfceError: text("nfce_error"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

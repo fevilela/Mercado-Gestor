@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState, useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Layout from "@/components/layout";
 import {
   Card,
@@ -28,6 +28,15 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 interface Product {
   id: number;
@@ -80,8 +89,20 @@ interface FormItem {
   cest: string;
 }
 
+interface NfceSale {
+  id: number;
+  customerName: string;
+  total: string;
+  nfceStatus: string;
+  nfceProtocol: string | null;
+  nfceKey: string | null;
+  nfceError?: string | null;
+  createdAt: string;
+}
+
 export default function FiscalDocuments() {
   const [activeTab, setActiveTab] = useState("nfe");
+  const queryClient = useQueryClient();
   const [productSearch, setProductSearch] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
@@ -89,13 +110,19 @@ export default function FiscalDocuments() {
   );
   const [productSearchOpen, setProductSearchOpen] = useState(false);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [selectedNfceIds, setSelectedNfceIds] = useState<number[]>([]);
+  const [inutilizeForm, setInutilizeForm] = useState({
+    serie: "",
+    startNumber: "",
+    endNumber: "",
+    reason: "",
+  });
 
   const [formData, setFormData] = useState({
     customerId: "",
     customerCPFCNPJ: "",
     cfopCode: "",
     scope: "interna" as "interna" | "interestadual" | "exterior",
-    paymentMethod: "01",
     items: [
       {
         productId: 0,
@@ -153,6 +180,15 @@ export default function FiscalDocuments() {
     enabled: customerSearch.length > 1,
   });
 
+  const { data: sales = [], isLoading: isLoadingSales } = useQuery<NfceSale[]>({
+    queryKey: ["/api/sales"],
+    queryFn: async () => {
+      const res = await fetch("/api/sales");
+      if (!res.ok) throw new Error("Erro ao carregar vendas");
+      return res.json();
+    },
+  });
+
   // Validar NF-e
   const validateNFeMutation = useMutation<any, Error, any>({
     mutationFn: async (data) => {
@@ -189,22 +225,75 @@ export default function FiscalDocuments() {
     },
   });
 
-  // Validar NFC-e
-  const validateNFCeMutation = useMutation<any, Error, any>({
-    mutationFn: async (data) => {
-      const res = await fetch("/api/fiscal/nfce/validate", {
+  const sendNfceMutation = useMutation<any, Error, number[]>({
+    mutationFn: async (saleIds) => {
+      const res = await fetch("/api/fiscal/nfce/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ saleIds }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Falha ao enviar NFC-e");
+      }
       return res.json();
     },
     onSuccess: () => {
-      toast.success("NFC-e validada com sucesso!");
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+      setSelectedNfceIds([]);
+      toast.success("Envio de NFC-e iniciado");
     },
     onError: (error) => {
-      toast.error("Erro ao validar NFC-e: " + error.message);
+      toast.error(error.message);
+    },
+  });
+
+  const cancelNfceMutation = useMutation<any, Error, number>({
+    mutationFn: async (saleId) => {
+      const res = await fetch("/api/fiscal/nfce/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ saleId }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Falha ao cancelar NFC-e");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+      toast.success("NFC-e cancelada");
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const inutilizeNfceMutation = useMutation<any, Error, typeof inutilizeForm>({
+    mutationFn: async (payload) => {
+      const res = await fetch("/api/fiscal/nfce/inutilize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          serie: payload.serie,
+          startNumber: payload.startNumber,
+          endNumber: payload.endNumber,
+          reason: payload.reason,
+        }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Falha ao inutilizar numeracao");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success("Inutilizacao registrada");
+      setInutilizeForm({ serie: "", startNumber: "", endNumber: "", reason: "" });
+    },
+    onError: (error) => {
+      toast.error(error.message);
     },
   });
 
@@ -347,33 +436,34 @@ export default function FiscalDocuments() {
     });
   };
 
-  const handleValidateNFCe = () => {
-    if (formData.items.length === 0) {
-      toast.error("Adicione produtos");
-      return;
-    }
-    if (!formData.cfopCode) {
-      toast.error("Selecione um CFOP");
-      return;
-    }
+  const nfceSales = useMemo(() => {
+    return sales.map((sale) => ({
+      ...sale,
+      nfceStatus: sale.nfceStatus || "Pendente",
+    }));
+  }, [sales]);
 
-    validateNFCeMutation.mutate({
-      customerCPF: formData.customerCPFCNPJ,
-      scope: formData.scope,
-      cfopCode: formData.cfopCode,
-      items: formData.items.map((item) => ({
-        productId: item.productId,
-        description: item.description,
-        ncm: item.ncm,
-        cfop: formData.cfopCode,
-        csosn: item.csosn,
-        quantity: parseInt(item.quantity),
-        unit: "UN",
-        unitPrice: parseFloat(item.unitPrice),
-        totalValue: parseFloat(item.unitPrice) * parseInt(item.quantity),
-      })),
-      paymentMethod: formData.paymentMethod,
-    });
+  const normalizeNfceStatus = (status: string) => {
+    if (status === "Autorizada") return "Autorizada";
+    if (status === "Cancelada") return "Cancelada";
+    if (status === "Rejeitada") return "Rejeitada";
+    return "Pendente";
+  };
+
+  const toggleSelectNfce = (saleId: number, checked: boolean) => {
+    if (checked) {
+      setSelectedNfceIds((prev) => [...prev, saleId]);
+    } else {
+      setSelectedNfceIds((prev) => prev.filter((id) => id !== saleId));
+    }
+  };
+
+  const handleBatchSend = () => {
+    if (selectedNfceIds.length === 0) {
+      toast.error("Selecione NFC-e para envio");
+      return;
+    }
+    sendNfceMutation.mutate(selectedNfceIds);
   };
 
   return (
@@ -757,78 +847,197 @@ export default function FiscalDocuments() {
           <TabsContent value="nfce" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Emitir NFC-e</CardTitle>
+                <CardTitle>Gestao de NFC-e</CardTitle>
                 <CardDescription>
-                  Nota Fiscal de Consumidor Eletrônica (PDV)
+                  NFC-e geradas automaticamente a partir das vendas do PDV
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>CFOP *</Label>
-                    <Select
-                      value={formData.cfopCode}
-                      onValueChange={(val) =>
-                        setFormData({ ...formData, cfopCode: val })
-                      }
-                    >
-                      <SelectTrigger data-testid="select-cfop-nfce">
-                        <SelectValue placeholder="Selecione um CFOP" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cfopCodes.map((cfop) => (
-                          <SelectItem key={cfop.id} value={cfop.code}>
-                            {cfop.code} - {cfop.description}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Forma de Pagamento</Label>
-                    <Select
-                      value={formData.paymentMethod}
-                      onValueChange={(val) =>
-                        setFormData({ ...formData, paymentMethod: val })
-                      }
-                    >
-                      <SelectTrigger data-testid="select-payment-method">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="01">Dinheiro</SelectItem>
-                        <SelectItem value="03">Cartão de Crédito</SelectItem>
-                        <SelectItem value="04">Cartão de Débito</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <Alert>
+                  <Check className="h-4 w-4" />
+                  <AlertDescription>
+                    A emissao e automatica no PDV. Esta tela e apenas para gestao.
+                  </AlertDescription>
+                </Alert>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={handleBatchSend}
+                    disabled={sendNfceMutation.isPending}
+                    data-testid="button-send-nfce-batch"
+                  >
+                    {sendNfceMutation.isPending && (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    )}
+                    Enviar selecionadas
+                  </Button>
                 </div>
 
-                <div>
-                  <Label>CPF do Cliente (opcional)</Label>
-                  <Input
-                    placeholder="00000000000"
-                    value={formData.customerCPFCNPJ}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        customerCPFCNPJ: e.target.value,
-                      })
-                    }
-                    data-testid="input-customer-cpf"
-                  />
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-8" />
+                        <TableHead>ID</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Valor</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Protocolo</TableHead>
+                        <TableHead>Erro</TableHead>
+                        <TableHead>Acoes</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isLoadingSales ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center">
+                            Carregando NFC-e...
+                          </TableCell>
+                        </TableRow>
+                      ) : nfceSales.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center">
+                            Nenhuma NFC-e encontrada
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        nfceSales.map((sale) => {
+                          const normalizedStatus = normalizeNfceStatus(
+                            sale.nfceStatus
+                          );
+                          const canSend =
+                            normalizedStatus === "Pendente" ||
+                            normalizedStatus === "Rejeitada";
+                          const canCancel = normalizedStatus === "Autorizada";
+                          return (
+                            <TableRow key={sale.id}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={selectedNfceIds.includes(sale.id)}
+                                  onCheckedChange={(checked) =>
+                                    toggleSelectNfce(sale.id, !!checked)
+                                  }
+                                  data-testid={`checkbox-nfce-${sale.id}`}
+                                />
+                              </TableCell>
+                              <TableCell>{sale.id}</TableCell>
+                              <TableCell>{sale.customerName}</TableCell>
+                              <TableCell>
+                                R$ {parseFloat(sale.total).toFixed(2)}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline">
+                                  {normalizedStatus}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>{sale.nfceProtocol || "-"}</TableCell>
+                              <TableCell>{sale.nfceError || "-"}</TableCell>
+                              <TableCell>
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={!canSend || sendNfceMutation.isPending}
+                                    onClick={() => sendNfceMutation.mutate([sale.id])}
+                                    data-testid={`button-send-nfce-${sale.id}`}
+                                  >
+                                    {normalizedStatus === "Rejeitada"
+                                      ? "Reenviar"
+                                      : "Enviar"}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    disabled={!canCancel || cancelNfceMutation.isPending}
+                                    onClick={() => cancelNfceMutation.mutate(sale.id)}
+                                    data-testid={`button-cancel-nfce-${sale.id}`}
+                                  >
+                                    Cancelar
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
                 </div>
 
-                <Button
-                  onClick={handleValidateNFCe}
-                  disabled={validateNFCeMutation.isPending}
-                  data-testid="button-validate-nfce"
-                >
-                  {validateNFCeMutation.isPending && (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  )}
-                  Validar NFC-e
-                </Button>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Inutilizar numeracao</CardTitle>
+                    <CardDescription>
+                      Use quando houver lacuna de numeracao
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <Label>Serie</Label>
+                        <Input
+                          value={inutilizeForm.serie}
+                          onChange={(e) =>
+                            setInutilizeForm({
+                              ...inutilizeForm,
+                              serie: e.target.value,
+                            })
+                          }
+                          data-testid="input-inutilize-serie"
+                        />
+                      </div>
+                      <div>
+                        <Label>Numero inicial</Label>
+                        <Input
+                          value={inutilizeForm.startNumber}
+                          onChange={(e) =>
+                            setInutilizeForm({
+                              ...inutilizeForm,
+                              startNumber: e.target.value,
+                            })
+                          }
+                          data-testid="input-inutilize-start"
+                        />
+                      </div>
+                      <div>
+                        <Label>Numero final</Label>
+                        <Input
+                          value={inutilizeForm.endNumber}
+                          onChange={(e) =>
+                            setInutilizeForm({
+                              ...inutilizeForm,
+                              endNumber: e.target.value,
+                            })
+                          }
+                          data-testid="input-inutilize-end"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Justificativa</Label>
+                      <Input
+                        value={inutilizeForm.reason}
+                        onChange={(e) =>
+                          setInutilizeForm({
+                            ...inutilizeForm,
+                            reason: e.target.value,
+                          })
+                        }
+                        data-testid="input-inutilize-reason"
+                      />
+                    </div>
+                    <Button
+                      onClick={() => inutilizeNfceMutation.mutate(inutilizeForm)}
+                      disabled={inutilizeNfceMutation.isPending}
+                      data-testid="button-inutilize-nfce"
+                    >
+                      {inutilizeNfceMutation.isPending && (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      )}
+                      Inutilizar numeracao
+                    </Button>
+                  </CardContent>
+                </Card>
               </CardContent>
             </Card>
           </TabsContent>

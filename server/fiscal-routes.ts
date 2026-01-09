@@ -17,7 +17,12 @@ import { SefazService } from "./sefaz-service";
 import { XMLSignatureService } from "./xml-signature";
 import { NFCeContingencyService } from "./nfce-contingency";
 import { storage } from "./storage";
-import { requireAuth, getCompanyId } from "./middleware";
+import {
+  requireAuth,
+  getCompanyId,
+  requirePermission,
+  requireValidFiscalCertificate,
+} from "./middleware";
 
 const CEST_REGEX = /^\d{7}$/;
 const isCestRequired = (ncm?: string) => Boolean(ncm);
@@ -291,7 +296,11 @@ router.post("/nfce/validate", async (req, res) => {
 });
 
 // Salva NFC-e em contingencia (offline)
-router.post("/nfce/contingency/save", requireAuth, async (req, res) => {
+router.post(
+  "/nfce/contingency/save",
+  requireAuth,
+  requireValidFiscalCertificate(),
+  async (req, res) => {
   try {
     const { xmlContent } = req.body;
     if (!xmlContent) {
@@ -315,7 +324,8 @@ router.post("/nfce/contingency/save", requireAuth, async (req, res) => {
           : "Erro ao salvar NFC-e em contingencia",
     });
   }
-});
+  }
+);
 
 // Lista NFC-e pendentes de reenvio
 router.get("/nfce/contingency/pending", requireAuth, async (_req, res) => {
@@ -323,7 +333,11 @@ router.get("/nfce/contingency/pending", requireAuth, async (_req, res) => {
 });
 
 // Dispara reenvio manual imediato
-router.post("/nfce/contingency/resend", requireAuth, async (_req, res) => {
+router.post(
+  "/nfce/contingency/resend",
+  requireAuth,
+  requireValidFiscalCertificate(),
+  async (_req, res) => {
   try {
     await nfceContingency.resendAll();
     res.json({ success: true, message: "Reenvio de NFC-e em contingencia iniciado" });
@@ -335,7 +349,171 @@ router.post("/nfce/contingency/resend", requireAuth, async (_req, res) => {
           : "Erro ao reenviar NFC-e em contingencia",
     });
   }
-});
+  }
+);
+
+router.post(
+  "/nfce/send",
+  requireAuth,
+  requirePermission("fiscal:emit_nfce"),
+  requireValidFiscalCertificate(),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const saleIds = Array.isArray(req.body.saleIds)
+        ? req.body.saleIds.map((id: any) => Number(id)).filter((id: number) => id > 0)
+        : [];
+
+      if (saleIds.length === 0) {
+        return res.status(400).json({ error: "Nenhuma venda informada" });
+      }
+
+      const results = [];
+      for (const saleId of saleIds) {
+        const sale = await storage.getSale(saleId, companyId);
+        if (!sale) {
+          results.push({ id: saleId, success: false, error: "Venda nao encontrada" });
+          continue;
+        }
+
+        const status = String(sale.nfceStatus || "Pendente");
+        if (status === "Autorizada" || status === "Cancelada") {
+          results.push({
+            id: saleId,
+            success: false,
+            error: "Status nao permite envio",
+          });
+          continue;
+        }
+
+        await storage.updateSaleNfceStatus(
+          saleId,
+          companyId,
+          "Pendente",
+          sale.nfceProtocol || null,
+          sale.nfceKey || null,
+          null
+        );
+        results.push({ id: saleId, success: true });
+      }
+
+      res.json({ success: true, results });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao enviar NFC-e",
+      });
+    }
+  }
+);
+
+router.post(
+  "/nfce/cancel",
+  requireAuth,
+  requirePermission("fiscal:cancel_nfce"),
+  requireValidFiscalCertificate(),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const saleId = Number(req.body.saleId);
+      if (!saleId) {
+        return res.status(400).json({ error: "Venda nao informada" });
+      }
+
+      const sale = await storage.getSale(saleId, companyId);
+      if (!sale) {
+        return res.status(404).json({ error: "Venda nao encontrada" });
+      }
+
+      if (sale.nfceStatus !== "Autorizada") {
+        return res.status(400).json({
+          error: "Apenas NFC-e autorizada pode ser cancelada",
+        });
+      }
+
+      const createdAt = sale.createdAt ? new Date(sale.createdAt) : null;
+      if (createdAt) {
+        const diffMs = Date.now() - createdAt.getTime();
+        if (diffMs > 24 * 60 * 60 * 1000) {
+          return res.status(400).json({
+            error: "Prazo legal para cancelamento expirado",
+          });
+        }
+      }
+
+      const updated = await storage.updateSaleNfceStatus(
+        saleId,
+        companyId,
+        "Cancelada",
+        sale.nfceProtocol || null,
+        sale.nfceKey || null,
+        null
+      );
+
+      res.json({ success: true, sale: updated });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao cancelar NFC-e",
+      });
+    }
+  }
+);
+
+router.post(
+  "/nfce/inutilize",
+  requireAuth,
+  requirePermission("fiscal:manage"),
+  requireValidFiscalCertificate(),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const serie = String(req.body.serie || "").trim();
+      const startNumber = Number(req.body.startNumber);
+      const endNumber = Number(req.body.endNumber);
+      const reason = String(req.body.reason || "").trim();
+
+      if (!serie || !startNumber || !endNumber) {
+        return res.status(400).json({ error: "Dados de numeracao invalidos" });
+      }
+
+      if (startNumber > endNumber) {
+        return res.status(400).json({ error: "Intervalo de numeracao invalido" });
+      }
+
+      if (reason.length < 15) {
+        return res.status(400).json({
+          error: "Justificativa obrigatoria (min 15 caracteres)",
+        });
+      }
+
+      const record = await storage.createNfeNumberInutilization({
+        companyId,
+        nfeSeries: serie,
+        startNumber,
+        endNumber,
+        reason,
+      });
+
+      res.json({ success: true, record });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error ? error.message : "Erro ao inutilizar numeracao",
+      });
+    }
+  }
+);
 
 // Iniciar rotina de reenvio automatico (handler deve ser configurado em tempo de execucao)
 nfceContingency.startAutoResend();
@@ -545,7 +723,11 @@ router.get("/csosn/all", async (req, res) => {
 // ============================================
 
 // Gerar NF-e com assinatura automática
-router.post("/nfe/generate", requireAuth, async (req, res) => {
+router.post(
+  "/nfe/generate",
+  requireAuth,
+  requireValidFiscalCertificate(),
+  async (req, res) => {
   try {
     const { config, series = "1", environment = "homologacao" } = req.body;
     const companyId = getCompanyId(req);
@@ -595,7 +777,8 @@ router.post("/nfe/generate", requireAuth, async (req, res) => {
       error: error instanceof Error ? error.message : "Erro ao gerar NF-e",
     });
   }
-});
+  }
+);
 
 // Listar notas fiscais pendentes de envio
 router.get("/nfe/pending", async (req, res) => {
@@ -613,7 +796,11 @@ router.get("/nfe/pending", async (req, res) => {
 
 // Submeter NF-e para SEFAZ com assinatura automática
 // Submeter NF-e para SEFAZ com assinatura automatica
-router.post("/sefaz/submit", requireAuth, async (req, res) => {
+router.post(
+  "/sefaz/submit",
+  requireAuth,
+  requireValidFiscalCertificate(),
+  async (req, res) => {
   try {
     const { xmlContent, environment = "homologacao", uf } = req.body;
     const companyId = getCompanyId(req);
@@ -678,7 +865,8 @@ router.post("/sefaz/submit", requireAuth, async (req, res) => {
       error: error instanceof Error ? error.message : "Erro ao submeter NF-e",
     });
   }
-});
+  }
+);
 
 // Consultar Recibo SEFAZ
 router.post("/sefaz/receipt", async (req, res) => {

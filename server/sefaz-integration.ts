@@ -4,6 +4,7 @@ import { NFEGenerator } from "./nfe-generator";
 import NodeCache from "node-cache";
 import { storage } from "./storage";
 import { companies } from "@shared/schema";
+import { getFiscalCertificateStatus } from "./fiscal-certificate";
 
 const cache = new NodeCache({ stdTTL: 3600 });
 
@@ -61,24 +62,11 @@ export class SefazIntegration {
       if (cached) return cached as SefazResponse;
 
       // Verificar certificado
-      const certificate = await this.certificateService.getCertificate(
-        companyId
-      );
-      if (!certificate) {
+      const fiscalStatus = await getFiscalCertificateStatus(companyId);
+      if (!fiscalStatus.isValid) {
         return {
           success: false,
-          message: "Certificado digital não configurado",
-          timestamp: new Date(),
-        };
-      }
-
-      const certInfo = await this.certificateService.validateCertificate(
-        companyId
-      );
-      if (!certInfo || !certInfo.isValid) {
-        return {
-          success: false,
-          message: "Certificado digital inválido ou expirado",
+          message: fiscalStatus.message,
           timestamp: new Date(),
         };
       }
@@ -216,13 +204,11 @@ export class SefazIntegration {
         };
       }
 
-      const certificate = await this.certificateService.getCertificate(
-        companyId
-      );
-      if (!certificate) {
+      const fiscalStatus = await getFiscalCertificateStatus(companyId);
+      if (!fiscalStatus.isValid) {
         return {
           success: false,
-          message: "Certificado digital não configurado",
+          message: fiscalStatus.message,
           timestamp: new Date(),
         };
       }
@@ -339,13 +325,11 @@ export class SefazIntegration {
         };
       }
 
-      const certificate = await this.certificateService.getCertificate(
-        companyId
-      );
-      if (!certificate) {
+      const fiscalStatus = await getFiscalCertificateStatus(companyId);
+      if (!fiscalStatus.isValid) {
         return {
           success: false,
-          message: "Certificado digital nao configurado",
+          message: fiscalStatus.message,
           timestamp: new Date(),
         };
       }
@@ -457,13 +441,11 @@ export class SefazIntegration {
         };
       }
 
-      const certificate = await this.certificateService.getCertificate(
-        companyId
-      );
-      if (!certificate) {
+      const fiscalStatus = await getFiscalCertificateStatus(companyId);
+      if (!fiscalStatus.isValid) {
         return {
           success: false,
-          message: "Certificado digital nao configurado",
+          message: fiscalStatus.message,
           timestamp: new Date(),
         };
       }
@@ -524,13 +506,11 @@ export class SefazIntegration {
       const cached = cache.get(cacheKey);
       if (cached) return cached as SefazResponse;
 
-      const certificate = await this.certificateService.getCertificate(
-        companyId
-      );
-      if (!certificate) {
+      const fiscalStatus = await getFiscalCertificateStatus(companyId);
+      if (!fiscalStatus.isValid) {
         return {
           success: false,
-          message: "Certificado digital não configurado",
+          message: fiscalStatus.message,
           timestamp: new Date(),
         };
       }
@@ -586,13 +566,11 @@ export class SefazIntegration {
     try {
       const startTime = Date.now();
 
-      const certificate = await this.certificateService.getCertificate(
-        companyId
-      );
-      if (!certificate && this.environment === "producao") {
+      const fiscalStatus = await getFiscalCertificateStatus(companyId);
+      if (!fiscalStatus.isValid) {
         return {
           success: false,
-          message: "Certificado digital obrigatório em produção",
+          message: fiscalStatus.message,
           timestamp: new Date(),
         };
       }
