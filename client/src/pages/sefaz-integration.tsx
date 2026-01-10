@@ -39,6 +39,21 @@ export default function SefazIntegration() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [selectedNFe, setSelectedNFe] = useState<number | null>(null);
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await fetch("/api/settings");
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data?.fiscalEnvironment) {
+          setEnvironment(data.fiscalEnvironment);
+        }
+      } catch {
+        return;
+      }
+    };
+    loadSettings();
+  }, []);
 
   // Cancelar NF-e
   const [cancelNumber, setCancelNumber] = useState("");

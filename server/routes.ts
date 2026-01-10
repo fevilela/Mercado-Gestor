@@ -22,6 +22,7 @@ import {
   insertNotificationSchema,
   insertFiscalConfigSchema,
   insertTaxAliquotSchema,
+  insertSimplesNacionalAliquotSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
@@ -798,6 +799,7 @@ export async function registerRoutes(
     protocol: z.string().optional(),
     key: z.string().optional(),
     error: z.string().nullable().optional(),
+    xmlContent: z.string().optional(),
   });
 
   app.patch(
@@ -811,7 +813,8 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const id = parseInt(req.params.id);
-        const { status, protocol, key, error } = updateNfceStatusSchema.parse(
+        const { status, protocol, key, error, xmlContent } =
+          updateNfceStatusSchema.parse(
           req.body
         );
         const sale = await storage.updateSaleNfceStatus(
@@ -822,6 +825,20 @@ export async function registerRoutes(
           key,
           error ?? null
         );
+        if (sale && status === "Autorizada" && xmlContent && key) {
+          const authorizedAt = new Date();
+          const expiresAt = new Date(
+            authorizedAt.getTime() + 5 * 365 * 24 * 60 * 60 * 1000
+          );
+          await storage.saveFiscalXml({
+            companyId,
+            documentType: "NFCe",
+            documentKey: key,
+            xmlContent,
+            authorizedAt,
+            expiresAt,
+          });
+        }
         if (!sale) {
           return res.status(404).json({ error: "Sale not found" });
         }
@@ -2641,6 +2658,81 @@ export async function registerRoutes(
     }
   );
 
+  app.get(
+    "/api/simples-aliquots",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÇœo autenticado" });
+
+        const aliquots = await storage.listSimplesNacionalAliquots(companyId);
+        res.json(aliquots);
+      } catch (error) {
+        console.error("Failed to fetch Simples Nacional aliquots:", error);
+        res.status(500).json({ error: "Failed to fetch Simples aliquots" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/simples-aliquots",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÇœo autenticado" });
+
+        const validated = insertSimplesNacionalAliquotSchema.parse({
+          ...req.body,
+          companyId,
+        });
+        const aliquot = await storage.createSimplesNacionalAliquot(validated);
+        res.status(201).json(aliquot);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to create Simples Nacional aliquot:", error);
+        res.status(500).json({ error: "Failed to create Simples aliquot" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/simples-aliquots/:id",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÇœo autenticado" });
+
+        const id = parseInt(req.params.id, 10);
+        if (isNaN(id)) {
+          return res.status(400).json({ error: "ID invÇ­lido" });
+        }
+
+        const deleted = await storage.deleteSimplesNacionalAliquot(
+          id,
+          companyId
+        );
+        if (!deleted) {
+          return res.status(404).json({ error: "AlÇðquota nÇœo encontrada" });
+        }
+        res.json({ success: true });
+      } catch (error) {
+        console.error("Failed to delete Simples Nacional aliquot:", error);
+        res.status(500).json({ error: "Failed to delete Simples aliquot" });
+      }
+    }
+  );
+
   // ============================================
   // DIGITAL CERTIFICATE MANAGEMENT
   // ============================================
@@ -2780,6 +2872,12 @@ export async function registerRoutes(
         if (!companyId)
           return res.status(401).json({ error: "Não autenticado" });
 
+        const settings = await storage.getCompanySettings(companyId);
+        const defaultEnvironment =
+          settings?.fiscalEnvironment === "producao"
+            ? "producao"
+            : "homologacao";
+
         const data = req.body as any;
         const numbering = await storage.createSequentialNumbering({
           companyId,
@@ -2793,7 +2891,7 @@ export async function registerRoutes(
             ? new Date(data.authorizedAt)
             : undefined,
           expiresAt: data.expiresAt ? new Date(data.expiresAt) : undefined,
-          environment: data.environment || "homologacao",
+          environment: data.environment || defaultEnvironment,
           isActive: true,
         });
         res.status(201).json(numbering);

@@ -49,8 +49,14 @@ const mapPaymentType = (method: PaymentMethod) => {
 };
 
 const parseResult = (data: any, provider: string): PaymentResult => {
-  const payment = data?.payment || data?.payments?.[0] || data?.transaction || {};
-  const statusSource = payment?.status || data?.status || "";
+  const payment =
+    data?.payment ||
+    data?.payments?.[0] ||
+    data?.transaction ||
+    data?.transactions?.payments?.[0] ||
+    {};
+  const statusSource =
+    payment?.status || data?.status || data?.state || "";
   return {
     status: normalizeStatus(String(statusSource)),
     nsu: payment?.nsu || payment?.reference_id || null,
@@ -62,7 +68,7 @@ const parseResult = (data: any, provider: string): PaymentResult => {
     provider,
     authorizationCode: payment?.authorization_code || null,
     providerReference:
-      payment?.id || data?.id || data?.payment_intent_id || null,
+      payment?.id || data?.id || data?.order_id || data?.payment_intent_id || null,
   };
 };
 
@@ -73,48 +79,75 @@ const authorizeMercadoPago = async (
   terminalId: string,
   description: string
 ): Promise<PaymentResult> => {
-  const createRes = await fetch(
-    "https://api.mercadopago.com/point/integration-api/payment-intents",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
+  const token = accessToken.trim().replace(/^Bearer\s+/i, "");
+  if (!token) {
+    throw new Error("Pagamento eletronico nao configurado");
+  }
+  const externalReference = `pdv-${Date.now()}`;
+  const idempotencyKey = `${terminalId}-${externalReference}`;
+  const createUrl = "https://api.mercadopago.com/v1/orders";
+  const payload = {
+    type: "point",
+    external_reference: externalReference,
+    expiration_time: "PT15M",
+    description,
+    transactions: {
+      payments: [
+        {
+          amount: amount.toFixed(2),
+        },
+      ],
+    },
+    config: {
+      point: {
+        terminal_id: terminalId,
+        print_on_terminal: "no_ticket",
       },
-      body: JSON.stringify({
-        amount,
-        description,
-        payment: { type: mapPaymentType(method) },
-        device_id: terminalId,
-      }),
-    }
-  );
+      payment_method: {
+        default_type: mapPaymentType(method),
+        default_installments: 1,
+        installments_cost: "seller",
+      },
+    },
+  };
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "X-Idempotency-Key": idempotencyKey,
+  };
+  const createRes = await fetch(createUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
 
   if (!createRes.ok) {
     const error = await createRes.json().catch(() => ({}));
     throw new Error(error?.message || "Pagamento nao autorizado");
   }
 
-  const intent = await createRes.json();
-  const intentId = intent?.id || intent?.payment_intent_id;
+  const order = await createRes.json();
+  const orderId = order?.id || order?.order_id;
 
-  if (!intentId) {
-    return parseResult(intent, "mercadopago");
+  if (!orderId) {
+    return parseResult(order, "mercadopago");
   }
 
   const statusRes = await fetch(
-    `https://api.mercadopago.com/point/integration-api/payment-intents/${intentId}`,
+    `https://api.mercadopago.com/v1/orders/${orderId}`,
     {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
+        Accept: "application/json",
       },
     }
   );
 
   if (!statusRes.ok) {
-    return parseResult(intent, "mercadopago");
+    return parseResult(order, "mercadopago");
   }
 
   const statusData = await statusRes.json();

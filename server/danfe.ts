@@ -70,6 +70,18 @@ function createPdf(docDefinition: any): Promise<Buffer> {
 
 export async function generateDanfeNFeA4(xmlContent: string): Promise<Buffer> {
   const { ide, emit, dest, total, det, chave } = await parseNFe(xmlContent);
+  const totalTributos = numberString(total.vTotTrib);
+  const totalsBody = [
+    ["Valor Produtos", formatCurrency(numberString(total.vProd))],
+    ["ICMS", formatCurrency(numberString(total.vICMS))],
+    ["IPI", formatCurrency(numberString(total.vIPI))],
+    ["PIS", formatCurrency(numberString(total.vPIS))],
+    ["COFINS", formatCurrency(numberString(total.vCOFINS))],
+  ];
+  if (totalTributos > 0) {
+    totalsBody.push(["Tributos (IBPT)", formatCurrency(totalTributos)]);
+  }
+  totalsBody.push(["Valor NF-e", formatCurrency(numberString(total.vNF))]);
 
   const docDefinition = {
     pageSize: "A4",
@@ -117,14 +129,7 @@ export async function generateDanfeNFeA4(xmlContent: string): Promise<Buffer> {
             width: 200,
             table: {
               widths: ["*", "*"],
-              body: [
-                ["Valor Produtos", formatCurrency(numberString(total.vProd))],
-                ["ICMS", formatCurrency(numberString(total.vICMS))],
-                ["IPI", formatCurrency(numberString(total.vIPI))],
-                ["PIS", formatCurrency(numberString(total.vPIS))],
-                ["COFINS", formatCurrency(numberString(total.vCOFINS))],
-                ["Valor NF-e", formatCurrency(numberString(total.vNF))],
-              ],
+              body: totalsBody,
             },
             layout: "lightHorizontalLines",
           },
@@ -189,6 +194,15 @@ export async function generateDanfeNFCeThermal(
   opts: { sefazUrl: string; cscId: string; csc: string }
 ): Promise<Buffer> {
   const { ide, emit, dest, total, det, chave, inf } = await parseNFe(xmlContent);
+  const totalTributos = numberString(total.vTotTrib);
+  const totalsBody = [
+    ["Subtotal", formatCurrency(numberString(total.vProd))],
+    ["ICMS", formatCurrency(numberString(total.vICMS))],
+  ];
+  if (totalTributos > 0) {
+    totalsBody.push(["Tributos (IBPT)", formatCurrency(totalTributos)]);
+  }
+  totalsBody.push(["Total", formatCurrency(numberString(total.vNF))]);
   const suplQr = inf?.infNFeSupl?.qrCode;
   const signature = toArray((inf as any)?.Signature).at(0);
   const digestValue =
@@ -250,11 +264,7 @@ export async function generateDanfeNFCeThermal(
             width: 100,
             table: {
               widths: ["*", "*"],
-              body: [
-                ["Subtotal", formatCurrency(numberString(total.vProd))],
-                ["ICMS", formatCurrency(numberString(total.vICMS))],
-                ["Total", formatCurrency(numberString(total.vNF))],
-              ],
+              body: totalsBody,
             },
             layout: "lightHorizontalLines",
           },

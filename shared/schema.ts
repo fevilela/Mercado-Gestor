@@ -390,6 +390,8 @@ export const companySettings = pgTable("company_settings", {
   razaoSocial: text("razao_social"),
   nomeFantasia: text("nome_fantasia"),
   regimeTributario: text("regime_tributario").default("Simples Nacional"),
+  crt: text("crt").default("1"),
+  fiscalEnvironment: text("fiscal_environment").default("homologacao"),
   fiscalEnabled: boolean("fiscal_enabled").default(false),
   cscToken: text("csc_token"),
   cscId: text("csc_id"),
@@ -641,6 +643,38 @@ export type InsertTaxAliquot = z.infer<typeof insertTaxAliquotSchema>;
 export type TaxAliquot = typeof taxAliquots.$inferSelect;
 
 // ============================================
+// FISCAL SYSTEM: Simples Nacional Aliquots
+// ============================================
+export const simplesNacionalAliquots = pgTable("simples_nacional_aliquots", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  annex: text("annex").notNull(),
+  rangeStart: decimal("range_start", { precision: 12, scale: 2 }).default("0"),
+  rangeEnd: decimal("range_end", { precision: 12, scale: 2 }).default("0"),
+  nominalAliquot: decimal("nominal_aliquot", {
+    precision: 5,
+    scale: 2,
+  }).default("0"),
+  effectiveAliquot: decimal("effective_aliquot", {
+    precision: 5,
+    scale: 2,
+  }).default("0"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertSimplesNacionalAliquotSchema = createInsertSchema(
+  simplesNacionalAliquots
+).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertSimplesNacionalAliquot = z.infer<
+  typeof insertSimplesNacionalAliquotSchema
+>;
+export type SimplesNacionalAliquot =
+  typeof simplesNacionalAliquots.$inferSelect;
+
+// ============================================
 // FISCAL SYSTEM: CST/CSOSN Codes
 // ============================================
 export const cstCodes = pgTable("cst_codes", {
@@ -693,6 +727,81 @@ export const insertNfeSubmissionSchema = createInsertSchema(
 });
 export type InsertNfeSubmission = z.infer<typeof insertNfeSubmissionSchema>;
 export type NfeSubmission = typeof nfeSubmissions.$inferSelect;
+
+// ============================================
+// SEFAZ INTEGRATION: Transmission Logs
+// ============================================
+export const sefazTransmissionLogs = pgTable("sefaz_transmission_logs", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  action: text("action").notNull(),
+  environment: text("environment").notNull(),
+  requestPayload: jsonb("request_payload"),
+  responsePayload: jsonb("response_payload"),
+  success: boolean("success").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertSefazTransmissionLogSchema = createInsertSchema(
+  sefazTransmissionLogs
+).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertSefazTransmissionLog = z.infer<
+  typeof insertSefazTransmissionLogSchema
+>;
+export type SefazTransmissionLog = typeof sefazTransmissionLogs.$inferSelect;
+
+// ============================================
+// FISCAL XML STORAGE: Authorized XML retention
+// ============================================
+export const fiscalXmlStorage = pgTable("fiscal_xml_storage", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  documentType: text("document_type").notNull(),
+  documentKey: text("document_key").notNull(),
+  xmlContent: text("xml_content").notNull(),
+  authorizedAt: timestamp("authorized_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertFiscalXmlStorageSchema = createInsertSchema(
+  fiscalXmlStorage
+).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertFiscalXmlStorage = z.infer<
+  typeof insertFiscalXmlStorageSchema
+>;
+export type FiscalXmlStorage = typeof fiscalXmlStorage.$inferSelect;
+
+// ============================================
+// MANIFESTATION: Documents issued against CNPJ
+// ============================================
+export const manifestDocuments = pgTable("manifest_documents", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  documentKey: text("document_key").notNull(),
+  issuerCnpj: text("issuer_cnpj").notNull(),
+  receiverCnpj: text("receiver_cnpj").notNull(),
+  xmlContent: text("xml_content").notNull(),
+  downloadedAt: timestamp("downloaded_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertManifestDocumentSchema = createInsertSchema(
+  manifestDocuments
+).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertManifestDocument = z.infer<
+  typeof insertManifestDocumentSchema
+>;
+export type ManifestDocument = typeof manifestDocuments.$inferSelect;
 
 // ============================================
 // SEFAZ INTEGRATION: NF-e Cancellations

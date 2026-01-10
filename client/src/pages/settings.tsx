@@ -47,6 +47,8 @@ interface CompanySettings {
   regimeTributario?: string;
   cnae?: string;
   im?: string;
+  crt?: string;
+  fiscalEnvironment?: string;
   fiscalEnabled?: boolean;
   cscToken?: string;
   cscId?: string;
@@ -83,6 +85,15 @@ interface PosTerminal {
   isActive: boolean;
 }
 
+interface SimplesAliquot {
+  id?: number;
+  annex: string;
+  rangeStart: string;
+  rangeEnd: string;
+  nominalAliquot: string;
+  effectiveAliquot: string;
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const { company } = useAuth();
@@ -102,6 +113,8 @@ export default function Settings() {
     regimeTributario: "Simples Nacional",
     cnae: "",
     im: "",
+    crt: "1",
+    fiscalEnvironment: "homologacao",
     fiscalEnabled: false,
     cscToken: "",
     cscId: "",
@@ -133,6 +146,16 @@ export default function Settings() {
   const [editingTerminal, setEditingTerminal] = useState<PosTerminal | null>(
     null
   );
+  const [simplesAliquots, setSimplesAliquots] = useState<SimplesAliquot[]>([]);
+  const [newSimplesAliquot, setNewSimplesAliquot] =
+    useState<SimplesAliquot>({
+      annex: "I",
+      rangeStart: "0",
+      rangeEnd: "0",
+      nominalAliquot: "0",
+      effectiveAliquot: "0",
+    });
+  const [savingSimplesAliquot, setSavingSimplesAliquot] = useState(false);
   const [newTerminal, setNewTerminal] = useState<PosTerminal>({
     name: "",
     code: "",
@@ -147,6 +170,7 @@ export default function Settings() {
   useEffect(() => {
     fetchSettings();
     fetchTerminals();
+    fetchSimplesAliquots();
   }, []);
 
   const fetchSettings = async () => {
@@ -175,6 +199,18 @@ export default function Settings() {
       }
     } catch (error) {
       console.error("Failed to fetch terminals:", error);
+    }
+  };
+
+  const fetchSimplesAliquots = async () => {
+    try {
+      const response = await fetch("/api/simples-aliquots");
+      if (response.ok) {
+        const data = await response.json();
+        setSimplesAliquots(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch Simples Nacional aliquots:", error);
     }
   };
 
@@ -270,6 +306,69 @@ export default function Settings() {
       toast({
         title: "Erro",
         description: "Não foi possível excluir o terminal.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCreateSimplesAliquot = async () => {
+    setSavingSimplesAliquot(true);
+    try {
+      const response = await fetch("/api/simples-aliquots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newSimplesAliquot),
+      });
+
+      if (response.ok) {
+        const created = await response.json();
+        setSimplesAliquots([created, ...simplesAliquots]);
+        setNewSimplesAliquot({
+          annex: "I",
+          rangeStart: "0",
+          rangeEnd: "0",
+          nominalAliquot: "0",
+          effectiveAliquot: "0",
+        });
+        toast({
+          title: "Sucesso!",
+          description: "AlÇðquota de Simples Nacional cadastrada.",
+        });
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || "Erro ao cadastrar alÇðquota");
+      }
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error.message || "NÇœo foi possÇðvel salvar a alÇðquota.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingSimplesAliquot(false);
+    }
+  };
+
+  const handleDeleteSimplesAliquot = async (id?: number) => {
+    if (!id) return;
+    if (!confirm("Deseja realmente excluir esta alÇðquota?")) return;
+    try {
+      const response = await fetch(`/api/simples-aliquots/${id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        setSimplesAliquots(simplesAliquots.filter((item) => item.id !== id));
+        toast({
+          title: "Sucesso!",
+          description: "AlÇðquota removida com sucesso.",
+        });
+      } else {
+        throw new Error("Erro ao excluir alÇðquota");
+      }
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "NÇœo foi possÇðvel excluir a alÇðquota.",
         variant: "destructive",
       });
     }
@@ -577,6 +676,43 @@ export default function Settings() {
                   />
                 </div>
                 <Separator />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Ambiente SEFAZ</Label>
+                    <Select
+                      value={settings.fiscalEnvironment || "homologacao"}
+                      onValueChange={(value) =>
+                        updateSetting("fiscalEnvironment", value)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="homologacao">Homologacao</SelectItem>
+                        <SelectItem value="producao">Producao</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>CRT</Label>
+                    <Select
+                      value={settings.crt || "1"}
+                      onValueChange={(value) => updateSetting("crt", value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">1 - Simples Nacional</SelectItem>
+                        <SelectItem value="2">
+                          2 - Simples Nacional - Excesso de Sublimite
+                        </SelectItem>
+                        <SelectItem value="3">3 - Regime Normal</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label>
@@ -608,8 +744,157 @@ export default function Settings() {
                     <Button variant="outline">Carregar</Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Válido até: 15/08/2026
+                    Valido ate: 15/08/2026
                   </p>
+                </div>
+                <div className="space-y-4 pt-4 border-t">
+                  <h3 className="text-lg font-medium">Simples Nacional</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                    <div className="space-y-2">
+                      <Label>Anexo</Label>
+                      <Select
+                        value={newSimplesAliquot.annex}
+                        onValueChange={(value) =>
+                          setNewSimplesAliquot({
+                            ...newSimplesAliquot,
+                            annex: value,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="I">Anexo I</SelectItem>
+                          <SelectItem value="II">Anexo II</SelectItem>
+                          <SelectItem value="III">Anexo III</SelectItem>
+                          <SelectItem value="IV">Anexo IV</SelectItem>
+                          <SelectItem value="V">Anexo V</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Faixa Inicial (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={newSimplesAliquot.rangeStart}
+                        onChange={(e) =>
+                          setNewSimplesAliquot({
+                            ...newSimplesAliquot,
+                            rangeStart: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Faixa Final (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={newSimplesAliquot.rangeEnd}
+                        onChange={(e) =>
+                          setNewSimplesAliquot({
+                            ...newSimplesAliquot,
+                            rangeEnd: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Aliquota Nominal (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={newSimplesAliquot.nominalAliquot}
+                        onChange={(e) =>
+                          setNewSimplesAliquot({
+                            ...newSimplesAliquot,
+                            nominalAliquot: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Aliquota Efetiva (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={newSimplesAliquot.effectiveAliquot}
+                        onChange={(e) =>
+                          setNewSimplesAliquot({
+                            ...newSimplesAliquot,
+                            effectiveAliquot: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      onClick={handleCreateSimplesAliquot}
+                      disabled={savingSimplesAliquot}
+                    >
+                      {savingSimplesAliquot ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Salvando...
+                        </>
+                      ) : (
+                        "Adicionar Aliquota"
+                      )}
+                    </Button>
+                  </div>
+                  {simplesAliquots.length > 0 ? (
+                    <div className="border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead className="border-b">
+                          <tr>
+                            <th className="text-left py-2 px-3">Anexo</th>
+                            <th className="text-left py-2 px-3">Faixa</th>
+                            <th className="text-left py-2 px-3">Nominal</th>
+                            <th className="text-left py-2 px-3">Efetiva</th>
+                            <th className="py-2 px-3" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {simplesAliquots.map((item) => (
+                            <tr
+                              key={item.id}
+                              className="border-b last:border-b-0"
+                            >
+                              <td className="py-2 px-3">{item.annex}</td>
+                              <td className="py-2 px-3">
+                                R$ {item.rangeStart} - R$ {item.rangeEnd}
+                              </td>
+                              <td className="py-2 px-3">
+                                {item.nominalAliquot}%
+                              </td>
+                              <td className="py-2 px-3">
+                                {item.effectiveAliquot}%
+                              </td>
+                              <td className="py-2 px-3 text-right">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() =>
+                                    handleDeleteSimplesAliquot(item.id)
+                                  }
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      Nenhuma al??quota de Simples Nacional cadastrada.
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button variant="outline">Testar Comunicação SEFAZ</Button>

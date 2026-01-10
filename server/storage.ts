@@ -22,7 +22,11 @@ import {
   cfopCodes,
   companies,
   cstCodes,
+  simplesNacionalAliquots,
+  sefazTransmissionLogs,
   digitalCertificates,
+  fiscalXmlStorage,
+  manifestDocuments,
   sequentialNumbering,
   nfeCancellations,
   nfeCorrectionLetters,
@@ -45,9 +49,13 @@ import {
   type InsertCashMovement,
   type InsertFiscalConfig,
   type InsertTaxAliquot,
+  type InsertSimplesNacionalAliquot,
   type InsertDigitalCertificate,
   type DigitalCertificate,
   type InsertSequentialNumbering,
+  type InsertFiscalXmlStorage,
+  type InsertManifestDocument,
+  type InsertSefazTransmissionLog,
 } from "@shared/schema";
 import { eq, and, desc, sql, ilike } from "drizzle-orm";
 
@@ -826,6 +834,43 @@ export const storage = {
     return aliquot;
   },
 
+  async listSimplesNacionalAliquots(companyId: number) {
+    return await db
+      .select()
+      .from(simplesNacionalAliquots)
+      .where(eq(simplesNacionalAliquots.companyId, companyId))
+      .orderBy(desc(simplesNacionalAliquots.createdAt));
+  },
+
+  async createSimplesNacionalAliquot(data: InsertSimplesNacionalAliquot) {
+    const [aliquot] = await db
+      .insert(simplesNacionalAliquots)
+      .values(data)
+      .returning();
+    return aliquot;
+  },
+
+  async deleteSimplesNacionalAliquot(id: number, companyId: number) {
+    const [aliquot] = await db
+      .delete(simplesNacionalAliquots)
+      .where(
+        and(
+          eq(simplesNacionalAliquots.id, id),
+          eq(simplesNacionalAliquots.companyId, companyId)
+        )
+      )
+      .returning();
+    return aliquot;
+  },
+
+  async createSefazTransmissionLog(data: InsertSefazTransmissionLog) {
+    const [log] = await db
+      .insert(sefazTransmissionLogs)
+      .values(data)
+      .returning();
+    return log;
+  },
+
   // ============================================
   // DIGITAL CERTIFICATES
   // ============================================
@@ -1023,5 +1068,23 @@ export const storage = {
   async createNfeNumberInutilization(data: InsertNfeNumberInutilization) {
     const [record] = await db.insert(nfeNumberInutilization).values(data).returning();
     return record;
+  },
+
+  async saveFiscalXml(data: InsertFiscalXmlStorage) {
+    const [record] = await db.insert(fiscalXmlStorage).values(data).returning();
+    return record;
+  },
+
+  async saveManifestDocument(data: InsertManifestDocument) {
+    const [record] = await db.insert(manifestDocuments).values(data).returning();
+    return record;
+  },
+
+  async listManifestDocuments(companyId: number) {
+    return await db
+      .select()
+      .from(manifestDocuments)
+      .where(eq(manifestDocuments.companyId, companyId))
+      .orderBy(desc(manifestDocuments.createdAt));
   },
 };
