@@ -397,6 +397,10 @@ export const companySettings = pgTable("company_settings", {
   cscId: text("csc_id"),
   stoneCode: text("stone_code"),
   stoneEnabled: boolean("stone_enabled").default(false),
+  stoneClientId: text("stone_client_id"),
+  stoneClientSecret: text("stone_client_secret"),
+  stoneTerminalId: text("stone_terminal_id"),
+  stoneEnvironment: text("stone_environment").default("producao"),
   mpAccessToken: text("mp_access_token"),
   mpTerminalId: text("mp_terminal_id"),
   mpEnabled: boolean("mp_enabled").default(false),
@@ -416,6 +420,9 @@ export const companySettings = pgTable("company_settings", {
   nfseEnabled: boolean("nfse_enabled").default(false),
   cteEnabled: boolean("cte_enabled").default(false),
   mdfeEnabled: boolean("mdfe_enabled").default(false),
+  sefazUrlHomologacao: text("sefaz_url_homologacao"),
+  sefazUrlProducao: text("sefaz_url_producao"),
+  sefazUf: text("sefaz_uf"),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 

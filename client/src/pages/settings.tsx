@@ -29,6 +29,37 @@ import {
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+
+const UFS = [
+  "AC",
+  "AL",
+  "AM",
+  "AP",
+  "BA",
+  "CE",
+  "DF",
+  "ES",
+  "GO",
+  "MA",
+  "MG",
+  "MS",
+  "MT",
+  "PA",
+  "PB",
+  "PE",
+  "PI",
+  "PR",
+  "RJ",
+  "RN",
+  "RO",
+  "RR",
+  "RS",
+  "SC",
+  "SE",
+  "SP",
+  "TO",
+];
+
 import { useAuth } from "@/lib/auth";
 import {
   Select,
@@ -54,6 +85,10 @@ interface CompanySettings {
   cscId?: string;
   stoneCode?: string;
   stoneEnabled?: boolean;
+  stoneClientId?: string;
+  stoneClientSecret?: string;
+  stoneTerminalId?: string;
+  stoneEnvironment?: string;
   mpAccessToken?: string;
   mpTerminalId?: string;
   mpEnabled?: boolean;
@@ -73,6 +108,9 @@ interface CompanySettings {
   nfseEnabled?: boolean;
   cteEnabled?: boolean;
   mdfeEnabled?: boolean;
+  sefazUrlHomologacao?: string;
+  sefazUrlProducao?: string;
+  sefazUf?: string;
 }
 
 interface PosTerminal {
@@ -120,6 +158,10 @@ export default function Settings() {
     cscId: "",
     stoneCode: "",
     stoneEnabled: false,
+    stoneClientId: "",
+    stoneClientSecret: "",
+    stoneTerminalId: "",
+    stoneEnvironment: "producao",
     mpAccessToken: "",
     mpTerminalId: "",
     mpEnabled: false,
@@ -135,6 +177,9 @@ export default function Settings() {
     nfseEnabled: false,
     cteEnabled: false,
     mdfeEnabled: false,
+    sefazUrlHomologacao: "",
+    sefazUrlProducao: "",
+    sefazUf: "SP",
     barcodeScannerEnabled: true,
     barcodeScannerAutoAdd: true,
     barcodeScannerBeep: true,
@@ -172,6 +217,24 @@ export default function Settings() {
     fetchTerminals();
     fetchSimplesAliquots();
   }, []);
+
+  useEffect(() => {
+    if (stoneStatus === "connected") {
+      setStoneStatus("idle");
+    }
+  }, [
+    settings.stoneClientId,
+    settings.stoneClientSecret,
+    settings.stoneTerminalId,
+    settings.stoneEnvironment,
+    settings.stoneEnabled,
+  ]);
+
+  useEffect(() => {
+    if (mpStatus === "connected") {
+      setMpStatus("idle");
+    }
+  }, [settings.mpAccessToken, settings.mpTerminalId, settings.mpEnabled]);
 
   const fetchSettings = async () => {
     setLoading(true);
@@ -408,13 +471,113 @@ export default function Settings() {
   };
 
   const handleConnectStone = () => {
+    if (!settings.stoneEnabled) {
+      toast({
+        title: "Ative a integracao",
+        description: "Habilite a Stone antes de conectar o terminal.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (
+      !settings.stoneClientId ||
+      !settings.stoneClientSecret ||
+      !settings.stoneTerminalId
+    ) {
+      toast({
+        title: "Credenciais incompletas",
+        description: "Informe client id, client secret e o terminal.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setStoneStatus("connecting");
-    setTimeout(() => setStoneStatus("connected"), 2000);
+    fetch("/api/payments/stone/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: settings.stoneClientId,
+        clientSecret: settings.stoneClientSecret,
+        terminalId: settings.stoneTerminalId,
+        environment: settings.stoneEnvironment || "producao",
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || "Falha ao validar Stone");
+        }
+        setStoneStatus("connected");
+        toast({
+          title: "Stone conectada",
+          description: "Credenciais validadas com sucesso.",
+        });
+      })
+      .catch((error) => {
+        setStoneStatus("idle");
+        toast({
+          title: "Nao foi possivel conectar",
+          description:
+            error instanceof Error
+              ? error.message
+              : "Falha ao validar credenciais.",
+          variant: "destructive",
+        });
+      });
   };
 
   const handleConnectMP = () => {
+    if (!settings.mpEnabled) {
+      toast({
+        title: "Ative a integracao",
+        description: "Habilite o Mercado Pago antes de vincular a maquininha.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!settings.mpAccessToken || !settings.mpTerminalId) {
+      toast({
+        title: "Credenciais incompletas",
+        description: "Informe o access token e o ID do terminal.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setMpStatus("connecting");
-    setTimeout(() => setMpStatus("connected"), 2000);
+    fetch("/api/payments/mercadopago/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accessToken: settings.mpAccessToken,
+        terminalId: settings.mpTerminalId,
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || "Falha ao validar Mercado Pago");
+        }
+        setMpStatus("connected");
+        toast({
+          title: "Maquininha vinculada",
+          description: "Credenciais validadas com sucesso.",
+        });
+      })
+      .catch((error) => {
+        setMpStatus("idle");
+        toast({
+          title: "Nao foi possivel vincular",
+          description:
+            error instanceof Error
+              ? error.message
+              : "Falha ao validar credenciais.",
+          variant: "destructive",
+        });
+      });
   };
 
   const handleTestPrinter = () => {
@@ -713,6 +876,46 @@ export default function Settings() {
                     </Select>
                   </div>
                 </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>UF padrao</Label>
+                    <Select
+                      value={settings.sefazUf || "SP"}
+                      onValueChange={(value) => updateSetting("sefazUf", value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {UFS.map((state) => (
+                          <SelectItem key={state} value={state}>
+                            {state}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>SEFAZ URL Homologacao</Label>
+                    <Input
+                      placeholder="https://..."
+                      value={settings.sefazUrlHomologacao || ""}
+                      onChange={(e) =>
+                        updateSetting("sefazUrlHomologacao", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>SEFAZ URL Producao</Label>
+                    <Input
+                      placeholder="https://..."
+                      value={settings.sefazUrlProducao || ""}
+                      onChange={(e) =>
+                        updateSetting("sefazUrlProducao", e.target.value)
+                      }
+                    />
+                  </div>
+                </div>
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label>
@@ -739,13 +942,14 @@ export default function Settings() {
                 </div>
                 <div className="space-y-2">
                   <Label>Certificado Digital (A1)</Label>
-                  <div className="flex gap-2">
-                    <Input type="file" className="cursor-pointer" />
-                    <Button variant="outline">Carregar</Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Valido ate: 15/08/2026
+                  <p className="text-sm text-muted-foreground">
+                    Instale e valide o certificado na tela dedicada.
                   </p>
+                  <Link href="/certificate-config">
+                    <Button variant="outline">
+                      Abrir configuracao de certificado
+                    </Button>
+                  </Link>
                 </div>
                 <div className="space-y-4 pt-4 border-t">
                   <h3 className="text-lg font-medium">Simples Nacional</h3>
@@ -1009,28 +1213,61 @@ export default function Settings() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Stone Code / ID da Loja</Label>
+                    <Label>Client ID</Label>
                     <Input
-                      placeholder="123456789"
-                      value={settings.stoneCode || ""}
+                      placeholder="client_id"
+                      value={settings.stoneClientId || ""}
                       onChange={(e) =>
-                        updateSetting("stoneCode", e.target.value)
+                        updateSetting("stoneClientId", e.target.value)
                       }
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Tipo de Conexão</Label>
-                    <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
-                      <option>Integrado (TEF - Valor vai automático)</option>
-                      <option>Manual (POS - Digitar valor na máquina)</option>
-                    </select>
+                    <Label>Client Secret</Label>
+                    <Input
+                      type="password"
+                      placeholder="client_secret"
+                      value={settings.stoneClientSecret || ""}
+                      onChange={(e) =>
+                        updateSetting("stoneClientSecret", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>ID do Terminal (POS)</Label>
+                    <Input
+                      placeholder="terminal_id"
+                      value={settings.stoneTerminalId || ""}
+                      onChange={(e) =>
+                        updateSetting("stoneTerminalId", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Ambiente</Label>
+                    <Select
+                      value={settings.stoneEnvironment || "producao"}
+                      onValueChange={(value) =>
+                        updateSetting("stoneEnvironment", value)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="homologacao">
+                          Homologacao
+                        </SelectItem>
+                        <SelectItem value="producao">Producao</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {stoneStatus === "connected" ? (
                     <div className="rounded-md bg-emerald-100 p-3 flex items-center gap-3 text-emerald-700">
                       <CheckCircle2 className="h-5 w-5" />
                       <div className="text-sm font-medium">
-                        Conectado: Terminal S920
+                        Conectado: Stone
                       </div>
                     </div>
                   ) : (

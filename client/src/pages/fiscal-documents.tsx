@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -20,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, Plus, AlertCircle, Check } from "lucide-react";
+import { Loader2, Plus, AlertCircle, Check, Trash2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Popover,
@@ -89,6 +90,16 @@ interface FormItem {
   cest: string;
 }
 
+interface NfseItem {
+  id: string;
+  code: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  discount: string;
+  serviceCode: string;
+}
+
 interface NfceSale {
   id: number;
   customerName: string;
@@ -103,6 +114,11 @@ interface NfceSale {
 export default function FiscalDocuments() {
   const [activeTab, setActiveTab] = useState("nfe");
   const queryClient = useQueryClient();
+  const [companyName] = useState("Sua Empresa LTDA");
+  const [companyCnpj] = useState("00.000.000/0000-00");
+  const [companyIe] = useState("000.000.000.000");
+  const [companyIm] = useState("00000000");
+  const [companyRegime] = useState("Simples Nacional");
   const [productSearch, setProductSearch] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
@@ -141,6 +157,36 @@ export default function FiscalDocuments() {
       } as FormItem,
     ],
   });
+
+  const [nfseIssueDate, setNfseIssueDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [nfseEnvironment, setNfseEnvironment] = useState("homologacao");
+  const [nfseOperationType, setNfseOperationType] = useState("prestacao");
+  const [nfseSeries] = useState("1");
+  const [nfseNumber] = useState("Automatico");
+  const [nfseCustomerType, setNfseCustomerType] = useState("pj");
+  const [nfseCustomerName, setNfseCustomerName] = useState("");
+  const [nfseCustomerDocument, setNfseCustomerDocument] = useState("");
+  const [nfseCustomerIeIndicator, setNfseCustomerIeIndicator] =
+    useState("nao_contribuinte");
+  const [nfseCustomerZip, setNfseCustomerZip] = useState("");
+  const [nfseCustomerAddress, setNfseCustomerAddress] = useState("");
+  const [nfsePaymentForm, setNfsePaymentForm] = useState("a_vista");
+  const [nfsePaymentCondition, setNfsePaymentCondition] = useState("imediato");
+  const [nfseAdditionalInfo, setNfseAdditionalInfo] = useState("");
+  const [nfseShowTaxDetails, setNfseShowTaxDetails] = useState(false);
+  const [nfseItems, setNfseItems] = useState<NfseItem[]>([
+    {
+      id: "1",
+      code: "",
+      description: "",
+      quantity: "1",
+      unitPrice: "0",
+      discount: "0",
+      serviceCode: "",
+    },
+  ]);
 
   // Fetch CFOP codes
   const { data: cfopCodes = [] } = useQuery<CfopCode[]>({
@@ -377,6 +423,49 @@ export default function FiscalDocuments() {
       0
     );
   }, [formData.items]);
+
+  const nfseSubtotal = useMemo(() => {
+    return nfseItems.reduce((acc, item) => {
+      const quantity = parseFloat(item.quantity || "0");
+      const unitPrice = parseFloat(item.unitPrice || "0");
+      const discount = parseFloat(item.discount || "0");
+      return acc + Math.max(0, quantity * unitPrice - discount);
+    }, 0);
+  }, [nfseItems]);
+
+  const nfseTaxes = useMemo(() => {
+    const rate = 5;
+    return nfseSubtotal * (rate / 100);
+  }, [nfseSubtotal]);
+
+  const nfseTotal = useMemo(() => {
+    return nfseSubtotal + nfseTaxes;
+  }, [nfseSubtotal, nfseTaxes]);
+
+  const addNfseItem = () => {
+    setNfseItems((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        code: "",
+        description: "",
+        quantity: "1",
+        unitPrice: "0",
+        discount: "0",
+        serviceCode: "",
+      },
+    ]);
+  };
+
+  const updateNfseItem = (id: string, field: keyof NfseItem, value: string) => {
+    setNfseItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+    );
+  };
+
+  const removeNfseItem = (id: string) => {
+    setNfseItems((prev) => prev.filter((item) => item.id !== id));
+  };
 
   const handleValidateNFe = () => {
     if (!formData.customerId) {
@@ -1042,23 +1131,334 @@ export default function FiscalDocuments() {
             </Card>
           </TabsContent>
 
-          {/* NFS-e */}
+                    {/* NFS-e */}
           <TabsContent value="nfse" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Emitir NFS-e</CardTitle>
-                <CardDescription>
-                  Nota Fiscal de Serviço Eletrônica
-                </CardDescription>
+                <CardTitle>Cabecalho da Nota</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <Label>Tipo de documento</Label>
+                  <Input value="NFS-e" disabled />
+                </div>
+                <div>
+                  <Label>Tipo de operacao</Label>
+                  <Select value={nfseOperationType} onValueChange={setNfseOperationType}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="prestacao">Prestacao</SelectItem>
+                      <SelectItem value="cancelamento">Cancelamento</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Numero</Label>
+                  <Input value={nfseNumber} disabled />
+                </div>
+                <div>
+                  <Label>Serie</Label>
+                  <Input value={nfseSeries} disabled />
+                </div>
+                <div>
+                  <Label>Data de emissao</Label>
+                  <Input
+                    type="date"
+                    value={nfseIssueDate}
+                    onChange={(e) => setNfseIssueDate(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label>Ambiente</Label>
+                  <Select value={nfseEnvironment} onValueChange={setNfseEnvironment}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="homologacao">Homologacao</SelectItem>
+                      <SelectItem value="producao">Producao</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Emitente</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label>Razao social</Label>
+                  <Input value={companyName} disabled />
+                </div>
+                <div>
+                  <Label>CNPJ</Label>
+                  <Input value={companyCnpj} disabled />
+                </div>
+                <div>
+                  <Label>IE</Label>
+                  <Input value={companyIe} disabled />
+                </div>
+                <div>
+                  <Label>IM</Label>
+                  <Input value={companyIm} disabled />
+                </div>
+                <div>
+                  <Label>Regime tributario</Label>
+                  <Input value={companyRegime} disabled />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Destinatario / Tomador</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label>Tipo</Label>
+                  <Select value={nfseCustomerType} onValueChange={setNfseCustomerType}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pf">Pessoa Fisica</SelectItem>
+                      <SelectItem value="pj">Pessoa Juridica</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Indicador IE</Label>
+                  <Select
+                    value={nfseCustomerIeIndicator}
+                    onValueChange={setNfseCustomerIeIndicator}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="contribuinte">Contribuinte</SelectItem>
+                      <SelectItem value="nao_contribuinte">Nao contribuinte</SelectItem>
+                      <SelectItem value="isento">Isento</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Nome / Razao social</Label>
+                  <Input
+                    value={nfseCustomerName}
+                    onChange={(e) => setNfseCustomerName(e.target.value)}
+                    placeholder="Nome do tomador"
+                  />
+                </div>
+                <div>
+                  <Label>{nfseCustomerType === "pf" ? "CPF" : "CNPJ"}</Label>
+                  <Input
+                    value={nfseCustomerDocument}
+                    onChange={(e) => setNfseCustomerDocument(e.target.value)}
+                    placeholder={
+                      nfseCustomerType === "pf"
+                        ? "000.000.000-00"
+                        : "00.000.000/0000-00"
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>CEP</Label>
+                  <Input
+                    value={nfseCustomerZip}
+                    onChange={(e) => setNfseCustomerZip(e.target.value)}
+                    placeholder="00000-000"
+                  />
+                </div>
+                <div>
+                  <Label>Endereco</Label>
+                  <Input
+                    value={nfseCustomerAddress}
+                    onChange={(e) => setNfseCustomerAddress(e.target.value)}
+                    placeholder="Endereco do tomador"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Itens (servicos)</CardTitle>
+                <Button variant="outline" size="sm" onClick={addNfseItem}>
+                  <Plus className="mr-2 h-4 w-4" /> Adicionar
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {nfseItems.map((item) => (
+                  <div key={item.id} className="grid gap-3 md:grid-cols-12 items-end">
+                    <div className="md:col-span-2">
+                      <Label>Codigo</Label>
+                      <Input
+                        value={item.code}
+                        onChange={(e) => updateNfseItem(item.id, "code", e.target.value)}
+                        placeholder="Codigo"
+                      />
+                    </div>
+                    <div className="md:col-span-4">
+                      <Label>Descricao</Label>
+                      <Input
+                        value={item.description}
+                        onChange={(e) => updateNfseItem(item.id, "description", e.target.value)}
+                        placeholder="Descricao do servico"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label>Quantidade</Label>
+                      <Input
+                        value={item.quantity}
+                        onChange={(e) => updateNfseItem(item.id, "quantity", e.target.value)}
+                        type="number"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label>Valor unitario</Label>
+                      <Input
+                        value={item.unitPrice}
+                        onChange={(e) => updateNfseItem(item.id, "unitPrice", e.target.value)}
+                        type="number"
+                        step="0.01"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label>Desconto</Label>
+                      <Input
+                        value={item.discount}
+                        onChange={(e) => updateNfseItem(item.id, "discount", e.target.value)}
+                        type="number"
+                        step="0.01"
+                      />
+                    </div>
+                    <div className="md:col-span-3">
+                      <Label>Codigo de servico</Label>
+                      <Input
+                        value={item.serviceCode}
+                        onChange={(e) => updateNfseItem(item.id, "serviceCode", e.target.value)}
+                        placeholder="Codigo"
+                      />
+                    </div>
+                    <div className="md:col-span-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeNfseItem(item.id)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Impostos</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Total de impostos</span>
+                  <span className="text-lg font-semibold">R$ {nfseTaxes.toFixed(2)}</span>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => setNfseShowTaxDetails(!nfseShowTaxDetails)}
+                >
+                  {nfseShowTaxDetails ? "Ocultar detalhes" : "Ver detalhes"}
+                </Button>
+                {nfseShowTaxDetails && (
+                  <div className="space-y-2">
+                    {nfseItems.map((item) => {
+                      const quantity = parseFloat(item.quantity || "0");
+                      const unitPrice = parseFloat(item.unitPrice || "0");
+                      const discount = parseFloat(item.discount || "0");
+                      const base = Math.max(0, quantity * unitPrice - discount);
+                      const imposto = base * 0.05;
+                      return (
+                        <div key={item.id} className="text-sm flex justify-between">
+                          <span>{item.description || "Servico"}</span>
+                          <span>R$ {imposto.toFixed(2)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Totais da Nota</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <Label>Servicos</Label>
+                  <Input value={`R$ ${nfseSubtotal.toFixed(2)}`} disabled />
+                </div>
+                <div>
+                  <Label>Impostos</Label>
+                  <Input value={`R$ ${nfseTaxes.toFixed(2)}`} disabled />
+                </div>
+                <div>
+                  <Label>Valor total</Label>
+                  <Input value={`R$ ${nfseTotal.toFixed(2)}`} disabled />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Pagamento</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label>Forma</Label>
+                  <Select value={nfsePaymentForm} onValueChange={setNfsePaymentForm}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="a_vista">A vista</SelectItem>
+                      <SelectItem value="credito">Credito</SelectItem>
+                      <SelectItem value="debito">Debito</SelectItem>
+                      <SelectItem value="pix">Pix</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Condicao</Label>
+                  <Select value={nfsePaymentCondition} onValueChange={setNfsePaymentCondition}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="imediato">Imediato</SelectItem>
+                      <SelectItem value="30">30 dias</SelectItem>
+                      <SelectItem value="30_60">30/60 dias</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Observacoes</CardTitle>
               </CardHeader>
               <CardContent>
-                <Alert>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    NFS-e em desenvolvimento. Requer integração com prefeitura
-                    municipal.
-                  </AlertDescription>
-                </Alert>
+                <Textarea
+                  value={nfseAdditionalInfo}
+                  onChange={(e) => setNfseAdditionalInfo(e.target.value)}
+                  placeholder="Informacoes complementares"
+                />
               </CardContent>
             </Card>
           </TabsContent>

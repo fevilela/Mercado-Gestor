@@ -889,14 +889,14 @@ export const storage = {
     if (existing) {
       const [cert] = await db
         .update(digitalCertificates)
-        .set({ ...data, updatedAt: new Date() })
+        .set({ ...data, isActive: true, updatedAt: new Date() })
         .where(eq(digitalCertificates.companyId, data.companyId))
         .returning();
       return cert;
     } else {
       const [cert] = await db
         .insert(digitalCertificates)
-        .values(data)
+        .values({ ...data, isActive: true })
         .returning();
       return cert;
     }

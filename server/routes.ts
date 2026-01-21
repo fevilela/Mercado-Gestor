@@ -9,6 +9,7 @@ import {
   kitItems,
   customers,
   suppliers,
+  digitalCertificates,
 } from "@shared/schema";
 import {
   insertProductSchema,
@@ -37,8 +38,15 @@ import { CFOPValidator } from "./cfop-validator";
 import { CSOSNCalculator } from "./csosn-calculator";
 import fiscalRouter from "./fiscal-routes";
 import { XMLSignatureService } from "./xml-signature";
-import { authorizePayment } from "./payment-service";
+import { authorizePayment, validateMercadoPagoSettings } from "./payment-service";
+import {
+  validateStoneSettings,
+  captureStonePayment,
+  cancelStonePayment,
+  getStonePaymentStatus,
+} from "./stone-connect";
 import { getFiscalCertificateStatus } from "./fiscal-certificate";
+import { certificateService } from "./certificate-service";
 import "./types";
 
 function parseNFeXML(xmlContent: string): Array<{
@@ -695,6 +703,183 @@ export async function registerRoutes(
     amount: z.number().positive(),
     method: z.enum(["pix", "credito", "debito"]),
   });
+
+  const mpValidationSchema = z.object({
+    accessToken: z.string().min(1),
+    terminalId: z.string().min(1),
+  });
+  const stoneValidationSchema = z.object({
+    clientId: z.string().min(1),
+    clientSecret: z.string().min(1),
+    terminalId: z.string().min(1),
+    environment: z.enum(["homologacao", "producao"]).optional(),
+  });
+  const stoneActionSchema = z.object({
+    paymentId: z.string().min(1),
+    environment: z.enum(["homologacao", "producao"]).optional(),
+  });
+
+  app.post(
+    "/api/payments/mercadopago/validate",
+    requireAuth,
+    requirePermission("settings:edit"),
+    async (req, res) => {
+      try {
+        const { accessToken, terminalId } = mpValidationSchema.parse(req.body);
+        const result = await validateMercadoPagoSettings(
+          accessToken,
+          terminalId
+        );
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Falha ao validar Mercado Pago",
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payments/stone/validate",
+    requireAuth,
+    requirePermission("settings:edit"),
+    async (req, res) => {
+      try {
+        const { clientId, clientSecret, terminalId, environment } =
+          stoneValidationSchema.parse(req.body);
+        const result = await validateStoneSettings({
+          clientId,
+          clientSecret,
+          environment: environment === "homologacao" ? "homologacao" : "producao",
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Falha ao validar Stone",
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payments/stone/capture",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { paymentId, environment } = stoneActionSchema.parse(req.body);
+        const settings = await storage.getCompanySettings(companyId);
+        if (!settings?.stoneClientId || !settings?.stoneClientSecret) {
+          return res
+            .status(400)
+            .json({ error: "Stone Connect nao configurado" });
+        }
+        const result = await captureStonePayment({
+          paymentId,
+          clientId: settings.stoneClientId,
+          clientSecret: settings.stoneClientSecret,
+          environment: environment === "homologacao" ? "homologacao" : "producao",
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Erro ao capturar pagamento",
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payments/stone/cancel",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { paymentId, environment } = stoneActionSchema.parse(req.body);
+        const settings = await storage.getCompanySettings(companyId);
+        if (!settings?.stoneClientId || !settings?.stoneClientSecret) {
+          return res
+            .status(400)
+            .json({ error: "Stone Connect nao configurado" });
+        }
+        const result = await cancelStonePayment({
+          paymentId,
+          clientId: settings.stoneClientId,
+          clientSecret: settings.stoneClientSecret,
+          environment: environment === "homologacao" ? "homologacao" : "producao",
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Erro ao cancelar pagamento",
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/payments/stone/status/:id",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const paymentId = String(req.params.id || "").trim();
+        const environment =
+          req.query.environment === "homologacao" ? "homologacao" : "producao";
+        if (!paymentId) {
+          return res.status(400).json({ error: "paymentId obrigatorio" });
+        }
+        const settings = await storage.getCompanySettings(companyId);
+        if (!settings?.stoneClientId || !settings?.stoneClientSecret) {
+          return res
+            .status(400)
+            .json({ error: "Stone Connect nao configurado" });
+        }
+        const result = await getStonePaymentStatus({
+          paymentId,
+          clientId: settings.stoneClientId,
+          clientSecret: settings.stoneClientSecret,
+          environment,
+        });
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Erro ao consultar pagamento",
+        });
+      }
+    }
+  );
 
   app.post(
     "/api/payments/authorize",
@@ -2792,22 +2977,34 @@ export async function registerRoutes(
           certificatePassword
         );
 
-        const cert = await storage.createOrUpdateDigitalCertificate({
+        const certBuffer = Buffer.from(certificateData, "base64");
+        const certCnpj = String(certInfo.cnpj || cnpj || "");
+        await certificateService.uploadCertificate(
           companyId,
-          certificateData,
+          certBuffer,
           certificatePassword,
-          cnpj: certInfo.cnpj || cnpj || "",
-          certificateType: "e-CNPJ",
-          subjectName: certInfo.subjectName,
-          issuer: certInfo.issuer,
-          validFrom: certInfo.validFrom,
-          validUntil: certInfo.validUntil,
-        });
+          certCnpj
+        );
+        await db
+          .update(digitalCertificates)
+          .set({
+            cnpj: certCnpj.replace(/\D/g, ""),
+            certificateType: "e-CNPJ",
+            subjectName: certInfo.subjectName,
+            issuer: certInfo.issuer,
+            validFrom: certInfo.validFrom,
+            validUntil: certInfo.validUntil,
+            isActive: true,
+            updatedAt: new Date(),
+          })
+          .where(eq(digitalCertificates.companyId, companyId));
+        certificateService.clearCache(companyId);
+        const cert = await storage.getDigitalCertificate(companyId);
 
         res.status(201).json({
           success: true,
           message: "Certificado digital salvo com sucesso",
-          cnpj: cert.cnpj,
+          cnpj: cert?.cnpj || certCnpj,
         });
       } catch (error) {
         console.error("Failed to upload certificate:", error);
@@ -2832,6 +3029,7 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         await storage.deleteDigitalCertificate(companyId);
+        certificateService.clearCache(companyId);
         res.json({ success: true, message: "Certificado removido" });
       } catch (error) {
         console.error("Failed to delete certificate:", error);

@@ -14,41 +14,68 @@ export interface SefazResponse {
   status?: string;
   message: string;
   timestamp: Date;
+  responseTime?: number;
 }
 
 export class SefazIntegration {
   private certificateService: CertificateService;
   private environment: "homologacao" | "producao";
+  private baseUrlOverride?: string;
 
-  constructor(environment: "homologacao" | "producao" = "homologacao") {
+  constructor(environment: "homologacao" | "producao" = "homologacao", baseUrlOverride?: string) {
     this.certificateService = new CertificateService();
     this.environment = environment;
+    this.baseUrlOverride = baseUrlOverride;
   }
 
   private getSefazUrl(
     state: string,
     environment: "homologacao" | "producao"
   ): string {
+    if (this.baseUrlOverride) {
+      return this.baseUrlOverride;
+    }
+
+    const envKey = `SEFAZ_URL_${state}_${environment.toUpperCase()}`;
+    const globalKey = `SEFAZ_URL_${environment.toUpperCase()}`;
+    if (process.env[envKey]) {
+      return process.env[envKey] as string;
+    }
+    if (process.env[globalKey]) {
+      return process.env[globalKey] as string;
+    }
+
     const urls: Record<string, Record<string, string>> = {
       SP: {
-        homologacao: "https://nfe-homolog.svrs.rs.gov.br/webservices",
-        producao: "https://nfe.svrs.rs.gov.br/webservices",
+        homologacao: "https://nfe.sefaz.sp.gov.br/ws",
+        producao: "https://nfe.sefaz.sp.gov.br/ws",
+      },
+      RS: {
+        homologacao: "https://nfe.sefaz.rs.gov.br/ws",
+        producao: "https://nfe.sefaz.rs.gov.br/ws",
       },
       MG: {
-        homologacao: "https://nfehomolog.sefaz.mg.gov.br/webservices",
-        producao: "https://nfe.sefaz.mg.gov.br/webservices",
+        homologacao: "https://nfe.fazenda.mg.gov.br/ws",
+        producao: "https://nfe.fazenda.mg.gov.br/ws",
       },
-      RJ: {
-        homologacao: "https://nfehomolog.sefaz.rj.gov.br/webservices",
-        producao: "https://nfe.sefaz.rj.gov.br/webservices",
+      PR: {
+        homologacao: "https://nfce.sefaz.pr.gov.br/ws",
+        producao: "https://nfce.sefaz.pr.gov.br/ws",
       },
-      BA: {
-        homologacao: "https://hnfe.sefaz.ba.gov.br/webservices",
-        producao: "https://nfe.sefaz.ba.gov.br/webservices",
+      SVRS: {
+        homologacao: "https://nfe.svrs.rs.gov.br/ws",
+        producao: "https://nfe.svrs.rs.gov.br/ws",
+      },
+      SVAN: {
+        homologacao: "https://nfe.svrs.rs.gov.br/ws",
+        producao: "https://nfe.svrs.rs.gov.br/ws",
       },
     };
 
-    return urls[state]?.[environment] || urls["SP"][environment];
+    if (urls[state]?.[environment]) {
+      return urls[state][environment];
+    }
+    return urls["SVRS"][environment];
   }
 
   async submitNFe(
@@ -565,7 +592,6 @@ export class SefazIntegration {
   ): Promise<SefazResponse> {
     try {
       const startTime = Date.now();
-
       const fiscalStatus = await getFiscalCertificateStatus(companyId);
       if (!fiscalStatus.isValid) {
         return {
@@ -575,19 +601,71 @@ export class SefazIntegration {
         };
       }
 
-      // Simular conexão
+      const baseUrl = this.getSefazUrl(state, this.environment);
+      const wsdlUrl = baseUrl.toLowerCase().includes("?wsdl")
+        ? baseUrl
+        : `${baseUrl}/NFeStatusServico4/NFeStatusServico4.asmx?wsdl`;
+      const certificateBuffer =
+        await this.certificateService.getCertificate(companyId);
+      const certificatePassword =
+        await this.certificateService.getCertificatePassword(companyId);
+      if (!certificateBuffer || !certificatePassword) {
+        return {
+          success: false,
+          message: "Certificado digital nao configurado",
+          timestamp: new Date(),
+        };
+      }
+
+      const tlsOptions = {
+        pfx: certificateBuffer,
+        passphrase: certificatePassword,
+        minVersion: "TLSv1.2",
+        maxVersion: "TLSv1.2",
+      };
+      const client = await soap.createClientAsync(wsdlUrl, {
+        wsdl_options: tlsOptions,
+      });
+      client.setSecurity(
+        new soap.ClientSSLSecurityPFX(certificateBuffer, certificatePassword, {
+          ...tlsOptions,
+          strictSSL: true,
+        })
+      );
+
+      const cUf = this.toStateCode(state);
+      const xml = `<consStatServ xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <tpAmb>${this.environment == "producao" ? "1" : "2"}</tpAmb>
+  <cUF>${cUf}</cUF>
+  <xServ>STATUS</xServ>
+</consStatServ>`;
+
+      const [result] = await client.nfeStatusServicoNF4Async({
+        nfeDadosMsg: { _xml: xml },
+      });
+      const raw =
+        result?.nfeResultMsg ||
+        result?.return ||
+        result?.nfeResultMsg?.$value ||
+        "";
+      const statusMatch = String(raw).match(/<cStat>(\d+)<\/cStat>/);
+      const messageMatch = String(raw).match(/<xMotivo>([^<]+)<\/xMotivo>/);
       const responseTime = Date.now() - startTime;
 
       return {
         success: true,
-        message: `Conexão com SEFAZ ${state} estabelecida com sucesso (${responseTime}ms)`,
+        status: statusMatch?.[1] || "OK",
+        message:
+          messageMatch?.[1] ||
+          `Conexao com SEFAZ ${state} estabelecida`,
         timestamp: new Date(),
+        responseTime,
       };
     } catch (error) {
       return {
         success: false,
         message:
-          error instanceof Error ? error.message : "Erro ao testar conexão",
+          error instanceof Error ? error.message : "Erro ao testar conexao",
         timestamp: new Date(),
       };
     }

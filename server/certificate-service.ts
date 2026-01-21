@@ -18,6 +18,14 @@ export interface CertificateInfo {
 export class CertificateService {
   private certificateCache = new Map<number, Buffer>();
 
+  clearCache(companyId?: number) {
+    if (companyId) {
+      this.certificateCache.delete(companyId);
+      return;
+    }
+    this.certificateCache.clear();
+  }
+
   async uploadCertificate(
     companyId: number,
     certificateBuffer: Buffer,
@@ -79,7 +87,7 @@ export class CertificateService {
         return this.certificateCache.get(companyId) || null;
       }
 
-      const [cert] = await db
+      const [activeCert] = await db
         .select()
         .from(digitalCertificates)
         .where(
@@ -90,13 +98,31 @@ export class CertificateService {
         )
         .limit(1);
 
+      const [cert] = activeCert
+        ? [activeCert]
+        : await db
+            .select()
+            .from(digitalCertificates)
+            .where(eq(digitalCertificates.companyId, companyId))
+            .limit(1);
+
       if (!cert || !cert.certificateData) {
         return null;
       }
 
-      const decrypted = this.decryptCertificate(
-        Buffer.from(cert.certificateData, "base64")
-      );
+      let decrypted: Buffer;
+      try {
+        decrypted = this.decryptCertificate(
+          Buffer.from(cert.certificateData, "base64")
+        );
+      } catch (error) {
+        console.error("Erro ao descriptografar certificado:", error);
+        await db
+          .delete(digitalCertificates)
+          .where(eq(digitalCertificates.companyId, companyId));
+        this.clearCache(companyId);
+        return null;
+      }
       this.certificateCache.set(companyId, decrypted);
       return decrypted;
     } catch (error) {
@@ -117,7 +143,16 @@ export class CertificateService {
         return null;
       }
 
-      return this.decryptPassword(cert.certificatePassword);
+      try {
+        return this.decryptPassword(cert.certificatePassword);
+      } catch (error) {
+        console.error("Erro ao descriptografar senha do certificado:", error);
+        await db
+          .delete(digitalCertificates)
+          .where(eq(digitalCertificates.companyId, companyId));
+        this.clearCache(companyId);
+        return null;
+      }
     } catch (error) {
       return null;
     }

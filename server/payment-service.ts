@@ -1,4 +1,5 @@
 import type { CompanySettings } from "@shared/schema";
+import { authorizeStonePayment } from "./stone-connect";
 
 export type PaymentMethod = "pix" | "credito" | "debito";
 export type PaymentStatus = "approved" | "declined" | "processing";
@@ -154,6 +155,73 @@ const authorizeMercadoPago = async (
   return parseResult(statusData, "mercadopago");
 };
 
+const readProviderError = async (response: Response) => {
+  const data = await response.json().catch(() => ({}));
+  const cause =
+    data?.cause?.[0]?.description ||
+    data?.cause?.[0]?.message ||
+    data?.cause?.[0]?.code ||
+    "";
+  const message =
+    data?.message ||
+    data?.error_description ||
+    data?.error ||
+    data?.status_message ||
+    "";
+  const details = [message, cause].filter(Boolean).join(" - ");
+  const statusInfo = response.status ? ` (status ${response.status})` : "";
+  return `${details}${statusInfo}`.trim();
+};
+
+export const validateMercadoPagoSettings = async (
+  accessToken: string,
+  terminalId: string
+) => {
+  const token = accessToken.trim().replace(/^Bearer\s+/i, "");
+  if (!token) {
+    throw new Error("Access token nao informado");
+  }
+  const deviceId = terminalId.trim();
+  if (!deviceId) {
+    throw new Error("Terminal nao informado");
+  }
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+
+  const userRes = await fetch("https://api.mercadopago.com/users/me", {
+    method: "GET",
+    headers,
+  });
+
+  if (!userRes.ok) {
+    const message = await readProviderError(userRes);
+    throw new Error(message || "Credenciais do Mercado Pago invalidas");
+  }
+
+  const terminalRes = await fetch(
+    `https://api.mercadopago.com/point/integration-api/devices/${encodeURIComponent(
+      deviceId
+    )}`,
+    {
+      method: "GET",
+      headers,
+    }
+  );
+
+  if (!terminalRes.ok) {
+    const message = await readProviderError(terminalRes);
+    throw new Error(
+      message || "Terminal do Mercado Pago nao encontrado ou inativo"
+    );
+  }
+
+  return { ok: true };
+};
+
 export const authorizePayment = async ({
   amount,
   method,
@@ -165,6 +233,24 @@ export const authorizePayment = async ({
   settings: CompanySettings | null;
   description: string;
 }): Promise<PaymentResult> => {
+  if (
+    settings?.stoneEnabled &&
+    settings?.stoneClientId &&
+    settings?.stoneClientSecret &&
+    settings?.stoneTerminalId
+  ) {
+    return authorizeStonePayment({
+      amount,
+      method,
+      description,
+      terminalId: settings.stoneTerminalId,
+      clientId: settings.stoneClientId,
+      clientSecret: settings.stoneClientSecret,
+      environment:
+        settings.stoneEnvironment === "homologacao" ? "homologacao" : "producao",
+    });
+  }
+
   if (
     settings?.mpEnabled &&
     settings?.mpAccessToken &&
@@ -179,8 +265,8 @@ export const authorizePayment = async ({
     );
   }
 
-  if (settings?.stoneEnabled && settings?.stoneCode) {
-    throw new Error("Provedor de pagamento nao configurado");
+  if (settings?.stoneEnabled) {
+    throw new Error("Stone Connect nao configurado");
   }
 
   throw new Error("Pagamento eletronico nao configurado");

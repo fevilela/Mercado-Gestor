@@ -152,6 +152,45 @@ export default function CashHistory() {
     }).format(num);
   };
 
+  const handleExport = () => {
+    const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const headers = [
+      "Data/Hora",
+      "Tipo",
+      "Descricao",
+      "Operador",
+      "Valor",
+      "Saldo",
+    ];
+
+    const rows = filteredMovements.map((movement) => [
+      format(parseISO(movement.createdAt), "dd/MM/yyyy HH:mm", {
+        locale: ptBR,
+      }),
+      getMovementTypeLabel(movement.type),
+      movement.description || "",
+      movement.userName || "",
+      formatCurrency(movement.amount),
+      formatCurrency(movement.newBalance),
+    ]);
+
+    const csvContent = [headers, ...rows]
+      .map((row) => row.map(escapeCsv).join(";"))
+      .join("\n");
+
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `historico_caixa_${dateFrom}_${dateTo}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   const getMovementTypeLabel = (type: string) => {
     switch (type) {
       case "opening":
@@ -244,7 +283,11 @@ export default function CashHistory() {
               Acompanhe todas as movimentações de caixa
             </p>
           </div>
-          <Button variant="outline" data-testid="button-export-history">
+          <Button
+            variant="outline"
+            data-testid="button-export-history"
+            onClick={handleExport}
+          >
             <Download className="mr-2 h-4 w-4" />
             Exportar
           </Button>

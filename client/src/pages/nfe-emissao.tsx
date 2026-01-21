@@ -40,11 +40,13 @@ import Layout from "@/components/layout";
 
 interface NFEItem {
   id: string;
-  productName: string;
+  code: string;
+  description: string;
   ncm: string;
   cfop: string;
   quantity: number;
   unitPrice: number;
+  discount: number;
   icmsAliquot: number;
   ipiAliquot: number;
 }
@@ -53,27 +55,43 @@ export default function NFEEmissao() {
   const { toast } = useToast();
   const [environment, setEnvironment] = useState("homologacao");
   const [series, setSeries] = useState("1");
+  const [documentNumber] = useState("Automatico");
+  const [operationType, setOperationType] = useState("saida");
+  const [issueDate, setIssueDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [paymentForm, setPaymentForm] = useState("a_vista");
+  const [paymentCondition, setPaymentCondition] = useState("imediato");
+  const [additionalInfo, setAdditionalInfo] = useState("");
+  const [showTaxDetails, setShowTaxDetails] = useState(false);
 
   // Dados da empresa (viriam da sessão em produção)
   const [companyName] = useState("Sua Empresa LTDA");
   const [cnpj] = useState("00.000.000/0000-00");
   const [ie] = useState("000.000.000.000");
+  const [im] = useState("00000000");
+  const [regime] = useState("Simples Nacional");
 
   // Dados do cliente
   const [customerName, setCustomerName] = useState("");
   const [customerType, setCustomerType] = useState("pf");
   const [customerDocument, setCustomerDocument] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
+  const [customerZip, setCustomerZip] = useState("");
+  const [customerIeIndicator, setCustomerIeIndicator] =
+    useState("nao_contribuinte");
 
   // Itens
   const [items, setItems] = useState<NFEItem[]>([]);
   const [showItemDialog, setShowItemDialog] = useState(false);
   const [currentItem, setCurrentItem] = useState<Partial<NFEItem>>({
-    productName: "",
+    code: "",
+    description: "",
     ncm: "28112090",
     cfop: "5102",
     quantity: 1,
     unitPrice: 0,
+    discount: 0,
     icmsAliquot: 18,
     ipiAliquot: 0,
   });
@@ -114,14 +132,25 @@ export default function NFEEmissao() {
   });
 
   const calcularTotal = () => {
-    return items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    return items.reduce((sum, item) => {
+      const totalItem = item.quantity * item.unitPrice - item.discount;
+      return sum + Math.max(0, totalItem);
+    }, 0);
+  };
+
+  const calcularImpostos = () => {
+    return items.reduce((sum, item) => {
+      const base = Math.max(0, item.quantity * item.unitPrice - item.discount);
+      const aliquota = (item.icmsAliquot || 0) + (item.ipiAliquot || 0);
+      return sum + base * (aliquota / 100);
+    }, 0);
   };
 
   const addItem = () => {
-    if (!currentItem.productName) {
+    if (!currentItem.description) {
       toast({
         title: "Erro",
-        description: "Informe o nome do produto",
+        description: "Informe a descriÇõÇœo do item",
         variant: "destructive",
       });
       return;
@@ -129,22 +158,26 @@ export default function NFEEmissao() {
 
     const newItem: NFEItem = {
       id: Date.now().toString(),
-      productName: currentItem.productName || "",
+      code: currentItem.code || "",
+      description: currentItem.description || "",
       ncm: currentItem.ncm || "28112090",
       cfop: currentItem.cfop || "5102",
       quantity: currentItem.quantity || 1,
       unitPrice: currentItem.unitPrice || 0,
+      discount: currentItem.discount || 0,
       icmsAliquot: currentItem.icmsAliquot || 18,
       ipiAliquot: currentItem.ipiAliquot || 0,
     };
 
     setItems([...items, newItem]);
     setCurrentItem({
-      productName: "",
+      code: "",
+      description: "",
       ncm: "28112090",
       cfop: "5102",
       quantity: 1,
       unitPrice: 0,
+      discount: 0,
       icmsAliquot: 18,
       ipiAliquot: 0,
     });
@@ -184,7 +217,10 @@ export default function NFEEmissao() {
         customerType === "pj" ? customerDocument.replace(/\D/g, "") : undefined,
       customerCPF:
         customerType === "pf" ? customerDocument.replace(/\D/g, "") : undefined,
-      items,
+      items: items.map((item) => ({
+        ...item,
+        productName: item.description,
+      })),
       cfop: items[0]?.cfop || "5102",
     };
 
@@ -251,36 +287,93 @@ export default function NFEEmissao() {
         <div className="grid gap-6 md:grid-cols-3">
           {/* Formulário */}
           <div className="md:col-span-2 space-y-6">
-            {/* Dados Empresa */}
+                        {/* Dados Empresa */}
             <Card>
               <CardHeader>
-                <CardTitle>Empresa</CardTitle>
+                <CardTitle>Cabecalho da Nota</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="grid gap-4">
-                  <div>
-                    <label className="text-sm font-medium">{companyName}</label>
-                    <p className="text-xs text-muted-foreground">{cnpj}</p>
-                  </div>
-                  <div className="grid gap-2">
-                    <label className="text-sm font-medium">Série</label>
-                    <Input
-                      value={series}
-                      onChange={(e) => setSeries(e.target.value)}
-                      placeholder="1"
-                      type="number"
-                    />
-                  </div>
+              <CardContent className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <label className="text-sm font-medium">Tipo de documento</label>
+                  <Input value="NF-e" disabled />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Tipo de operacao</label>
+                  <Select value={operationType} onValueChange={setOperationType}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="saida">Saida</SelectItem>
+                      <SelectItem value="entrada">Entrada</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Numero</label>
+                  <Input value={documentNumber} disabled />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Serie</label>
+                  <Input value={series} onChange={(e) => setSeries(e.target.value)} disabled />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Data de emissao</label>
+                  <Input
+                    type="date"
+                    value={issueDate}
+                    onChange={(e) => setIssueDate(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Ambiente</label>
+                  <Select value={environment} onValueChange={setEnvironment}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="homologacao">Homologacao</SelectItem>
+                      <SelectItem value="producao">Producao</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Dados Cliente */}
             <Card>
               <CardHeader>
-                <CardTitle>Cliente</CardTitle>
+                <CardTitle>Emitente</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="text-sm font-medium">Razao social</label>
+                  <Input value={companyName} disabled />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">CNPJ</label>
+                  <Input value={cnpj} disabled />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">IE</label>
+                  <Input value={ie} disabled />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">IM</label>
+                  <Input value={im} disabled />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Regime tributario</label>
+                  <Input value={regime} disabled />
+                </div>
+              </CardContent>
+            </Card>
+
+                        {/* Dados Cliente */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Destinatario / Tomador</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
                 <div>
                   <label className="text-sm font-medium">Tipo</label>
                   <Select value={customerType} onValueChange={setCustomerType}>
@@ -288,21 +381,35 @@ export default function NFEEmissao() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="pf">Pessoa Física</SelectItem>
-                      <SelectItem value="pj">Pessoa Jurídica</SelectItem>
+                      <SelectItem value="pf">Pessoa Fisica</SelectItem>
+                      <SelectItem value="pj">Pessoa Juridica</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-
                 <div>
-                  <label className="text-sm font-medium">Nome</label>
+                  <label className="text-sm font-medium">Indicador IE</label>
+                  <Select
+                    value={customerIeIndicator}
+                    onValueChange={setCustomerIeIndicator}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="contribuinte">Contribuinte</SelectItem>
+                      <SelectItem value="nao_contribuinte">Nao contribuinte</SelectItem>
+                      <SelectItem value="isento">Isento</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Nome / Razao social</label>
                   <Input
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
                     placeholder="Nome do cliente"
                   />
                 </div>
-
                 <div>
                   <label className="text-sm font-medium">
                     {customerType === "pf" ? "CPF" : "CNPJ"}
@@ -317,13 +424,20 @@ export default function NFEEmissao() {
                     }
                   />
                 </div>
-
                 <div>
-                  <label className="text-sm font-medium">Endereço</label>
+                  <label className="text-sm font-medium">CEP</label>
+                  <Input
+                    value={customerZip}
+                    onChange={(e) => setCustomerZip(e.target.value)}
+                    placeholder="00000-000"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Endereco</label>
                   <Input
                     value={customerAddress}
                     onChange={(e) => setCustomerAddress(e.target.value)}
-                    placeholder="Endereço do cliente"
+                    placeholder="Endereco do cliente"
                   />
                 </div>
               </CardContent>
@@ -356,10 +470,17 @@ export default function NFEEmissao() {
                         data-testid={`item-row-${item.id}`}
                       >
                         <div className="flex-1">
-                          <p className="font-medium">{item.productName}</p>
+                          <p className="font-medium">{item.description}</p>
                           <p className="text-xs text-muted-foreground">
-                            {item.quantity} x R$ {item.unitPrice.toFixed(2)} =
-                            R$ {(item.quantity * item.unitPrice).toFixed(2)}
+                            Codigo: {item.code || "-"} - CFOP: {item.cfop}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {item.quantity} x R$ {item.unitPrice.toFixed(2)} -
+                            R$ {item.discount.toFixed(2)} = R${" "}
+                            {Math.max(
+                              0,
+                              item.quantity * item.unitPrice - item.discount
+                            ).toFixed(2)}
                           </p>
                         </div>
                         <Button
@@ -377,26 +498,111 @@ export default function NFEEmissao() {
               </CardContent>
             </Card>
 
-            {/* Ambiente */}
+                        {/* Impostos */}
             <Card>
               <CardHeader>
-                <CardTitle>Configuração</CardTitle>
+                <CardTitle>Impostos</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-muted-foreground">Total de impostos</div>
+                  <div className="text-lg font-semibold">R$ {calcularImpostos().toFixed(2)}</div>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowTaxDetails(!showTaxDetails)}
+                >
+                  {showTaxDetails ? "Ocultar detalhes" : "Ver detalhes"}
+                </Button>
+                {showTaxDetails && (
+                  <div className="space-y-2">
+                    {items.map((item) => {
+                      const base = Math.max(0, item.quantity * item.unitPrice - item.discount);
+                      const aliquota = (item.icmsAliquot || 0) + (item.ipiAliquot || 0);
+                      const imposto = base * (aliquota / 100);
+                      return (
+                        <div key={item.id} className="text-sm flex justify-between">
+                          <span>{item.description}</span>
+                          <span>R$ {imposto.toFixed(2)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Totais */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Totais da Nota</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-3">
                 <div>
-                  <label className="text-sm font-medium">Ambiente</label>
-                  <Select value={environment} onValueChange={setEnvironment}>
+                  <label className="text-sm font-medium">Produtos</label>
+                  <Input value={`R$ ${calcularTotal().toFixed(2)}`} disabled />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Impostos</label>
+                  <Input value={`R$ ${calcularImpostos().toFixed(2)}`} disabled />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Valor total</label>
+                  <Input
+                    value={`R$ ${(calcularTotal() + calcularImpostos()).toFixed(2)}`}
+                    disabled
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Pagamento */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Pagamento</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="text-sm font-medium">Forma</label>
+                  <Select value={paymentForm} onValueChange={setPaymentForm}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="homologacao">
-                        Homologação (Testes)
-                      </SelectItem>
-                      <SelectItem value="producao">Produção</SelectItem>
+                      <SelectItem value="a_vista">A vista</SelectItem>
+                      <SelectItem value="credito">Credito</SelectItem>
+                      <SelectItem value="debito">Debito</SelectItem>
+                      <SelectItem value="pix">Pix</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                <div>
+                  <label className="text-sm font-medium">Condicao</label>
+                  <Select value={paymentCondition} onValueChange={setPaymentCondition}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="imediato">Imediato</SelectItem>
+                      <SelectItem value="30">30 dias</SelectItem>
+                      <SelectItem value="30_60">30/60 dias</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Observacoes */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Observacoes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea
+                  value={additionalInfo}
+                  onChange={(e) => setAdditionalInfo(e.target.value)}
+                  placeholder="Informacoes complementares"
+                />
               </CardContent>
             </Card>
 
@@ -456,9 +662,21 @@ export default function NFEEmissao() {
                   <p className="text-2xl font-bold">{items.length}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Valor Total</p>
+                  <p className="text-xs text-muted-foreground">Produtos</p>
                   <p className="text-2xl font-bold">
                     R$ {calcularTotal().toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Impostos</p>
+                  <p className="text-2xl font-bold">
+                    R$ {calcularImpostos().toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Valor Total</p>
+                  <p className="text-2xl font-bold">
+                    R$ {(calcularTotal() + calcularImpostos()).toFixed(2)}
                   </p>
                 </div>
                 <div className="pt-4 border-t">
@@ -540,16 +758,30 @@ export default function NFEEmissao() {
 
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium">Produto</label>
+              <label className="text-sm font-medium">Codigo</label>
               <Input
-                value={currentItem.productName || ""}
+                value={currentItem.code || ""}
                 onChange={(e) =>
                   setCurrentItem({
                     ...currentItem,
-                    productName: e.target.value,
+                    code: e.target.value,
                   })
                 }
-                placeholder="Nome do produto"
+                placeholder="Codigo do item"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Descricao</label>
+              <Input
+                value={currentItem.description || ""}
+                onChange={(e) =>
+                  setCurrentItem({
+                    ...currentItem,
+                    description: e.target.value,
+                  })
+                }
+                placeholder="Descricao do item"
               />
             </div>
 
@@ -604,6 +836,21 @@ export default function NFEEmissao() {
                   }
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Desconto</label>
+              <Input
+                type="number"
+                step="0.01"
+                value={currentItem.discount || 0}
+                onChange={(e) =>
+                  setCurrentItem({
+                    ...currentItem,
+                    discount: parseFloat(e.target.value),
+                  })
+                }
+              />
             </div>
 
             <div className="grid gap-4 grid-cols-2">

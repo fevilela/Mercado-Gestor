@@ -11,10 +11,41 @@ import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 
+const UFS = [
+  "AC",
+  "AL",
+  "AM",
+  "AP",
+  "BA",
+  "CE",
+  "DF",
+  "ES",
+  "GO",
+  "MA",
+  "MG",
+  "MS",
+  "MT",
+  "PA",
+  "PB",
+  "PE",
+  "PI",
+  "PR",
+  "RJ",
+  "RN",
+  "RO",
+  "RR",
+  "RS",
+  "SC",
+  "SE",
+  "SP",
+  "TO",
+];
+
 export default function SefazTestPage() {
   const [environment, setEnvironment] = useState<"homologacao" | "producao">(
     "homologacao"
   );
+  const [uf, setUf] = useState("SP");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +61,7 @@ export default function SefazTestPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ environment }),
+        body: JSON.stringify({ environment, uf }),
       });
 
       const data = await response.json();
@@ -91,6 +122,20 @@ export default function SefazTestPage() {
                   Produção
                 </button>
               </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">UF</label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={uf}
+                onChange={(e) => setUf(e.target.value)}
+              >
+                {UFS.map((state) => (
+                  <option key={state} value={state}>
+                    {state}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Test Button */}

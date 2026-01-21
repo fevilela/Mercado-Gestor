@@ -39,7 +39,7 @@ const extractAccessKey = (xmlContent: string): string => {
 
 const resolveSefazEnvironment = async (
   companyId: number,
-  environment?: string
+  environment?: string,
 ): Promise<"homologacao" | "producao"> => {
   if (environment === "producao") {
     return "producao";
@@ -77,15 +77,18 @@ const applyNFCeContingencyFlags = (xmlContent: string) => {
   const now = new Date().toISOString();
   let updated = xmlContent.replace(
     /<tpEmis>.*?<\/tpEmis>/,
-    "<tpEmis>9</tpEmis>"
+    "<tpEmis>9</tpEmis>",
   );
   if (updated === xmlContent) {
     updated = updated.replace(
       /<ide>/,
-      `<ide><tpEmis>9</tpEmis><dhCont>${now}</dhCont>`
+      `<ide><tpEmis>9</tpEmis><dhCont>${now}</dhCont>`,
     );
   } else {
-    updated = updated.replace(/<dhCont>.*?<\/dhCont>/, `<dhCont>${now}</dhCont>`);
+    updated = updated.replace(
+      /<dhCont>.*?<\/dhCont>/,
+      `<dhCont>${now}</dhCont>`,
+    );
   }
   return updated.includes("<dhCont>")
     ? updated
@@ -257,7 +260,7 @@ router.post("/nfe/calculate-taxes", async (req, res) => {
         item.pisAliquot || 0,
         item.cofinsAliquot || 0,
         item.issAliquot || 0,
-        item.irrfAliquot || 0
+        item.irrfAliquot || 0,
       );
 
       const subtotal = item.quantity * item.unitPrice;
@@ -343,30 +346,30 @@ router.post(
   requireAuth,
   requireValidFiscalCertificate(),
   async (req, res) => {
-  try {
-    const { xmlContent } = req.body;
-    if (!xmlContent) {
-      return res.status(400).json({ error: "XML content e obrigatorio" });
+    try {
+      const { xmlContent } = req.body;
+      if (!xmlContent) {
+        return res.status(400).json({ error: "XML content e obrigatorio" });
+      }
+
+      const flaggedXml = applyNFCeContingencyFlags(xmlContent);
+      const saved = nfceContingency.enqueue(flaggedXml);
+
+      res.json({
+        success: true,
+        message: "NFC-e salva em contingencia offline",
+        id: saved.id,
+        createdAt: saved.createdAt,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao salvar NFC-e em contingencia",
+      });
     }
-
-    const flaggedXml = applyNFCeContingencyFlags(xmlContent);
-    const saved = nfceContingency.enqueue(flaggedXml);
-
-    res.json({
-      success: true,
-      message: "NFC-e salva em contingencia offline",
-      id: saved.id,
-      createdAt: saved.createdAt,
-    });
-  } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Erro ao salvar NFC-e em contingencia",
-    });
-  }
-  }
+  },
 );
 
 // Lista NFC-e pendentes de reenvio
@@ -380,18 +383,21 @@ router.post(
   requireAuth,
   requireValidFiscalCertificate(),
   async (_req, res) => {
-  try {
-    await nfceContingency.resendAll();
-    res.json({ success: true, message: "Reenvio de NFC-e em contingencia iniciado" });
-  } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Erro ao reenviar NFC-e em contingencia",
-    });
-  }
-  }
+    try {
+      await nfceContingency.resendAll();
+      res.json({
+        success: true,
+        message: "Reenvio de NFC-e em contingencia iniciado",
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao reenviar NFC-e em contingencia",
+      });
+    }
+  },
 );
 
 router.post(
@@ -407,7 +413,9 @@ router.post(
       }
 
       const saleIds = Array.isArray(req.body.saleIds)
-        ? req.body.saleIds.map((id: any) => Number(id)).filter((id: number) => id > 0)
+        ? req.body.saleIds
+            .map((id: any) => Number(id))
+            .filter((id: number) => id > 0)
         : [];
 
       if (saleIds.length === 0) {
@@ -418,7 +426,11 @@ router.post(
       for (const saleId of saleIds) {
         const sale = await storage.getSale(saleId, companyId);
         if (!sale) {
-          results.push({ id: saleId, success: false, error: "Venda nao encontrada" });
+          results.push({
+            id: saleId,
+            success: false,
+            error: "Venda nao encontrada",
+          });
           continue;
         }
 
@@ -436,9 +448,9 @@ router.post(
           saleId,
           companyId,
           "Pendente",
-          sale.nfceProtocol || null,
-          sale.nfceKey || null,
-          null
+          sale.nfceProtocol || undefined,
+          sale.nfceKey || undefined,
+          undefined,
         );
         results.push({ id: saleId, success: true });
       }
@@ -449,7 +461,7 @@ router.post(
         error: error instanceof Error ? error.message : "Erro ao enviar NFC-e",
       });
     }
-  }
+  },
 );
 
 router.post(
@@ -494,18 +506,19 @@ router.post(
         saleId,
         companyId,
         "Cancelada",
-        sale.nfceProtocol || null,
-        sale.nfceKey || null,
-        null
+        sale.nfceProtocol || undefined,
+        sale.nfceKey || undefined,
+        undefined,
       );
 
       res.json({ success: true, sale: updated });
     } catch (error) {
       res.status(400).json({
-        error: error instanceof Error ? error.message : "Erro ao cancelar NFC-e",
+        error:
+          error instanceof Error ? error.message : "Erro ao cancelar NFC-e",
       });
     }
-  }
+  },
 );
 
 router.post(
@@ -530,7 +543,9 @@ router.post(
       }
 
       if (startNumber > endNumber) {
-        return res.status(400).json({ error: "Intervalo de numeracao invalido" });
+        return res
+          .status(400)
+          .json({ error: "Intervalo de numeracao invalido" });
       }
 
       if (reason.length < 15) {
@@ -551,10 +566,12 @@ router.post(
     } catch (error) {
       res.status(400).json({
         error:
-          error instanceof Error ? error.message : "Erro ao inutilizar numeracao",
+          error instanceof Error
+            ? error.message
+            : "Erro ao inutilizar numeracao",
       });
     }
-  }
+  },
 );
 
 // Iniciar rotina de reenvio automatico (handler deve ser configurado em tempo de execucao)
@@ -652,7 +669,7 @@ router.post("/mdfe/validate", async (req, res) => {
 
     const totalValue = validation.documents.reduce(
       (sum, doc) => sum + doc.value,
-      0
+      0,
     );
 
     res.json({
@@ -764,62 +781,110 @@ router.get("/csosn/all", async (req, res) => {
 // SEFAZ INTEGRATION ROUTES
 // ============================================
 
+router.post(
+  "/sefaz/test-connection",
+  requireAuth,
+  requirePermission("fiscal:view"),
+  async (req, res) => {
+    try {
+      const { environment, uf } = req.body;
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Empresa nao identificada" });
+      }
+
+      const resolvedEnvironment = await resolveSefazEnvironment(
+        companyId,
+        environment,
+      );
+
+      const { SefazIntegration } = await import("./sefaz-integration");
+      const integration = new SefazIntegration(resolvedEnvironment);
+      const result = await integration.testConnection(companyId, uf || "SP");
+
+      await logSefazTransmission({
+        companyId,
+        action: "test-connection",
+        environment: resolvedEnvironment,
+        requestPayload: { environment, uf },
+        responsePayload: result,
+        success: result.success,
+      });
+
+      res.json({
+        success: result.success,
+        status: result.status || (result.success ? "OK" : "ERROR"),
+        message: result.message,
+        responseTime: result.responseTime,
+        environment: resolvedEnvironment,
+        certificateRequired: resolvedEnvironment === "producao",
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao testar conexao com SEFAZ",
+      });
+    }
+  },
+);
+
 // Gerar NF-e com assinatura automática
 router.post(
   "/nfe/generate",
   requireAuth,
   requireValidFiscalCertificate(),
   async (req, res) => {
-  try {
-    const { config, series = "1", environment = "homologacao" } = req.body;
-    const companyId = getCompanyId(req);
+    try {
+      const { config, series = "1", environment = "homologacao" } = req.body;
+      const companyId = getCompanyId(req);
 
-    if (!config) {
-      return res
-        .status(400)
-        .json({ error: "Configuração de NF-e é obrigatória" });
-    }
+      if (!config) {
+        return res
+          .status(400)
+          .json({ error: "Configuração de NF-e é obrigatória" });
+      }
 
-    if (!companyId) {
-      return res.status(401).json({ error: "Empresa não identificada" });
-    }
+      if (!companyId) {
+        return res.status(401).json({ error: "Empresa não identificada" });
+      }
 
-    // Obter certificado da empresa
-    const { CertificateService } = await import("./certificate-service");
-    const certService = new CertificateService();
-    const certificateBuffer = await certService.getCertificate(companyId);
-    const certificatePassword = await certService.getCertificatePassword(
-      companyId
-    );
+      // Obter certificado da empresa
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
 
-    if (!certificateBuffer || !certificatePassword) {
-      return res.status(400).json({
-        error: "Certificado digital não configurado para esta empresa",
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital não configurado para esta empresa",
+        });
+      }
+
+      // Gerar XML com assinatura
+      const { NFEGenerator } = await import("./nfe-generator");
+      const nfeResult = NFEGenerator.generateXML(
+        config,
+        series,
+        certificateBuffer,
+        certificatePassword,
+      );
+
+      res.json({
+        success: true,
+        xml: nfeResult.xml,
+        signed: nfeResult.signed,
+        message: `NF-e ${nfeResult.signed ? "assinada" : "gerada"}`,
+        readyForSubmission: nfeResult.signed,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao gerar NF-e",
       });
     }
-
-    // Gerar XML com assinatura
-    const { NFEGenerator } = await import("./nfe-generator");
-    const nfeResult = NFEGenerator.generateXML(
-      config,
-      series,
-      certificateBuffer,
-      certificatePassword
-    );
-
-    res.json({
-      success: true,
-      xml: nfeResult.xml,
-      signed: nfeResult.signed,
-      message: `NF-e ${nfeResult.signed ? "assinada" : "gerada"}`,
-      readyForSubmission: nfeResult.signed,
-    });
-  } catch (error) {
-    res.status(400).json({
-      error: error instanceof Error ? error.message : "Erro ao gerar NF-e",
-    });
-  }
-  }
+  },
 );
 
 // Listar notas fiscais pendentes de envio
@@ -843,129 +908,136 @@ router.post(
   requireAuth,
   requireValidFiscalCertificate(),
   async (req, res) => {
-  try {
-    const { xmlContent, environment, uf } = req.body;
-    const companyId = getCompanyId(req);
-
-    if (!xmlContent) {
-      return res.status(400).json({ error: "XML content e obrigatorio" });
-    }
-
-    if (!uf) {
-      return res.status(400).json({ error: "UF e obrigatoria" });
-    }
-
-    if (!companyId) {
-      return res.status(401).json({ error: "Empresa nao identificada" });
-    }
-
-    const resolvedEnvironment = await resolveSefazEnvironment(
-      companyId,
-      environment
-    );
-
-    const { CertificateService } = await import("./certificate-service");
-    const certService = new CertificateService();
-    const certificateBuffer = await certService.getCertificate(companyId);
-    const certificatePassword = await certService.getCertificatePassword(companyId);
-
-    if (!certificateBuffer || !certificatePassword) {
-      return res.status(400).json({
-        error: "Certificado digital nao configurado para esta empresa",
-      });
-    }
-
-    let signedXml = xmlContent;
-    let signed = false;
     try {
-      const certificateBase64 = certificateBuffer.toString("base64");
-      signedXml = XMLSignatureService.signXML(
-        xmlContent,
-        certificateBase64,
-        certificatePassword
-      );
-      signed = true;
-    } catch (signError) {
-      await logSefazTransmission({
-        companyId,
-        action: "submit",
-        environment: resolvedEnvironment,
-        requestPayload: { xmlContent, uf },
-        responsePayload: {
-          error:
-            signError instanceof Error ? signError.message : "Erro ao assinar XML",
-        },
-        success: false,
-      });
-      console.error("Erro ao assinar XML:", signError);
-      return res.status(400).json({
-        error: `Falha ao assinar XML: ${
-          signError instanceof Error ? signError.message : "Desconhecido"
-        }`,
-      });
-    }
+      const { xmlContent, environment, uf } = req.body;
+      const companyId = getCompanyId(req);
 
-    const sefazService = new SefazService({
-      environment: resolvedEnvironment,
-      uf,
-      certificatePath: "",
-      certificatePassword: "",
-    });
-
-    const result = await sefazService.submitNFe(signedXml);
-    await logSefazTransmission({
-      companyId,
-      action: "submit",
-      environment: resolvedEnvironment,
-      requestPayload: { xmlContent: signedXml, uf, signed },
-      responsePayload: result,
-      success: result.success,
-    });
-    if (result.success) {
-      const accessKey = extractAccessKey(signedXml);
-      if (accessKey) {
-        const authorizedAt = result.timestamp ?? new Date();
-        const expiresAt = new Date(
-          authorizedAt.getTime() + 5 * 365 * 24 * 60 * 60 * 1000
-        );
-        await storage.saveFiscalXml({
-          companyId,
-          documentType: "NFe",
-          documentKey: accessKey,
-          xmlContent: signedXml,
-          authorizedAt,
-          expiresAt,
-        });
+      if (!xmlContent) {
+        return res.status(400).json({ error: "XML content e obrigatorio" });
       }
-    }
-    res.json({
-      ...result,
-      signed,
-      message: `NF-e ${signed ? "assinada" : "gerada"} e enviada para SEFAZ`,
-    });
-  } catch (error) {
-    const companyId = getCompanyId(req);
-    if (companyId) {
+
+      if (!uf) {
+        return res.status(400).json({ error: "UF e obrigatoria" });
+      }
+
+      if (!companyId) {
+        return res.status(401).json({ error: "Empresa nao identificada" });
+      }
+
       const resolvedEnvironment = await resolveSefazEnvironment(
         companyId,
-        req.body?.environment
+        environment,
       );
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado para esta empresa",
+        });
+      }
+
+      let signedXml = xmlContent;
+      let signed = false;
+      try {
+        const certificateBase64 = certificateBuffer.toString("base64");
+        signedXml = XMLSignatureService.signXML(
+          xmlContent,
+          certificateBase64,
+          certificatePassword,
+        );
+        signed = true;
+      } catch (signError) {
+        await logSefazTransmission({
+          companyId,
+          action: "submit",
+          environment: resolvedEnvironment,
+          requestPayload: { xmlContent, uf },
+          responsePayload: {
+            error:
+              signError instanceof Error
+                ? signError.message
+                : "Erro ao assinar XML",
+          },
+          success: false,
+        });
+        console.error("Erro ao assinar XML:", signError);
+        return res.status(400).json({
+          error: `Falha ao assinar XML: ${
+            signError instanceof Error ? signError.message : "Desconhecido"
+          }`,
+        });
+      }
+
+      const sefazService = new SefazService({
+        environment: resolvedEnvironment,
+        uf,
+        certificatePath: "",
+        certificatePassword: "",
+      });
+
+      const result = await sefazService.submitNFe(signedXml);
       await logSefazTransmission({
         companyId,
         action: "submit",
         environment: resolvedEnvironment,
-        requestPayload: { xmlContent: req.body?.xmlContent, uf: req.body?.uf },
-        responsePayload: {
-          error: error instanceof Error ? error.message : "Erro ao submeter NF-e",
-        },
-        success: false,
+        requestPayload: { xmlContent: signedXml, uf, signed },
+        responsePayload: result,
+        success: result.success,
+      });
+      if (result.success) {
+        const accessKey = extractAccessKey(signedXml);
+        if (accessKey) {
+          const authorizedAt = result.timestamp ?? new Date();
+          const expiresAt = new Date(
+            authorizedAt.getTime() + 5 * 365 * 24 * 60 * 60 * 1000,
+          );
+          await storage.saveFiscalXml({
+            companyId,
+            documentType: "NFe",
+            documentKey: accessKey,
+            xmlContent: signedXml,
+            authorizedAt,
+            expiresAt,
+          });
+        }
+      }
+      res.json({
+        ...result,
+        signed,
+        message: `NF-e ${signed ? "assinada" : "gerada"} e enviada para SEFAZ`,
+      });
+    } catch (error) {
+      const companyId = getCompanyId(req);
+      if (companyId) {
+        const resolvedEnvironment = await resolveSefazEnvironment(
+          companyId,
+          req.body?.environment,
+        );
+        await logSefazTransmission({
+          companyId,
+          action: "submit",
+          environment: resolvedEnvironment,
+          requestPayload: {
+            xmlContent: req.body?.xmlContent,
+            uf: req.body?.uf,
+          },
+          responsePayload: {
+            error:
+              error instanceof Error ? error.message : "Erro ao submeter NF-e",
+          },
+          success: false,
+        });
+      }
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao submeter NF-e",
       });
     }
-    res.status(400).json({
-      error: error instanceof Error ? error.message : "Erro ao submeter NF-e",
-    });
-  }
-  }
+  },
 );
 
 router.post(
@@ -986,7 +1058,7 @@ router.post(
 
       const resolvedEnvironment = await resolveSefazEnvironment(
         companyId,
-        environment
+        environment,
       );
 
       const sefazService = new SefazService({
@@ -999,7 +1071,7 @@ router.post(
       const result = await sefazService.cancelNFe(
         String(nfeNumber),
         String(nfeSeries),
-        String(reason)
+        String(reason),
       );
 
       await logSefazTransmission({
@@ -1023,7 +1095,7 @@ router.post(
         error: error instanceof Error ? error.message : "Erro ao cancelar NF-e",
       });
     }
-  }
+  },
 );
 
 router.post(
@@ -1051,7 +1123,7 @@ router.post(
 
       const resolvedEnvironment = await resolveSefazEnvironment(
         companyId,
-        environment
+        environment,
       );
 
       const sefazService = new SefazService({
@@ -1064,7 +1136,7 @@ router.post(
       const result = await sefazService.sendCorrectionLetter(
         String(nfeNumber),
         String(nfeSeries),
-        { correctionReason, correctedContent }
+        { correctionReason, correctedContent },
       );
 
       await logSefazTransmission({
@@ -1096,7 +1168,7 @@ router.post(
             : "Erro ao enviar Carta de Correcao",
       });
     }
-  }
+  },
 );
 
 router.post(
@@ -1106,7 +1178,8 @@ router.post(
   requireValidFiscalCertificate(),
   async (req, res) => {
     try {
-      const { series, startNumber, endNumber, reason, environment, uf } = req.body;
+      const { series, startNumber, endNumber, reason, environment, uf } =
+        req.body;
       const companyId = getCompanyId(req);
       if (!companyId) {
         return res.status(401).json({ error: "Empresa nao identificada" });
@@ -1117,7 +1190,7 @@ router.post(
 
       const resolvedEnvironment = await resolveSefazEnvironment(
         companyId,
-        environment
+        environment,
       );
 
       const sefazService = new SefazService({
@@ -1131,7 +1204,7 @@ router.post(
         String(series),
         Number(startNumber),
         Number(endNumber),
-        String(reason)
+        String(reason),
       );
 
       await logSefazTransmission({
@@ -1157,7 +1230,7 @@ router.post(
             : "Erro ao inutilizar numeracao",
       });
     }
-  }
+  },
 );
 
 router.post(
@@ -1174,12 +1247,19 @@ router.post(
       const company =
         (await storage.getCompanyById(companyId)) ||
         (await storage.getCompanySettings(companyId));
-      const receiverCnpj = String((company as any)?.cnpj || "").replace(/\D/g, "");
+      const receiverCnpj = String((company as any)?.cnpj || "").replace(
+        /\D/g,
+        "",
+      );
       if (!receiverCnpj) {
-        return res.status(400).json({ error: "CNPJ da empresa nao encontrado" });
+        return res
+          .status(400)
+          .json({ error: "CNPJ da empresa nao encontrado" });
       }
 
-      const documents = Array.isArray(req.body.documents) ? req.body.documents : [];
+      const documents = Array.isArray(req.body.documents)
+        ? req.body.documents
+        : [];
       if (documents.length === 0) {
         return res.status(400).json({ error: "Nenhum documento informado" });
       }
@@ -1190,7 +1270,11 @@ router.post(
         const issuerCnpj = String(doc.issuerCnpj || "").replace(/\D/g, "");
         const xmlContent = String(doc.xmlContent || "");
         if (!documentKey || !issuerCnpj || !xmlContent) {
-          results.push({ documentKey, success: false, error: "Dados incompletos" });
+          results.push({
+            documentKey,
+            success: false,
+            error: "Dados incompletos",
+          });
           continue;
         }
 
@@ -1214,7 +1298,7 @@ router.post(
             : "Erro ao baixar manifestacao",
       });
     }
-  }
+  },
 );
 
 router.get(
@@ -1238,7 +1322,7 @@ router.get(
             : "Erro ao listar manifestacoes",
       });
     }
-  }
+  },
 );
 
 // Consultar Recibo SEFAZ
