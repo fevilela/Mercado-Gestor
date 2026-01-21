@@ -9,7 +9,7 @@ channel = "stable-25_05"
 deploymentTarget = "autoscale"
 build = ["npm", "run", "build"]
 publicDir = "dist/public"
-run = ["npm", "run", "start"]
+run = ["node", "./dist/index.cjs"]
 
 [[ports]]
 localPort = 3000
@@ -17,7 +17,7 @@ externalPort = 80
 
 [[ports]]
 localPort = 5000
-externalPort = 5000
+externalPort = 80
 
 [env]
 PORT = "3000"
@@ -41,7 +41,10 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm run dev"
-waitForPort = 3000
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
 
 [agent]
 mockupState = "FULLSTACK"
@@ -51,3 +54,4 @@ expertMode = true
 [userenv]
 
 [userenv.shared]
+PORT = "5000"
