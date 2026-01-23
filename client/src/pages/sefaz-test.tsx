@@ -46,6 +46,7 @@ export default function SefazTestPage() {
     "homologacao"
   );
   const [uf, setUf] = useState("SP");
+  const [documentType, setDocumentType] = useState<"nfe" | "nfce">("nfe");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +62,7 @@ export default function SefazTestPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ environment, uf }),
+        body: JSON.stringify({ environment, uf, documentType }),
       });
 
       const data = await response.json();
@@ -135,6 +136,19 @@ export default function SefazTestPage() {
                     {state}
                   </option>
                 ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Documento</label>
+              <select
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={documentType}
+                onChange={(e) =>
+                  setDocumentType(e.target.value === "nfce" ? "nfce" : "nfe")
+                }
+              >
+                <option value="nfe">NF-e</option>
+                <option value="nfce">NFC-e</option>
               </select>
             </div>
 

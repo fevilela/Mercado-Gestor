@@ -29,6 +29,7 @@ import {
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { getSefazDefaults } from "@shared/sefaz-defaults";
 
 const UFS = [
   "AC",
@@ -75,6 +76,8 @@ interface CompanySettings {
   ie?: string;
   razaoSocial?: string;
   nomeFantasia?: string;
+  email?: string;
+  phone?: string;
   regimeTributario?: string;
   cnae?: string;
   im?: string;
@@ -111,6 +114,9 @@ interface CompanySettings {
   sefazUrlHomologacao?: string;
   sefazUrlProducao?: string;
   sefazUf?: string;
+  sefazMunicipioCodigo?: string;
+  sefazQrCodeUrlHomologacao?: string;
+  sefazQrCodeUrlProducao?: string;
 }
 
 interface PosTerminal {
@@ -148,6 +154,8 @@ export default function Settings() {
     ie: "",
     razaoSocial: company?.razaoSocial || "",
     nomeFantasia: company?.nomeFantasia || "",
+    email: company?.email || "",
+    phone: company?.phone || "",
     regimeTributario: "Simples Nacional",
     cnae: "",
     im: "",
@@ -180,6 +188,9 @@ export default function Settings() {
     sefazUrlHomologacao: "",
     sefazUrlProducao: "",
     sefazUf: "SP",
+    sefazMunicipioCodigo: "",
+    sefazQrCodeUrlHomologacao: "",
+    sefazQrCodeUrlProducao: "",
     barcodeScannerEnabled: true,
     barcodeScannerAutoAdd: true,
     barcodeScannerBeep: true,
@@ -242,8 +253,13 @@ export default function Settings() {
       const response = await fetch("/api/settings");
       if (response.ok) {
         const data = await response.json();
-        if (data && Object.keys(data).length > 0) {
-          setSettings((prev) => ({ ...prev, ...data }));
+                        if (data && Object.keys(data).length > 0) {
+          setSettings((prev) =>
+            applySefazDefaults(data.sefazUf || prev.sefazUf || "SP", {
+              ...prev,
+              ...data,
+            })
+          );
         }
       }
     } catch (error) {
@@ -598,6 +614,30 @@ export default function Settings() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
+  const applySefazDefaults = (
+    ufValue: string,
+    current: CompanySettings
+  ): CompanySettings => {
+    const defaults = getSefazDefaults(ufValue);
+    return {
+      ...current,
+      sefazUf: ufValue,
+      sefazUrlHomologacao:
+        current.sefazUrlHomologacao || defaults.sefazUrlHomologacao,
+      sefazUrlProducao:
+        current.sefazUrlProducao || defaults.sefazUrlProducao,
+      sefazQrCodeUrlHomologacao:
+        current.sefazQrCodeUrlHomologacao ||
+        defaults.sefazQrCodeUrlHomologacao,
+      sefazQrCodeUrlProducao:
+        current.sefazQrCodeUrlProducao || defaults.sefazQrCodeUrlProducao,
+    };
+  };
+
+  const handleSefazUfChange = (value: string) => {
+    setSettings((prev) => applySefazDefaults(value, prev));
+  };
+
   if (loading) {
     return (
       <Layout>
@@ -702,6 +742,26 @@ export default function Settings() {
                       updateSetting("nomeFantasia", e.target.value)
                     }
                   />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="email">E-mail</Label>
+                    <Input
+                      id="email"
+                      placeholder="contato@empresa.com"
+                      value={settings.email || ""}
+                      onChange={(e) => updateSetting("email", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Telefone</Label>
+                    <Input
+                      id="phone"
+                      placeholder="31999999999"
+                      value={settings.phone || ""}
+                      onChange={(e) => updateSetting("phone", e.target.value)}
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="regime">Regime Tributário</Label>
@@ -881,7 +941,7 @@ export default function Settings() {
                     <Label>UF padrao</Label>
                     <Select
                       value={settings.sefazUf || "SP"}
-                      onValueChange={(value) => updateSetting("sefazUf", value)}
+                      onValueChange={handleSefazUfChange}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -912,6 +972,36 @@ export default function Settings() {
                       value={settings.sefazUrlProducao || ""}
                       onChange={(e) =>
                         updateSetting("sefazUrlProducao", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Codigo municipio (IBGE)</Label>
+                    <Input
+                      placeholder="Ex: 3138203"
+                      value={settings.sefazMunicipioCodigo || ""}
+                      onChange={(e) =>
+                        updateSetting("sefazMunicipioCodigo", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>URL QR Code Homologacao</Label>
+                    <Input
+                      placeholder="https://.../qrcode.xhtml"
+                      value={settings.sefazQrCodeUrlHomologacao || ""}
+                      onChange={(e) =>
+                        updateSetting("sefazQrCodeUrlHomologacao", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>URL QR Code Producao</Label>
+                    <Input
+                      placeholder="https://.../qrcode.xhtml"
+                      value={settings.sefazQrCodeUrlProducao || ""}
+                      onChange={(e) =>
+                        updateSetting("sefazQrCodeUrlProducao", e.target.value)
                       }
                     />
                   </div>

@@ -24,7 +24,7 @@ app.use(
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
-  })
+  }),
 );
 
 app.use(express.urlencoded({ extended: false }));
@@ -47,7 +47,7 @@ app.use(
       maxAge: 24 * 60 * 60 * 1000,
       sameSite: "lax",
     },
-  })
+  }),
 );
 
 app.use("/api/auth", authRouter);
@@ -119,7 +119,7 @@ app.use((req, res, next) => {
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "5000", 10);
+  const port = parseInt(process.env.PORT || "3000", 10);
   httpServer.listen(
     {
       port,
@@ -128,6 +128,6 @@ app.use((req, res, next) => {
     },
     () => {
       log(`serving on port ${port}`);
-    }
+    },
   );
 })();

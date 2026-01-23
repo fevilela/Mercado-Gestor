@@ -36,6 +36,27 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useAuth } from "@/lib/auth";
+
+function NfceQrCode({ nfceKey }: { nfceKey?: string | null }) {
+  const { data } = useQuery<{ qrCodeUrl: string } | null>({
+    queryKey: ["/api/fiscal/nfce/qrcode", nfceKey],
+    queryFn: async () => {
+      if (!nfceKey) return null;
+      const res = await fetch(`/api/fiscal/nfce/qrcode/${nfceKey}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: Boolean(nfceKey),
+  });
+
+  if (!data?.qrCodeUrl) return null;
+  return (
+    <div className="flex justify-center">
+      <img src={data.qrCodeUrl} alt="QR Code NFC-e" className="h-32 w-32" />
+    </div>
+  );
+}
 import {
   Select,
   SelectContent,
@@ -87,19 +108,20 @@ interface Sale {
 
 export default function Sales() {
   const { toast } = useToast();
+  const { company } = useAuth();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [processingId, setProcessingId] = useState<number | null>(null);
   const [exportMonth, setExportMonth] = useState<string>(
-    (new Date().getMonth() + 1).toString()
+    (new Date().getMonth() + 1).toString(),
   );
   const [exportYear, setExportYear] = useState<string>(
-    new Date().getFullYear().toString()
+    new Date().getFullYear().toString(),
   );
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showClosingDialog, setShowClosingDialog] = useState(false);
   const [closingReport, setClosingReport] = useState<ClosingReport | null>(
-    null
+    null,
   );
   const [isLoadingReport, setIsLoadingReport] = useState(false);
 
@@ -112,53 +134,43 @@ export default function Sales() {
     },
   });
 
-  const updateNfceStatusMutation = useMutation({
-    mutationFn: async ({
-      id,
-      status,
-      protocol,
-    }: {
-      id: number;
-      status: string;
-      protocol: string;
-    }) => {
-      const res = await fetch(`/api/sales/${id}/nfce-status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, protocol }),
-      });
-      if (!res.ok) throw new Error("Failed to update NFC-e status");
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
-      toast({
-        title: "Sucesso!",
-        description: "Nota autorizada com sucesso.",
-        className: "bg-emerald-500 text-white border-none",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Erro",
-        description: "Falha ao transmitir nota.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleTransmit = (id: number) => {
+  const handleTransmit = async (id: number) => {
     setProcessingId(id);
     toast({
       title: "Transmitindo...",
-      description: "Enviando nota de contingência para SEFAZ.",
+      description: "Enviando nota para SEFAZ.",
     });
 
-    setTimeout(() => {
-      const protocol = `1352300045679${Math.floor(Math.random() * 90) + 10}`;
-      updateNfceStatusMutation.mutate({ id, status: "Autorizada", protocol });
+    try {
+      const res = await fetch("/api/fiscal/nfce/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ saleIds: [id] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || "Falha ao transmitir NFC-e");
+      }
+      const result = data?.results?.[0];
+      if (!result?.success) {
+        throw new Error(result?.error || "Falha ao transmitir NFC-e");
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+      toast({
+        title: "Sucesso!",
+        description: "NFC-e autorizada com sucesso.",
+        className: "bg-emerald-500 text-white border-none",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error ? error.message : "Falha ao transmitir NFC-e.",
+        variant: "destructive",
+      });
+    } finally {
       setProcessingId(null);
-    }, 2000);
+    }
   };
 
   const [isExporting, setIsExporting] = useState(false);
@@ -251,10 +263,10 @@ export default function Sales() {
         <td>${sale.paymentMethod}</td>
         <td>${sale.status}</td>
         <td style="text-align: right; font-weight: bold;">R$ ${parseFloat(
-          sale.total
+          sale.total,
         ).toFixed(2)}</td>
       </tr>
-    `
+    `,
       )
       .join("");
 
@@ -265,7 +277,7 @@ export default function Sales() {
         <span>${pm.method}</span>
         <span><strong>R$ ${pm.total}</strong> (${pm.count} vendas - ${pm.percentage}%)</span>
       </div>
-    `
+    `,
       )
       .join("");
 
@@ -455,7 +467,7 @@ export default function Sales() {
   const contingencySales = sales.filter(
     (sale: Sale) =>
       sale.nfceStatus === "Contingência" ||
-      sale.nfceStatus === "Pendente Fiscal"
+      sale.nfceStatus === "Pendente Fiscal",
   );
 
   if (isLoading) {
@@ -584,7 +596,7 @@ export default function Sales() {
                       ? format(
                           new Date(closingReport.date),
                           "dd 'de' MMMM 'de' yyyy",
-                          { locale: ptBR }
+                          { locale: ptBR },
                         )
                       : ""}
                   </p>
@@ -596,7 +608,7 @@ export default function Sales() {
                       ? format(
                           new Date(closingReport.date),
                           "dd 'de' MMMM 'de' yyyy",
-                          { locale: ptBR }
+                          { locale: ptBR },
                         )
                       : "Carregando..."}
                   </DialogDescription>
@@ -932,10 +944,9 @@ export default function Sales() {
                               <div className="bg-muted p-4 rounded-md font-mono text-xs space-y-2 border border-border">
                                 <div className="text-center border-b border-border pb-2 mb-2">
                                   <p className="font-bold text-sm">
-                                    MERCADO MODELO LTDA
+                                    {company?.razaoSocial || "Empresa"}
                                   </p>
-                                  <p>CNPJ: 00.000.000/0000-00</p>
-                                  <p>Rua Exemplo, 123 - Centro</p>
+                                  <p>CNPJ: {company?.cnpj || "-"}</p>
                                 </div>
                                 <div className="flex justify-between">
                                   <span>Nº Venda:</span>

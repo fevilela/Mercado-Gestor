@@ -67,6 +67,7 @@ export default function SefazIntegration() {
   const { toast } = useToast();
   const [environment, setEnvironment] = useState("homologacao");
   const [uf, setUf] = useState("SP");
+  const [documentType, setDocumentType] = useState<"nfe" | "nfce">("nfe");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [selectedNFe, setSelectedNFe] = useState<number | null>(null);
@@ -240,7 +241,7 @@ export default function SefazIntegration() {
       const response = await fetch("/api/fiscal/sefaz/test-connection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ environment, uf }),
+        body: JSON.stringify({ environment, uf, documentType }),
       });
       const data = await response.json();
       setResult(data);
@@ -368,6 +369,20 @@ export default function SefazIntegration() {
                   {state}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={documentType}
+            onValueChange={(value) =>
+              setDocumentType(value === "nfce" ? "nfce" : "nfe")
+            }
+          >
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="nfe">NF-e</SelectItem>
+              <SelectItem value="nfce">NFC-e</SelectItem>
             </SelectContent>
           </Select>
           <Button

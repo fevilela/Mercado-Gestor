@@ -23,6 +23,7 @@ import {
   Wallet,
   Lock,
   ArrowDownLeft,
+  Upload,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,14 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 
-type PaymentMethod = "pix" | "credito" | "debito" | null;
+type PdvPaymentMethod = {
+  id: number;
+  name: string;
+  type: "pix" | "credito" | "debito" | "dinheiro" | "outros";
+  tefMethod?: "pix" | "credito" | "debito" | null;
+  isActive?: boolean | null;
+  sortOrder?: number | null;
+};
 type PaymentStatus = "idle" | "processing" | "approved" | "declined" | "error";
 type PaymentResult = {
   status: "approved" | "declined" | "processing";
@@ -60,7 +68,8 @@ export default function POS() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isFinishing, setIsFinishing] = useState(false);
   const [fiscalStatus, setFiscalStatus] = useState<FiscalStatus>("idle");
-  const [selectedPayment, setSelectedPayment] = useState<PaymentMethod>(null);
+  const [selectedPayment, setSelectedPayment] =
+    useState<PdvPaymentMethod | null>(null);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("idle");
   const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(null);
   const [showCatalog, setShowCatalog] = useState(false);
@@ -223,19 +232,65 @@ export default function POS() {
 
   const isFiscalConfigured =
     settings?.fiscalEnabled && settings?.cscToken && settings?.cscId;
+  const fiscalEnvironmentLabel =
+    settings?.fiscalEnvironment === "producao" ? "Producao" : "Homologacao";
 
   const isScannerEnabled = settings?.barcodeScannerEnabled !== false;
   const isScannerAutoAdd = settings?.barcodeScannerAutoAdd !== false;
   const isScannerBeep = settings?.barcodeScannerBeep !== false;
 
-  const { data: products = [] } = useQuery({
-    queryKey: ["/api/products"],
+  const handleSendPdvLoad = async () => {
+    try {
+      const res = await fetch("/api/pdv/load", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Falha ao enviar carga");
+      }
+      await refetchPdvLoad();
+      toast({
+        title: "Carga enviada",
+        description: `Produtos: ${data.products} ? Pagamentos: ${data.paymentMethods}`,
+        className: "bg-emerald-500 text-white border-none",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao enviar carga",
+        description: error instanceof Error ? error.message : "Falha ao enviar carga",
+        variant: "destructive",
+      });
+    }
+  };
+
+
+  const {
+    data: pdvLoad,
+    error: pdvLoadError,
+    isFetching: isFetchingPdvLoad,
+    refetch: refetchPdvLoad,
+  } = useQuery({
+    queryKey: ["/api/pdv/load"],
     queryFn: async () => {
-      const res = await fetch("/api/products");
-      if (!res.ok) throw new Error("Failed to fetch");
+      const res = await fetch("/api/pdv/load");
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Nenhuma carga enviada");
+      }
       return res.json();
     },
   });
+
+  const fallbackPaymentMethods: PdvPaymentMethod[] = [
+    { id: -1, name: "PIX", type: "pix", tefMethod: "pix" },
+    { id: -2, name: "Cartao de Credito", type: "credito", tefMethod: "credito" },
+    { id: -3, name: "Cartao de Debito", type: "debito", tefMethod: "debito" },
+    { id: -4, name: "Dinheiro", type: "dinheiro" },
+  ];
+  const products = (pdvLoad?.products || []) as any[];
+  const paymentMethods = (pdvLoad?.paymentMethods || []) as PdvPaymentMethod[];
+  const availablePaymentMethods =
+    paymentMethods.filter((method) => method.isActive !== false).length > 0
+      ? paymentMethods.filter((method) => method.isActive !== false)
+      : fallbackPaymentMethods;
 
   const createSaleMutation = useMutation({
     mutationFn: async (
@@ -251,7 +306,7 @@ export default function POS() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/pdv/load"] });
     },
   });
 
@@ -370,20 +425,11 @@ export default function POS() {
     );
   };
 
-  const getPaymentMethodLabel = (method: PaymentMethod): string => {
-    switch (method) {
-      case "pix":
-        return "PIX";
-      case "credito":
-        return "Cartão de Crédito";
-      case "debito":
-        return "Cartão de Débito";
-      default:
-        return "Não informado";
-    }
+  const getPaymentMethodLabel = (method?: PdvPaymentMethod | null): string => {
+    return method?.name || "Nao informado";
   };
 
-  const handleSelectPayment = async (method: PaymentMethod) => {
+  const handleSelectPayment = async (method: PdvPaymentMethod) => {
     if (!method) return;
     if (cart.length === 0) {
       toast({
@@ -395,8 +441,23 @@ export default function POS() {
     }
 
     setSelectedPayment(method);
-    setPaymentStatus("processing");
     setPaymentResult(null);
+
+    if (!method.tefMethod) {
+      setPaymentStatus("approved");
+      setPaymentResult({
+        status: "approved",
+        provider: "manual",
+      });
+      toast({
+        title: "Pagamento confirmado",
+        description: `Forma: ${method.name}`,
+        className: "bg-emerald-500 text-white border-none",
+      });
+      return;
+    }
+
+    setPaymentStatus("processing");
 
     try {
       const res = await fetch("/api/payments/authorize", {
@@ -404,7 +465,7 @@ export default function POS() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: parseFloat(total.toFixed(2)),
-          method,
+          method: method.tefMethod,
         }),
       });
 
@@ -482,7 +543,7 @@ export default function POS() {
         itemsCount: cart.reduce((acc, item) => acc + item.qty, 0),
         paymentMethod: getPaymentMethodLabel(selectedPayment),
         status: "Concluído",
-        nfceStatus: "Autorizada",
+        nfceStatus: "Pendente",
       },
       items: cart.map((item) => ({
         productId: item.product.id,
@@ -504,27 +565,47 @@ export default function POS() {
     try {
       const result = await createSaleMutation.mutateAsync(saleData);
 
-      setTimeout(() => {
-        if (result.fiscalConfigured === false) {
-          setFiscalStatus("pending_fiscal");
-          toast({
-            title: "Venda Registrada",
-            description:
-              "Venda salva como pendente fiscal. Configure o certificado para emitir NFC-e.",
-            variant: "default",
-            className: "bg-amber-500 text-white border-none",
-          });
-        } else {
-          setFiscalStatus("success");
-          toast({
-            title: "Venda Autorizada!",
-            description:
-              "Nota Fiscal (NFC-e) emitida e enviada para a Receita com sucesso.",
-            variant: "default",
-            className: "bg-emerald-500 text-white border-none",
-          });
+      if (result.fiscalConfigured === false) {
+        setFiscalStatus("pending_fiscal");
+        toast({
+          title: "Venda Registrada",
+          description:
+            "Venda salva como pendente fiscal. Configure o certificado para emitir NFC-e.",
+          variant: "default",
+          className: "bg-amber-500 text-white border-none",
+        });
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/fiscal/nfce/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ saleIds: [result.sale?.id].filter(Boolean) }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.error || "Erro ao enviar NFC-e");
         }
-      }, 1500);
+        setFiscalStatus("success");
+        toast({
+          title: "Envio Fiscal Iniciado",
+          description: "NFC-e enviada automaticamente para a SEFAZ.",
+          variant: "default",
+          className: "bg-emerald-500 text-white border-none",
+        });
+      } catch (error) {
+        setFiscalStatus("pending_fiscal");
+        toast({
+          title: "Envio Fiscal Pendente",
+          description:
+            error instanceof Error
+              ? error.message
+              : "Falha ao enviar NFC-e automaticamente.",
+          variant: "default",
+          className: "bg-amber-500 text-white border-none",
+        });
+      }
     } catch (error) {
       toast({
         title: "Erro",
@@ -600,6 +681,37 @@ export default function POS() {
       selectedCategory === "Todos" || p.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
+
+  const paymentTypeStyles = {
+    pix: {
+      active: "bg-purple-600 hover:bg-purple-700 ring-2 ring-purple-300 ring-offset-2",
+      base: "bg-purple-600/70 hover:bg-purple-600",
+    },
+    credito: {
+      active: "bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300 ring-offset-2",
+      base: "bg-blue-600/70 hover:bg-blue-600",
+    },
+    debito: {
+      active: "bg-emerald-600 hover:bg-emerald-700 ring-2 ring-emerald-300 ring-offset-2",
+      base: "bg-emerald-600/70 hover:bg-emerald-600",
+    },
+    dinheiro: {
+      active: "bg-amber-600 hover:bg-amber-700 ring-2 ring-amber-300 ring-offset-2",
+      base: "bg-amber-600/70 hover:bg-amber-600",
+    },
+    outros: {
+      active: "bg-slate-600 hover:bg-slate-700 ring-2 ring-slate-300 ring-offset-2",
+      base: "bg-slate-600/70 hover:bg-slate-600",
+    },
+  } as const;
+
+  const paymentTypeIcons = {
+    pix: QrCode,
+    credito: CreditCard,
+    debito: CreditCard,
+    dinheiro: DollarSign,
+    outros: Wallet,
+  } as const;
 
   return (
     <div className="flex h-screen w-full bg-background overflow-hidden">
@@ -743,6 +855,12 @@ export default function POS() {
                 <FileCheck className="h-3 w-3 mr-1" /> Modo Offline
               </Badge>
             )}
+            <Badge
+              variant="secondary"
+              className="bg-white/20 hover:bg-white/30 text-white border-0"
+            >
+              {fiscalEnvironmentLabel}
+            </Badge>
             {cashRegister && hasPermission("pos:sangria") && (
               <Button
                 variant="secondary"
@@ -763,6 +881,18 @@ export default function POS() {
               <Package className="h-4 w-4" />
               Catálogo
             </Button>
+            {hasPermission("settings:payments") && (
+              <Button
+                variant="secondary"
+                className="gap-2"
+                onClick={handleSendPdvLoad}
+                disabled={isFetchingPdvLoad}
+                data-testid="button-send-pdv-load"
+              >
+                <Upload className="h-4 w-4" />
+                Enviar Carga
+              </Button>
+            )}
             <Badge
               variant="secondary"
               className="bg-white/20 hover:bg-white/30 text-white border-0"
@@ -771,6 +901,12 @@ export default function POS() {
             </Badge>
           </div>
         </div>
+
+        {pdvLoadError && (
+          <div className="mx-4 mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+            Nenhuma carga enviada para o PDV. Gere a carga para atualizar produtos e pagamentos.
+          </div>
+        )}
 
         {/* Cart Items */}
         <ScrollArea className="flex-1 p-4">
@@ -886,46 +1022,26 @@ export default function POS() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 pt-2">
-            <Button
-              className={`h-14 flex flex-col gap-1 transition-all ${
-                selectedPayment === "pix"
-                  ? "bg-purple-600 hover:bg-purple-700 ring-2 ring-purple-300 ring-offset-2"
-                  : "bg-purple-600/70 hover:bg-purple-600"
-              }`}
-              onClick={() => handleSelectPayment("pix")}
-              disabled={cart.length === 0 || paymentStatus === "processing"}
-              data-testid="button-payment-pix"
-            >
-              <QrCode className="h-5 w-5" />
-              <span className="text-xs">PIX</span>
-            </Button>
-            <Button
-              className={`h-14 flex flex-col gap-1 transition-all ${
-                selectedPayment === "credito"
-                  ? "bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300 ring-offset-2"
-                  : "bg-blue-600/70 hover:bg-blue-600"
-              }`}
-              onClick={() => handleSelectPayment("credito")}
-              disabled={cart.length === 0 || paymentStatus === "processing"}
-              data-testid="button-payment-credit"
-            >
-              <CreditCard className="h-5 w-5" />
-              <span className="text-xs">Crédito</span>
-            </Button>
-            <Button
-              className={`h-14 flex flex-col gap-1 transition-all ${
-                selectedPayment === "debito"
-                  ? "bg-emerald-600 hover:bg-emerald-700 ring-2 ring-emerald-300 ring-offset-2"
-                  : "bg-emerald-600/70 hover:bg-emerald-600"
-              }`}
-              onClick={() => handleSelectPayment("debito")}
-              disabled={cart.length === 0 || paymentStatus === "processing"}
-              data-testid="button-payment-debit"
-            >
-              <CreditCard className="h-5 w-5" />
-              <span className="text-xs">Débito</span>
-            </Button>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-2">
+            {availablePaymentMethods.map((method) => {
+              const isSelected = selectedPayment?.id === method.id;
+              const styles = paymentTypeStyles[method.type] || paymentTypeStyles.outros;
+              const Icon = paymentTypeIcons[method.type] || Wallet;
+              return (
+                <Button
+                  key={method.id}
+                  className={`h-14 flex flex-col gap-1 transition-all ${
+                    isSelected ? styles.active : styles.base
+                  }`}
+                  onClick={() => handleSelectPayment(method)}
+                  disabled={cart.length === 0 || paymentStatus === "processing"}
+                  data-testid={`button-payment-${method.id}`}
+                >
+                  <Icon className="h-5 w-5" />
+                  <span className="text-xs">{method.name}</span>
+                </Button>
+              );
+            })}
           </div>
 
           {selectedPayment && (

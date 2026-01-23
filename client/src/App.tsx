@@ -13,6 +13,7 @@ import Sales from "@/pages/sales";
 import Contacts from "@/pages/contacts";
 import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
+import PaymentMethods from "@/pages/payment-methods";
 import Login from "@/pages/login";
 import Register from "@/pages/register";
 import Users from "@/pages/users";
@@ -102,6 +103,9 @@ function Router() {
       </Route>
       <Route path="/settings">
         <ProtectedRoute component={Settings} />
+      </Route>
+      <Route path="/payment-methods">
+        <ProtectedRoute component={PaymentMethods} />
       </Route>
       <Route path="/users">
         <ProtectedRoute component={Users} />

@@ -389,6 +389,8 @@ export const companySettings = pgTable("company_settings", {
   ie: text("ie"),
   razaoSocial: text("razao_social"),
   nomeFantasia: text("nome_fantasia"),
+  email: text("email"),
+  phone: text("phone"),
   regimeTributario: text("regime_tributario").default("Simples Nacional"),
   crt: text("crt").default("1"),
   fiscalEnvironment: text("fiscal_environment").default("homologacao"),
@@ -423,6 +425,9 @@ export const companySettings = pgTable("company_settings", {
   sefazUrlHomologacao: text("sefaz_url_homologacao"),
   sefazUrlProducao: text("sefaz_url_producao"),
   sefazUf: text("sefaz_uf"),
+  sefazMunicipioCodigo: text("sefaz_municipio_codigo"),
+  sefazQrCodeUrlHomologacao: text("sefaz_qr_url_homologacao"),
+  sefazQrCodeUrlProducao: text("sefaz_qr_url_producao"),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
@@ -431,6 +436,38 @@ export const insertCompanySettingsSchema = createInsertSchema(
 ).omit({ id: true, updatedAt: true });
 export type InsertCompanySettings = z.infer<typeof insertCompanySettingsSchema>;
 export type CompanySettings = typeof companySettings.$inferSelect;
+
+export const paymentMethods = pgTable("payment_methods", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  nfceCode: text("nfce_code"),
+  tefMethod: text("tef_method"),
+  isActive: boolean("is_active").default(true),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPaymentMethodSchema = createInsertSchema(
+  paymentMethods
+).omit({ id: true, createdAt: true });
+export type InsertPaymentMethod = z.infer<typeof insertPaymentMethodSchema>;
+export type PaymentMethod = typeof paymentMethods.$inferSelect;
+
+export const pdvLoads = pgTable("pdv_loads", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  payload: jsonb("payload").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPdvLoadSchema = createInsertSchema(pdvLoads).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertPdvLoad = z.infer<typeof insertPdvLoadSchema>;
+export type PdvLoad = typeof pdvLoads.$inferSelect;
 
 export const payables = pgTable("payables", {
   id: serial("id").primaryKey(),
@@ -769,6 +806,7 @@ export const fiscalXmlStorage = pgTable("fiscal_xml_storage", {
   documentType: text("document_type").notNull(),
   documentKey: text("document_key").notNull(),
   xmlContent: text("xml_content").notNull(),
+  qrCodeUrl: text("qr_code_url"),
   authorizedAt: timestamp("authorized_at"),
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow(),

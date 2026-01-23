@@ -1,7 +1,6 @@
 import * as crypto from "crypto";
-import * as fs from "fs";
-import * as path from "path";
 import * as forge from "node-forge";
+import { SignedXml } from "xml-crypto";
 import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
@@ -28,7 +27,8 @@ export class XMLSignatureService {
   static signXML(
     xmlContent: string,
     certificateDataBase64: string,
-    certificatePassword: string
+    certificatePassword: string,
+    referenceId: string = "nfe"
   ): string {
     try {
       // Decode base64 certificate data
@@ -46,12 +46,30 @@ export class XMLSignatureService {
       let privateKey: any = null;
       let certificate: any = null;
 
-      if (p12.bags && p12.bags.length > 0) {
-        for (const bag of p12.bags) {
-          if (bag.type === forgeLib.pki.oids.pkcs8ShroudedKeyBag) {
-            privateKey = bag.key;
-          } else if (bag.type === forgeLib.pki.oids.certBag && !certificate) {
-            certificate = bag.cert;
+      try {
+        const keyBags =
+          p12.getBags({ bagType: forgeLib.pki.oids.pkcs8ShroudedKeyBag })[
+            forgeLib.pki.oids.pkcs8ShroudedKeyBag
+          ] || [];
+        if (keyBags.length > 0) {
+          privateKey = keyBags[0]?.key ?? null;
+        }
+
+        const certBags =
+          p12.getBags({ bagType: forgeLib.pki.oids.certBag })[
+            forgeLib.pki.oids.certBag
+          ] || [];
+        if (certBags.length > 0) {
+          certificate = certBags[0]?.cert ?? null;
+        }
+      } catch {
+        if (p12.bags && p12.bags.length > 0) {
+          for (const bag of p12.bags) {
+            if (bag.type === forgeLib.pki.oids.pkcs8ShroudedKeyBag) {
+              privateKey = bag.key;
+            } else if (bag.type === forgeLib.pki.oids.certBag && !certificate) {
+              certificate = bag.cert;
+            }
           }
         }
       }
@@ -60,50 +78,59 @@ export class XMLSignatureService {
         throw new Error("Could not extract key or certificate from P12");
       }
 
-      // Create signature of the XML content using RSA-SHA256
-      const md = forgeLib.md.sha256.create();
-      md.update(xmlContent);
-      const signature = privateKey.sign(md);
-      const signatureBase64 = forgeLib.util.encode64(signature);
-
-      // Convert certificate to base64 for inclusion in signature
+      const privateKeyPem = forgeLib.pki.privateKeyToPem(privateKey);
       const certDer = forgeLib.asn1.toDer(
         forgeLib.pki.certificateToAsn1(certificate)
       );
       const certBase64 = forgeLib.util.encode64(certDer.getBytes());
 
-      // Create the XML Signature element
-      const signatureElement = `
-    <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
-      <SignedInfo>
-        <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#" />
-        <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256" />
-        <Reference URI="#nfe">
-          <Transforms>
-            <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature" />
-            <Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#" />
-          </Transforms>
-          <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256" />
-          <DigestValue>${forgeLib.util.encode64(
-            md.digest().getBytes()
-          )}</DigestValue>
-        </Reference>
-      </SignedInfo>
-      <SignatureValue>${signatureBase64}</SignatureValue>
-      <KeyInfo>
-        <X509Data>
-          <X509Certificate>${certBase64}</X509Certificate>
-        </X509Data>
-      </KeyInfo>
-    </Signature>`;
+      const signedXml = new SignedXml();
+      const signedXmlAny = signedXml as any;
+      signedXmlAny.idAttributes = ["Id"];
+      signedXmlAny.signatureAlgorithm =
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+      signedXmlAny.canonicalizationAlgorithm =
+        "http://www.w3.org/2001/10/xml-exc-c14n#";
+      signedXmlAny.signingKey = privateKeyPem;
+      signedXmlAny.privateKey = privateKeyPem;
+      const keyInfoProvider = {
+        getKeyInfo() {
+          return `<KeyInfo><X509Data><X509Certificate>${certBase64}</X509Certificate></X509Data></KeyInfo>`;
+        },
+        getKey() {
+          return privateKeyPem;
+        },
+      } as any;
+      signedXmlAny.keyInfoProvider = keyInfoProvider;
+      signedXmlAny.addReference({
+        xpath: `//*[@Id='${referenceId}']`,
+        transforms: [
+          "http://www.w3.org/2000/09/xmldsig#enveloped-signature",
+          "http://www.w3.org/2001/10/xml-exc-c14n#",
+        ],
+        digestAlgorithm: "http://www.w3.org/2001/04/xmlenc#sha256",
+        uri: `#${referenceId}`,
+      });
+      const signatureAnchor = xmlContent.includes("<infNFeSupl")
+        ? "//*[local-name()='infNFeSupl']"
+        : "//*[local-name()='infNFe']";
+      signedXmlAny.computeSignature(xmlContent, {
+        location: {
+          reference: signatureAnchor,
+          action: "after",
+        },
+        keyInfoProvider,
+      });
 
-      // Insert signature into the XML before the closing tag
-      const modifiedXml = xmlContent.replace(
-        /<\/NFe>/,
-        `${signatureElement}</NFe>`
+      const signed = signedXmlAny.getSignedXml();
+      if (signed.includes("<KeyInfo>")) {
+        return signed;
+      }
+      const keyInfo = `<KeyInfo><X509Data><X509Certificate>${certBase64}</X509Certificate></X509Data></KeyInfo>`;
+      return signed.replace(
+        /<\/SignatureValue>/,
+        `</SignatureValue>${keyInfo}`
       );
-
-      return modifiedXml;
     } catch (error) {
       throw new Error(
         `Failed to sign XML: ${

@@ -22,6 +22,8 @@ import {
   cfopCodes,
   companies,
   cstCodes,
+  paymentMethods,
+  pdvLoads,
   simplesNacionalAliquots,
   sefazTransmissionLogs,
   digitalCertificates,
@@ -50,6 +52,8 @@ import {
   type InsertFiscalConfig,
   type InsertTaxAliquot,
   type InsertSimplesNacionalAliquot,
+  type InsertPaymentMethod,
+  type InsertPdvLoad,
   type InsertDigitalCertificate,
   type DigitalCertificate,
   type InsertSequentialNumbering,
@@ -401,13 +405,17 @@ export const storage = {
       data.nomeFantasia ||
       data.cnpj ||
       data.ie ||
-      data.regimeTributario
+      data.regimeTributario ||
+      data.email ||
+      data.phone
     ) {
       const companyData: any = {};
       if (data.razaoSocial) companyData.razaoSocial = data.razaoSocial;
       if (data.nomeFantasia) companyData.nomeFantasia = data.nomeFantasia;
       if (data.cnpj) companyData.cnpj = data.cnpj;
       if (data.ie) companyData.ie = data.ie;
+      if (data.email) companyData.email = data.email;
+      if (data.phone) companyData.phone = data.phone;
       if (data.regimeTributario)
         companyData.regimeTributario = data.regimeTributario;
 
@@ -431,6 +439,58 @@ export const storage = {
         .returning();
       return created;
     }
+  },
+
+  async getPaymentMethods(companyId: number) {
+    return await db
+      .select()
+      .from(paymentMethods)
+      .where(eq(paymentMethods.companyId, companyId))
+      .orderBy(paymentMethods.sortOrder, paymentMethods.name);
+  },
+
+  async createPaymentMethod(data: InsertPaymentMethod) {
+    const [method] = await db
+      .insert(paymentMethods)
+      .values(data)
+      .returning();
+    return method;
+  },
+
+  async updatePaymentMethod(
+    id: number,
+    companyId: number,
+    data: Partial<InsertPaymentMethod>
+  ) {
+    const [method] = await db
+      .update(paymentMethods)
+      .set(data)
+      .where(and(eq(paymentMethods.id, id), eq(paymentMethods.companyId, companyId)))
+      .returning();
+    return method;
+  },
+
+  async deletePaymentMethod(id: number, companyId: number) {
+    const [method] = await db
+      .delete(paymentMethods)
+      .where(and(eq(paymentMethods.id, id), eq(paymentMethods.companyId, companyId)))
+      .returning();
+    return method;
+  },
+
+  async createPdvLoad(data: InsertPdvLoad) {
+    const [load] = await db.insert(pdvLoads).values(data).returning();
+    return load;
+  },
+
+  async getLatestPdvLoad(companyId: number) {
+    const [load] = await db
+      .select()
+      .from(pdvLoads)
+      .where(eq(pdvLoads.companyId, companyId))
+      .orderBy(desc(pdvLoads.createdAt))
+      .limit(1);
+    return load || null;
   },
 
   async getAllPayables(companyId: number) {
@@ -1073,6 +1133,20 @@ export const storage = {
   async saveFiscalXml(data: InsertFiscalXmlStorage) {
     const [record] = await db.insert(fiscalXmlStorage).values(data).returning();
     return record;
+  },
+
+  async getFiscalXmlByKey(companyId: number, documentKey: string) {
+    const [record] = await db
+      .select()
+      .from(fiscalXmlStorage)
+      .where(
+        and(
+          eq(fiscalXmlStorage.companyId, companyId),
+          eq(fiscalXmlStorage.documentKey, documentKey)
+        )
+      )
+      .limit(1);
+    return record || null;
   },
 
   async saveManifestDocument(data: InsertManifestDocument) {

@@ -16,6 +16,15 @@ import { TaxMatrixService } from "./tax-matrix";
 import { SefazService } from "./sefaz-service";
 import { XMLSignatureService } from "./xml-signature";
 import { NFCeContingencyService } from "./nfce-contingency";
+import {
+  buildNfceQrUrl,
+  buildNfceXml,
+  formatNfceDateTime,
+  generateNfceKey,
+  mapPaymentCode,
+  signNfceXml,
+  validateNfceXmlStructure,
+} from "./nfce-emitter";
 import { storage } from "./storage";
 import {
   requireAuth,
@@ -23,10 +32,46 @@ import {
   requirePermission,
   requireValidFiscalCertificate,
 } from "./middleware";
+import * as soap from "soap";
+import * as fs from "fs";
+import * as crypto from "crypto";
+import * as path from "path";
 
 const CEST_REGEX = /^\d{7}$/;
 const isCestRequired = (ncm?: string) => Boolean(ncm);
 const nfceContingency = new NFCeContingencyService();
+const nfceDebugEnabled = process.env.NFCE_DEBUG_XML === "true";
+
+const injectNfceSupplement = (xml: string, supplement: string) => {
+  if (!supplement) return xml;
+  if (xml.includes("<infNFeSupl>")) return xml;
+  if (xml.includes("</Signature>")) {
+    return xml.replace(/<\/Signature>/, `</Signature>${supplement}`);
+  }
+  if (xml.includes("</NFe>")) {
+    return xml.replace(/<\/NFe>/, `${supplement}</NFe>`);
+  }
+  return xml;
+};
+
+const wrapNfceBatch = (xml: string) => {
+  if (xml.includes("<enviNFe")) return xml;
+  const body = xml.replace(/<\?xml[^>]*\?>/i, "").trim();
+  return `<?xml version="1.0" encoding="UTF-8"?><enviNFe versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe"><idLote>${Date.now()}</idLote><indSinc>1</indSinc>${body}</enviNFe>`;
+};
+
+const saveNfceDebugXml = async (
+  saleId: number,
+  xmlContent: string,
+  suffix: string,
+) => {
+  if (!nfceDebugEnabled) return null;
+  const dir = path.join(process.cwd(), "server", "logs");
+  await fs.promises.mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, `nfce-${saleId}-${suffix}.xml`);
+  await fs.promises.writeFile(filePath, xmlContent, "utf8");
+  return filePath;
+};
 
 const router = Router();
 
@@ -422,6 +467,64 @@ router.post(
         return res.status(400).json({ error: "Nenhuma venda informada" });
       }
 
+      const settings = await storage.getCompanySettings(companyId);
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      if (!settings?.cscToken || !settings?.cscId) {
+        return res.status(400).json({
+          error: "CSC da NFC-e nao configurado",
+        });
+      }
+
+      if (!settings?.sefazMunicipioCodigo) {
+        return res.status(400).json({
+          error: "Codigo do municipio (IBGE) nao configurado",
+        });
+      }
+
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+      const { getSefazDefaults } = await import("@shared/sefaz-defaults");
+      const defaults = getSefazDefaults(
+        settings?.sefazUf || company.state || "SP",
+      );
+      const qrBaseUrl =
+        resolvedEnvironment === "producao"
+          ? settings.sefazQrCodeUrlProducao || defaults.sefazQrCodeUrlProducao
+          : settings.sefazQrCodeUrlHomologacao ||
+            defaults.sefazQrCodeUrlHomologacao;
+      if (!qrBaseUrl) {
+        return res.status(400).json({
+          error: "URL do QR Code da NFC-e nao configurada",
+        });
+      }
+
+      const uf = settings.sefazUf || company.state || "SP";
+      const sefazUrl =
+        resolvedEnvironment === "producao"
+          ? settings.sefazUrlProducao || defaults.sefazUrlProducao
+          : settings.sefazUrlHomologacao || defaults.sefazUrlHomologacao;
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado",
+        });
+      }
+
+      const paymentMethods = await storage.getPaymentMethods(companyId);
+      const { SefazIntegration } = await import("./sefaz-integration");
+      const integration = new SefazIntegration(
+        resolvedEnvironment,
+        sefazUrl || undefined,
+      );
+
       const results = [];
       for (const saleId of saleIds) {
         const sale = await storage.getSale(saleId, companyId);
@@ -444,15 +547,240 @@ router.post(
           continue;
         }
 
-        await storage.updateSaleNfceStatus(
-          saleId,
-          companyId,
-          "Pendente",
-          sale.nfceProtocol || undefined,
-          sale.nfceKey || undefined,
-          undefined,
-        );
-        results.push({ id: saleId, success: true });
+        let signedXml = "";
+        try {
+          const items = await storage.getSaleItems(saleId);
+          const resolvedItems = await Promise.all(
+            items.map(async (item) => {
+              if (item.ncm && String(item.ncm).trim()) {
+                return item;
+              }
+              const product = await storage.getProduct(
+                item.productId,
+                companyId,
+              );
+              return {
+                ...item,
+                ncm: product?.ncm ?? item.ncm,
+              };
+            }),
+          );
+          let numbering;
+          try {
+            numbering = await storage.getNextDocumentNumber(
+              companyId,
+              "NFC-e",
+              1,
+            );
+          } catch (error) {
+            numbering = await storage.getNextDocumentNumber(
+              companyId,
+              "NFCe",
+              1,
+            );
+          }
+          const issueDate = new Date();
+          const { key, cNF } = generateNfceKey({
+            uf,
+            cnpj: company.cnpj,
+            issueDate,
+            serie: numbering.numbering.series,
+            number: numbering.number,
+            tpEmis: "1",
+          });
+          const emitIe = String(company.ie || "").replace(/\D/g, "");
+          if (!emitIe) {
+            throw new Error("IE do emitente nao configurada");
+          }
+          const municipioCodigo = String(
+            settings.sefazMunicipioCodigo || "",
+          ).replace(/\D/g, "");
+          if (municipioCodigo.length < 7) {
+            throw new Error("Codigo do municipio SEFAZ invalido");
+          }
+          const paymentMethod = paymentMethods.find(
+            (method) => method.name === sale.paymentMethod,
+          );
+          const paymentCode = mapPaymentCode(
+            paymentMethod?.nfceCode,
+            paymentMethod?.type,
+          );
+          const xml = buildNfceXml({
+            key,
+            cNF,
+            issueDate,
+            environment: resolvedEnvironment,
+            serie: numbering.numbering.series,
+            number: numbering.number,
+            uf,
+            municipioCodigo,
+            emitente: {
+              cnpj: company.cnpj,
+              ie: emitIe,
+              nome: company.razaoSocial,
+              endereco: {
+                logradouro: company.address,
+                numero: "",
+                bairro: "",
+                municipio: company.city,
+                uf: company.state,
+                cep: company.zipCode,
+              },
+            },
+            itens: resolvedItems.map((item) => ({
+              id: item.productId,
+              nome: item.productName,
+              ncm: item.ncm,
+              cfop: null,
+              unidade: "UN",
+              quantidade: Number(item.quantity),
+              valorUnitario: Number(item.unitPrice),
+              valorTotal: Number(item.subtotal),
+            })),
+            pagamento: { codigo: paymentCode, valor: Number(sale.total) },
+            crt: settings.crt || "1",
+          });
+          const validation = validateNfceXmlStructure(xml, {
+            requireSignature: false,
+          });
+          if (!validation.ok) {
+            console.error("NFC-e schema local invalid:", validation);
+            const details = validation.details
+              ? ` | detalhes: ${JSON.stringify(validation.details)}`
+              : "";
+            throw new Error(`Schema NFC-e invalido: ${validation.error}${details}`);
+          }
+
+          if (!settings.cscId || !settings.cscToken) {
+            throw new Error("CSC nao configurado para NFC-e");
+          }
+          const qrBase = uf === "MG" && qrBaseUrl.includes("fazenda.mg.gov.br/nfce/qrcode")
+            ? "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml"
+            : qrBaseUrl;
+          const qrUrl = buildNfceQrUrl({
+            sefazUrl: qrBase,
+            chave: key,
+            versaoQr: "2",
+            tpAmb: resolvedEnvironment === "producao" ? "1" : "2",
+            cscId: settings.cscId,
+            csc: settings.cscToken,
+          });
+          const urlChave =
+            "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml";
+          const supplement = `<infNFeSupl><qrCode><![CDATA[${qrUrl.trim()}]]></qrCode><urlChave>${urlChave}</urlChave></infNFeSupl>`;
+
+          const xmlWithSupl = injectNfceSupplement(xml, supplement);
+          const validationWithSupl = validateNfceXmlStructure(xmlWithSupl, {
+            requireSignature: false,
+          });
+          if (!validationWithSupl.ok) {
+            console.error("NFC-e schema local invalid:", validationWithSupl);
+            const details = validationWithSupl.details
+              ? ` | detalhes: ${JSON.stringify(validationWithSupl.details)}`
+              : "";
+            throw new Error(
+              `Schema NFC-e invalido: ${validationWithSupl.error}${details}`,
+            );
+          }
+
+          signedXml = signNfceXml(
+            xmlWithSupl,
+            certificateBuffer.toString("base64"),
+            certificatePassword,
+            key,
+          );
+          const finalXml = signedXml;
+          const validationSigned = validateNfceXmlStructure(finalXml, {
+            requireSignature: true,
+          });
+          if (!validationSigned.ok) {
+            console.error("NFC-e schema local invalid:", validationSigned);
+            const details = validationSigned.details
+              ? ` | detalhes: ${JSON.stringify(validationSigned.details)}`
+              : "";
+            throw new Error(
+              `Schema NFC-e invalido: ${validationSigned.error}${details}`,
+            );
+          }
+
+          const batchXml = wrapNfceBatch(finalXml);
+
+          const result = await integration.authorizeNFCe(
+            companyId,
+            uf,
+            batchXml,
+          );
+
+          if (result.success && result.status === "100") {
+            await storage.updateSaleNfceStatus(
+              saleId,
+              companyId,
+              "Autorizada",
+              result.protocol || undefined,
+              result.key || key,
+              null,
+            );
+            const authorizedAt = new Date();
+            const expiresAt = new Date(
+              authorizedAt.getTime() + 5 * 365 * 24 * 60 * 60 * 1000,
+            );
+            await storage.saveFiscalXml({
+              companyId,
+              documentType: "NFCe",
+              documentKey: result.key || key,
+              xmlContent: finalXml,
+              qrCodeUrl: qrUrl,
+              authorizedAt,
+              expiresAt,
+            });
+            results.push({
+              id: saleId,
+              success: true,
+              status: result.status,
+              message: result.message,
+              key: result.key || key,
+              qrCodeUrl: qrUrl,
+            });
+          } else {
+            const debugPath = await saveNfceDebugXml(
+              saleId,
+              batchXml,
+              "signed",
+            );
+            await storage.updateSaleNfceStatus(
+              saleId,
+              companyId,
+              "Pendente Fiscal",
+              sale.nfceProtocol || undefined,
+              sale.nfceKey || undefined,
+              result.message || "Erro ao autorizar NFC-e",
+            );
+            results.push({
+              id: saleId,
+              success: false,
+              status: result.status,
+              error: result.message || "Erro ao autorizar NFC-e",
+              ...(debugPath ? { debugXmlPath: debugPath } : {}),
+            });
+          }
+        } catch (error) {
+          const debugPath = await saveNfceDebugXml(saleId, signedXml, "signed");
+          await storage.updateSaleNfceStatus(
+            saleId,
+            companyId,
+            "Pendente Fiscal",
+            sale.nfceProtocol || undefined,
+            sale.nfceKey || undefined,
+            error instanceof Error ? error.message : "Erro ao emitir NFC-e",
+          );
+          results.push({
+            id: saleId,
+            success: false,
+            error:
+              error instanceof Error ? error.message : "Erro ao emitir NFC-e",
+            ...(debugPath ? { debugXmlPath: debugPath } : {}),
+          });
+        }
       }
 
       res.json({ success: true, results });
@@ -570,6 +898,31 @@ router.post(
             ? error.message
             : "Erro ao inutilizar numeracao",
       });
+    }
+  },
+);
+
+router.get(
+  "/nfce/qrcode/:key",
+  requireAuth,
+  requirePermission("fiscal:view"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+      const key = String(req.params.key || "").trim();
+      if (!key) {
+        return res.status(400).json({ error: "Chave nao informada" });
+      }
+      const record = await storage.getFiscalXmlByKey(companyId, key);
+      if (!record?.qrCodeUrl) {
+        return res.status(404).json({ error: "QR Code nao encontrado" });
+      }
+      res.json({ qrCodeUrl: record.qrCodeUrl });
+    } catch (error) {
+      res.status(500).json({ error: "Falha ao obter QR Code" });
     }
   },
 );
@@ -782,31 +1135,107 @@ router.get("/csosn/all", async (req, res) => {
 // ============================================
 
 router.post(
+  "/sefaz/debug",
+  requireAuth,
+  requirePermission("fiscal:manage"),
+  async (req, res) => {
+    try {
+      const { wsdlUrl } = req.body;
+      if (!wsdlUrl) {
+        return res.status(400).json({ error: "wsdlUrl obrigatorio" });
+      }
+
+      const certPath = process.env.SEFAZ_CLIENT_PEM_PATH;
+      const caPath = process.env.SEFAZ_CA_CERT_PATH;
+      if (!certPath) {
+        return res
+          .status(400)
+          .json({ error: "SEFAZ_CLIENT_PEM_PATH nao configurado" });
+      }
+
+      const certPem = fs.readFileSync(certPath);
+      const caPem = caPath ? fs.readFileSync(caPath) : undefined;
+      const strictSSL = process.env.SEFAZ_STRICT_SSL !== "false";
+      const tlsOptions = {
+        minVersion: "TLSv1.2",
+        maxVersion: "TLSv1.2",
+        ciphers: "DEFAULT:@SECLEVEL=1",
+        honorCipherOrder: true,
+        secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+        ca: caPem,
+        rejectUnauthorized: strictSSL,
+      };
+      const servername = new URL(wsdlUrl).hostname;
+
+      const client = await soap.createClientAsync(wsdlUrl, {
+        wsdl_options: {
+          ...tlsOptions,
+          ...(certPem ? { cert: certPem, key: certPem } : {}),
+          servername,
+        },
+      });
+      client.setSecurity(
+        new soap.ClientSSLSecurity(certPem, certPem, "", {
+          ...tlsOptions,
+          servername,
+          strictSSL,
+        }),
+      );
+
+      res.json({ success: true, message: "WSDL carregado e TLS ok" });
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  },
+);
+
+router.post(
   "/sefaz/test-connection",
   requireAuth,
   requirePermission("fiscal:view"),
   async (req, res) => {
     try {
-      const { environment, uf } = req.body;
+      const { environment, uf, documentType } = req.body;
       const companyId = getCompanyId(req);
       if (!companyId) {
         return res.status(401).json({ error: "Empresa nao identificada" });
       }
 
+      const settings = await storage.getCompanySettings(companyId);
       const resolvedEnvironment = await resolveSefazEnvironment(
         companyId,
         environment,
       );
+      const sefazUrl =
+        resolvedEnvironment === "producao"
+          ? settings?.sefazUrlProducao
+          : settings?.sefazUrlHomologacao;
+      const resolvedUf = uf || settings?.sefazUf || "SP";
+      const resolvedDocumentType = documentType === "nfce" ? "nfce" : "nfe";
 
       const { SefazIntegration } = await import("./sefaz-integration");
-      const integration = new SefazIntegration(resolvedEnvironment);
-      const result = await integration.testConnection(companyId, uf || "SP");
+      const integration = new SefazIntegration(
+        resolvedEnvironment,
+        sefazUrl || undefined,
+      );
+      const result = await integration.testConnection(
+        companyId,
+        resolvedUf,
+        resolvedDocumentType,
+      );
 
       await logSefazTransmission({
         companyId,
         action: "test-connection",
         environment: resolvedEnvironment,
-        requestPayload: { environment, uf },
+        requestPayload: {
+          environment,
+          uf: resolvedUf,
+          documentType: resolvedDocumentType,
+          sefazUrl,
+        },
         responsePayload: result,
         success: result.success,
       });

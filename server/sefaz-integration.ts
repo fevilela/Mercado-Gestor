@@ -1,4 +1,7 @@
 import * as soap from "soap";
+import * as crypto from "crypto";
+import * as fs from "fs";
+import * as https from "https";
 import { CertificateService } from "./certificate-service";
 import { NFEGenerator } from "./nfe-generator";
 import NodeCache from "node-cache";
@@ -11,6 +14,7 @@ const cache = new NodeCache({ stdTTL: 3600 });
 export interface SefazResponse {
   success: boolean;
   protocol?: string;
+  key?: string;
   status?: string;
   message: string;
   timestamp: Date;
@@ -22,7 +26,10 @@ export class SefazIntegration {
   private environment: "homologacao" | "producao";
   private baseUrlOverride?: string;
 
-  constructor(environment: "homologacao" | "producao" = "homologacao", baseUrlOverride?: string) {
+  constructor(
+    environment: "homologacao" | "producao" = "homologacao",
+    baseUrlOverride?: string,
+  ) {
     this.certificateService = new CertificateService();
     this.environment = environment;
     this.baseUrlOverride = baseUrlOverride;
@@ -30,7 +37,7 @@ export class SefazIntegration {
 
   private getSefazUrl(
     state: string,
-    environment: "homologacao" | "producao"
+    environment: "homologacao" | "producao",
   ): string {
     if (this.baseUrlOverride) {
       return this.baseUrlOverride;
@@ -81,7 +88,7 @@ export class SefazIntegration {
   async submitNFe(
     xmlContent: string,
     companyId: number,
-    state: string = "SP"
+    state: string = "SP",
   ): Promise<SefazResponse> {
     try {
       const cacheKey = `nfe-submit-${companyId}-${Date.now()}`;
@@ -200,7 +207,7 @@ export class SefazIntegration {
     justification: string,
     companyId: number,
     authorizedAt: Date,
-    state: string = "SP"
+    state: string = "SP",
   ): Promise<SefazResponse> {
     try {
       const cacheKey = `nfe-cancel-${nfeKey}`;
@@ -327,10 +334,14 @@ export class SefazIntegration {
     correctionText: string,
     companyId: number,
     state: string = "SP",
-    sequence: number = 1
+    sequence: number = 1,
   ): Promise<SefazResponse> {
     try {
-      if (!correctionText || correctionText.length < 15 || correctionText.length > 1000) {
+      if (
+        !correctionText ||
+        correctionText.length < 15 ||
+        correctionText.length > 1000
+      ) {
         return {
           success: false,
           message: "Correcao deve ter entre 15 e 1000 caracteres",
@@ -400,8 +411,7 @@ export class SefazIntegration {
     } catch (error) {
       return {
         success: false,
-        message:
-          error instanceof Error ? error.message : "Erro ao enviar CC-e",
+        message: error instanceof Error ? error.message : "Erro ao enviar CC-e",
         timestamp: new Date(),
       };
     }
@@ -443,7 +453,7 @@ export class SefazIntegration {
     serie: string,
     start: string,
     end: string,
-    justification: string
+    justification: string,
   ): Promise<SefazResponse> {
     try {
       if (!justification || justification.length < 15) {
@@ -517,7 +527,9 @@ export class SefazIntegration {
       return {
         success: false,
         message:
-          error instanceof Error ? error.message : "Erro ao inutilizar numeracao",
+          error instanceof Error
+            ? error.message
+            : "Erro ao inutilizar numeracao",
         timestamp: new Date(),
       };
     }
@@ -526,7 +538,7 @@ export class SefazIntegration {
   async checkAuthorizationStatus(
     protocol: string,
     companyId: number,
-    state: string = "SP"
+    state: string = "SP",
   ): Promise<SefazResponse> {
     try {
       const cacheKey = `nfe-status-${protocol}`;
@@ -559,7 +571,7 @@ export class SefazIntegration {
   }
 
   async activateContingencyMode(
-    mode: "offline" | "svc" | "svc_rs" | "svc_an"
+    mode: "offline" | "svc" | "svc_rs" | "svc_an",
   ): Promise<SefazResponse> {
     try {
       const cacheKey = `contingency-${mode}`;
@@ -588,10 +600,10 @@ export class SefazIntegration {
 
   async testConnection(
     companyId: number,
-    state: string = "SP"
+    state: string = "SP",
+    documentType: "nfe" | "nfce" = "nfe",
   ): Promise<SefazResponse> {
     try {
-      const startTime = Date.now();
       const fiscalStatus = await getFiscalCertificateStatus(companyId);
       if (!fiscalStatus.isValid) {
         return {
@@ -601,10 +613,26 @@ export class SefazIntegration {
         };
       }
 
+      const certRecord = await storage.getDigitalCertificate(companyId);
+      const subjectName = certRecord?.subjectName || "";
+      const ufMatch = subjectName.match(/stateOrProvinceName=([A-Z]{2})/i);
+      if (ufMatch) {
+        const certUf = ufMatch[1].toUpperCase();
+        if (certUf !== state.toUpperCase()) {
+          return {
+            success: false,
+            message: `Certificado pertence a UF ${certUf} e nao corresponde a UF selecionada`,
+            timestamp: new Date(),
+          };
+        }
+      }
+
       const baseUrl = this.getSefazUrl(state, this.environment);
-      const wsdlUrl = baseUrl.toLowerCase().includes("?wsdl")
-        ? baseUrl
-        : `${baseUrl}/NFeStatusServico4/NFeStatusServico4.asmx?wsdl`;
+      const serviceNames = [
+        documentType === "nfce" ? "NFCeStatusServico4" : "NFeStatusServico4",
+        "NFeStatusServico4",
+      ].filter((value, index, self) => self.indexOf(value) === index);
+
       const certificateBuffer =
         await this.certificateService.getCertificate(companyId);
       const certificatePassword =
@@ -617,49 +645,136 @@ export class SefazIntegration {
         };
       }
 
+      const caPath = process.env.SEFAZ_CA_CERT_PATH;
+      const ca = caPath ? fs.readFileSync(caPath) : undefined;
+      const strictSSL = process.env.SEFAZ_STRICT_SSL !== "false";
+      const clientPemPath = process.env.SEFAZ_CLIENT_PEM_PATH;
+      const clientPem = clientPemPath
+        ? fs.readFileSync(clientPemPath)
+        : undefined;
       const tlsOptions = {
         pfx: certificateBuffer,
         passphrase: certificatePassword,
-        minVersion: "TLSv1.2",
-        maxVersion: "TLSv1.2",
+        minVersion: "TLSv1.2" as any,
+        maxVersion: "TLSv1.2" as any,
+        ciphers: "DEFAULT:@SECLEVEL=1",
+        honorCipherOrder: true,
+        secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+        ca,
+        rejectUnauthorized: strictSSL,
       };
-      const client = await soap.createClientAsync(wsdlUrl, {
-        wsdl_options: tlsOptions,
-      });
-      client.setSecurity(
-        new soap.ClientSSLSecurityPFX(certificateBuffer, certificatePassword, {
-          ...tlsOptions,
-          strictSSL: true,
-        })
-      );
 
       const cUf = this.toStateCode(state);
-      const xml = `<consStatServ xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
-  <tpAmb>${this.environment == "producao" ? "1" : "2"}</tpAmb>
-  <cUF>${cUf}</cUF>
-  <xServ>STATUS</xServ>
-</consStatServ>`;
+      const tpAmb = this.environment == "producao" ? "1" : "2";
+      const payload = `<consStatServ xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><tpAmb>${tpAmb}</tpAmb><cUF>${cUf}</cUF><xServ>STATUS</xServ></consStatServ>`;
 
-      const [result] = await client.nfeStatusServicoNF4Async({
-        nfeDadosMsg: { _xml: xml },
-      });
-      const raw =
-        result?.nfeResultMsg ||
-        result?.return ||
-        result?.nfeResultMsg?.$value ||
-        "";
-      const statusMatch = String(raw).match(/<cStat>(\d+)<\/cStat>/);
-      const messageMatch = String(raw).match(/<xMotivo>([^<]+)<\/xMotivo>/);
-      const responseTime = Date.now() - startTime;
+      const sendSoap = async (
+        statusUrl: string,
+        soapVersion: "1.1" | "1.2",
+        serviceName: string,
+      ) => {
+        const actionUrl = `http://www.portalfiscal.inf.br/nfe/wsdl/${serviceName}/nfeStatusServicoNF`;
+        const envelope =
+          soapVersion === "1.1"
+            ? `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/${serviceName}">${payload}</nfeDadosMsg>
+  </soap:Body>
+</soap:Envelope>`
+            : `<?xml version="1.0" encoding="utf-8"?>
+<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+  <soap12:Body>
+    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/${serviceName}">${payload}</nfeDadosMsg>
+  </soap12:Body>
+</soap12:Envelope>`;
+        const headers: Record<string, string | number> = {
+          "Content-Length": Buffer.byteLength(envelope),
+        };
+        if (soapVersion === "1.1") {
+          headers["Content-Type"] = "text/xml; charset=utf-8";
+          headers["SOAPAction"] = actionUrl;
+        } else {
+          headers["Content-Type"] = `application/soap+xml; charset=utf-8; action="${actionUrl}"`;
+        }
+
+        const servername = new URL(statusUrl).hostname;
+        const agent = new https.Agent({
+          ...tlsOptions,
+          servername,
+          cert: clientPem,
+          key: clientPem,
+        });
+
+        return await new Promise<{ status: string; message: string; responseTime: number }>(
+          (resolve, reject) => {
+            const startTime = Date.now();
+            const req = https.request(
+              statusUrl,
+              {
+                method: "POST",
+                agent,
+                headers,
+              },
+              (res) => {
+                let body = "";
+                res.setEncoding("utf8");
+                res.on("data", (chunk) => {
+                  body += chunk;
+                });
+                res.on("end", () => {
+                  const statusMatch = body.match(/<cStat>(\d+)<\/cStat>/);
+                  const messageMatch = body.match(/<xMotivo>([^<]+)<\/xMotivo>/);
+                  if (!statusMatch || !messageMatch) {
+                    return reject(
+                      new Error("Resposta SEFAZ inesperada: " + body.slice(0, 200))
+                    );
+                  }
+                  resolve({
+                    status: statusMatch[1],
+                    message: messageMatch[1],
+                    responseTime: Date.now() - startTime,
+                  });
+                });
+              }
+            );
+            req.on("error", reject);
+            req.write(envelope);
+            req.end();
+          }
+        );
+      };
+
+      let lastError: unknown = null;
+      for (const serviceName of serviceNames) {
+        const wsdlUrl = baseUrl.toLowerCase().includes("?wsdl")
+          ? baseUrl
+          : `${baseUrl}/${serviceName}/${serviceName}.asmx?wsdl`;
+        const statusUrl = wsdlUrl.replace(/\?wsdl$/i, "");
+        for (const soapVersion of ["1.1", "1.2"] as const) {
+          try {
+            const result = await sendSoap(statusUrl, soapVersion, serviceName);
+            return {
+              success: true,
+              status: result.status,
+              message: result.message,
+              timestamp: new Date(),
+              responseTime: result.responseTime,
+            };
+          } catch (error) {
+            lastError = error;
+            continue;
+          }
+        }
+      }
 
       return {
-        success: true,
-        status: statusMatch?.[1] || "OK",
+        success: false,
         message:
-          messageMatch?.[1] ||
-          `Conexao com SEFAZ ${state} estabelecida`,
+          lastError instanceof Error
+            ? lastError.message
+            : "Erro ao testar conexao",
         timestamp: new Date(),
-        responseTime,
       };
     } catch (error) {
       return {
@@ -671,9 +786,204 @@ export class SefazIntegration {
     }
   }
 
+  async authorizeNFCe(
+    companyId: number,
+    state: string,
+    xmlContent: string,
+  ): Promise<SefazResponse> {
+    try {
+      const fiscalStatus = await getFiscalCertificateStatus(companyId);
+      if (!fiscalStatus.isValid) {
+        return {
+          success: false,
+          message: fiscalStatus.message,
+          timestamp: new Date(),
+        };
+      }
+
+      const certificateBuffer =
+        await this.certificateService.getCertificate(companyId);
+      const certificatePassword =
+        await this.certificateService.getCertificatePassword(companyId);
+      if (!certificateBuffer || !certificatePassword) {
+        return {
+          success: false,
+          message: "Certificado digital nao configurado",
+          timestamp: new Date(),
+        };
+      }
+
+      const baseUrl = this.getSefazUrl(state, this.environment);
+      const wsdlUrl = baseUrl.toLowerCase().includes("?wsdl")
+        ? baseUrl
+            .replace(/StatusServico4/gi, "Autorizacao4")
+            .replace(/NFeStatusServico4/gi, "NFeAutorizacao4")
+        : `${baseUrl}/NFeAutorizacao4/NFeAutorizacao4.asmx?wsdl`;
+      const statusUrl = wsdlUrl.replace(/\?wsdl$/i, "");
+      const servername = new URL(statusUrl).hostname;
+
+      const caPath = process.env.SEFAZ_CA_CERT_PATH;
+      const ca = caPath ? fs.readFileSync(caPath) : undefined;
+      const strictSSL = process.env.SEFAZ_STRICT_SSL !== "false";
+      const clientPemPath = process.env.SEFAZ_CLIENT_PEM_PATH;
+      const clientPem = clientPemPath
+        ? fs.readFileSync(clientPemPath)
+        : undefined;
+      const tlsOptions = {
+        pfx: certificateBuffer,
+        passphrase: certificatePassword,
+        minVersion: "TLSv1.2" as any,
+        maxVersion: "TLSv1.2" as any,
+        ciphers: "DEFAULT:@SECLEVEL=1",
+        honorCipherOrder: true,
+        secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+        ca,
+        rejectUnauthorized: strictSSL,
+        servername,
+        ...(clientPem ? { cert: clientPem, key: clientPem } : {}),
+      };
+
+      const sendSoap = async (soapVersion: "1.1" | "1.2") => {
+        const actionUrl =
+          "http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4/nfeAutorizacaoLote";
+        const sanitizeXml = (value: string) =>
+          value
+            .replace(/^\uFEFF/, "")
+            .replace(/>\s+</g, "><")
+            .trim();
+        const nfeXml = sanitizeXml(
+          xmlContent
+          .replace(/<\?xml[^>]*\?>/i, "")
+        );
+        const payload = nfeXml.includes("<enviNFe")
+          ? nfeXml
+          : `<enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><idLote>${Date.now()}</idLote><indSinc>1</indSinc>${nfeXml}</enviNFe>`;
+        const compactPayload = sanitizeXml(payload);
+        const envelope =
+          soapVersion === "1.1"
+            ? `<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">${compactPayload}</nfeDadosMsg></soap:Body></soap:Envelope>`
+            : `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">${compactPayload}</nfeDadosMsg></soap12:Body></soap12:Envelope>`;
+        const headers: Record<string, string | number> = {
+          "Content-Length": Buffer.byteLength(envelope),
+        };
+        if (soapVersion === "1.1") {
+          headers["Content-Type"] = "text/xml; charset=utf-8";
+          headers["SOAPAction"] = actionUrl;
+        } else {
+          headers["Content-Type"] = `application/soap+xml; charset=utf-8; action="${actionUrl}"`;
+        }
+
+        return await new Promise<{
+          status: string;
+          message: string;
+          protocol?: string;
+          key?: string;
+          responseTime: number;
+        }>((resolve, reject) => {
+          const startTime = Date.now();
+          const req = https.request(
+            statusUrl,
+            {
+              method: "POST",
+              agent: new https.Agent(tlsOptions),
+              headers,
+            },
+            (res) => {
+              let body = "";
+              res.setEncoding("utf8");
+              res.on("data", (chunk) => {
+                body += chunk;
+              });
+              res.on("end", () => {
+                const extractTag = (tag: string, source: string) => {
+                  const match = source.match(
+                    new RegExp(`<[^>]*${tag}[^>]*>([^<]+)<\\/[^>]*${tag}>`)
+                  );
+                  return match?.[1];
+                };
+                const status = extractTag("cStat", body);
+                const message = extractTag("xMotivo", body);
+                const protocol = extractTag("nProt", body);
+                const key = extractTag("chNFe", body);
+                if (!status || !message) {
+                  return reject(
+                    new Error("Resposta SEFAZ inesperada: " + body.slice(0, 200))
+                  );
+                }
+                if (status === "104") {
+                  const protBlock = body.match(
+                    /<[^>]*protNFe[^>]*>([\s\S]*?)<\/[^>]*protNFe>/
+                  );
+                  const inner = protBlock?.[1] || "";
+                  const innerStatus = extractTag("cStat", inner);
+                  const innerMessage = extractTag("xMotivo", inner);
+                  const innerProtocol = extractTag("nProt", inner);
+                  const innerKey = extractTag("chNFe", inner);
+                  if (innerStatus && innerMessage) {
+                    return resolve({
+                      status: innerStatus,
+                      message: innerMessage,
+                      protocol: innerProtocol,
+                      key: innerKey,
+                      responseTime: Date.now() - startTime,
+                    });
+                  }
+                }
+                resolve({
+                  status,
+                  message,
+                  protocol,
+                  key,
+                  responseTime: Date.now() - startTime,
+                });
+              });
+            }
+          );
+          req.on("error", reject);
+          req.write(envelope);
+          req.end();
+        });
+      };
+
+      let lastError: unknown = null;
+      for (const soapVersion of ["1.2", "1.1"] as const) {
+        try {
+          const result = await sendSoap(soapVersion);
+          return {
+            success: result.status === "100" || result.status === "103",
+            status: result.status,
+            message: result.message,
+            protocol: result.protocol,
+            key: result.key,
+            timestamp: new Date(),
+            responseTime: result.responseTime,
+          };
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      return {
+        success: false,
+        message:
+          lastError instanceof Error
+            ? lastError.message
+            : "Erro ao autorizar NFC-e",
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message:
+          error instanceof Error ? error.message : "Erro ao autorizar NFC-e",
+        timestamp: new Date(),
+      };
+    }
+  }
+
   async getSequentialNumbering(
     companyId: number,
-    state: string = "SP"
+    state: string = "SP",
   ): Promise<{ series: string; nextNumber: number }> {
     // Em produção, consultar a numeração com SEFAZ
     return {

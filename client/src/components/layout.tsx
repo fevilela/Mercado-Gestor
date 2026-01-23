@@ -5,6 +5,7 @@ import {
   Store,
   BarChart3,
   Wallet,
+  CreditCard,
   Settings,
   Users,
   LogOut,
@@ -126,6 +127,12 @@ const sidebarItems = [
     label: "Configurações",
     href: "/settings",
     permissions: ["settings:view", "settings:manage"],
+  },
+  {
+    icon: CreditCard,
+    label: "Formas de Pagamento",
+    href: "/payment-methods",
+    permissions: ["settings:payments"],
   },
 ];
 

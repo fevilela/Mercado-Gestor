@@ -942,6 +942,8 @@ export async function registerRoutes(
           settings.cscToken &&
           settings.cscId
         );
+        const isNfceAuto =
+          Boolean(settings?.nfceEnabled) && isFiscalConfigured;
 
         const saleData = {
           ...sale,
@@ -953,7 +955,7 @@ export async function registerRoutes(
           paymentProvider: payment.provider || null,
           paymentAuthorization: payment.authorizationCode || null,
           paymentReference: payment.providerReference || null,
-          nfceStatus: isFiscalConfigured ? "Autorizada" : "Pendente Fiscal",
+          nfceStatus: isNfceAuto ? "Pendente" : "Pendente Fiscal",
           status: isFiscalConfigured ? "Concluído" : "Aguardando Emissão",
         };
 
@@ -1077,6 +1079,181 @@ export async function registerRoutes(
       res.status(500).json({ error: "Failed to update settings" });
     }
   });
+
+  // ============================================
+  // PAYMENT METHODS
+  // ============================================
+  const paymentMethodSchema = z.object({
+    name: z.string().min(1),
+    type: z.enum(["pix", "credito", "debito", "dinheiro", "outros"]),
+    nfceCode: z.string().optional(),
+    tefMethod: z.enum(["pix", "credito", "debito"]).optional(),
+    isActive: z.boolean().optional(),
+    sortOrder: z.number().int().optional(),
+  });
+
+  app.get(
+    "/api/payment-methods",
+    requireAuth,
+    requirePermission("settings:payments"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const methods = await storage.getPaymentMethods(companyId);
+        res.json(methods);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch payment methods" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payment-methods",
+    requireAuth,
+    requirePermission("settings:payments"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const data = paymentMethodSchema.parse(req.body);
+        const created = await storage.createPaymentMethod({
+          companyId,
+          name: data.name.trim(),
+          type: data.type,
+          nfceCode: data.nfceCode || null,
+          tefMethod: data.tefMethod || null,
+          isActive: data.isActive ?? true,
+          sortOrder: data.sortOrder ?? 0,
+        });
+        res.status(201).json(created);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to create payment method" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/payment-methods/:id",
+    requireAuth,
+    requirePermission("settings:payments"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const id = parseInt(req.params.id);
+        const data = paymentMethodSchema.partial().parse(req.body);
+        const updated = await storage.updatePaymentMethod(id, companyId, {
+          name: data.name?.trim(),
+          type: data.type,
+          nfceCode: data.nfceCode ?? undefined,
+          tefMethod: data.tefMethod ?? undefined,
+          isActive: data.isActive,
+          sortOrder: data.sortOrder,
+        });
+        if (!updated) {
+          return res.status(404).json({ error: "Payment method not found" });
+        }
+        res.json(updated);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to update payment method" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/payment-methods/:id",
+    requireAuth,
+    requirePermission("settings:payments"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const id = parseInt(req.params.id);
+        const deleted = await storage.deletePaymentMethod(id, companyId);
+        if (!deleted) {
+          return res.status(404).json({ error: "Payment method not found" });
+        }
+        res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to delete payment method" });
+      }
+    }
+  );
+
+  // ============================================
+  // PDV LOAD
+  // ============================================
+  app.post(
+    "/api/pdv/load",
+    requireAuth,
+    requirePermission("settings:payments"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+
+        const productsList = await storage.getAllProducts(companyId);
+        const methods = await storage.getPaymentMethods(companyId);
+        const payload = {
+          generatedAt: new Date().toISOString(),
+          products: productsList,
+          paymentMethods: methods.filter((m) => m.isActive !== false),
+        };
+        const load = await storage.createPdvLoad({
+          companyId,
+          payload,
+        });
+
+        res.json({
+          success: true,
+          loadId: load.id,
+          generatedAt: load.createdAt,
+          products: productsList.length,
+          paymentMethods: payload.paymentMethods.length,
+        });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to generate PDV load" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/pdv/load",
+    requireAuth,
+    requirePermission("pos:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const load = await storage.getLatestPdvLoad(companyId);
+        if (!load) {
+          return res.status(404).json({ error: "Nenhuma carga enviada" });
+        }
+        res.json(load.payload || {});
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch PDV load" });
+      }
+    }
+  );
 
   app.get("/api/ean/:code", requireAuth, async (req, res) => {
     try {

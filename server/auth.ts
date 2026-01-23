@@ -588,6 +588,8 @@ authRouter.post("/register", async (req, res) => {
         cnpj: company.cnpj,
         razaoSocial: company.razaoSocial,
         nomeFantasia: company.nomeFantasia,
+        email: company.email,
+        phone: company.phone,
       },
     });
   } catch (error) {

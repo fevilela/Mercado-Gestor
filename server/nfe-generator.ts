@@ -243,7 +243,8 @@ export class NFEGenerator {
         const signedXml = XMLSignatureService.signXML(
           xml,
           certificateBase64,
-          certificatePassword
+          certificatePassword,
+          `NFe${nfeKey}`
         );
         return { xml: signedXml, signed: true };
       } catch (error) {
