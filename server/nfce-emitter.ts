@@ -79,8 +79,7 @@ const toNumber = (value: any) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const formatNumber = (value: number, decimals = 2) =>
-  value.toFixed(decimals);
+const formatNumber = (value: number, decimals = 2) => value.toFixed(decimals);
 
 export const formatNfceDateTime = (value: Date) => {
   const pad = (num: number) => String(num).padStart(2, "0");
@@ -190,7 +189,7 @@ export const buildNfceXml = (params: {
   const nNF = String(params.number);
   const totalProdutos = params.itens.reduce(
     (sum, item) => sum + item.valorTotal,
-    0
+    0,
   );
   const totalTributos = 0;
   const totalNF = totalProdutos;
@@ -218,50 +217,50 @@ export const buildNfceXml = (params: {
       const icmsXml = isSimples
         ? `<ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102>`
         : `<ICMS00><orig>0</orig><CST>00</CST><modBC>3</modBC><vBC>0.00</vBC><pICMS>0.00</pICMS><vICMS>0.00</vICMS></ICMS00>`;
-      const pisXml = `<PISNT><CST>07</CST></PISNT>`;
-      const cofinsXml = `<COFINSNT><CST>07</CST></COFINSNT>`;
+      const pisXml = `<PIS><PISNT><CST>07</CST></PISNT></PIS>`;
+      const cofinsXml = `<COFINS><COFINSNT><CST>07</CST></COFINSNT></COFINS>`;
       return `<det nItem="${idx + 1}"><prod><cProd>${item.id}</cProd><cEAN>SEM GTIN</cEAN><xProd>${sanitizeXml(
-        item.nome
+        item.nome,
       )}</xProd><NCM>${ncm}</NCM><CFOP>${cfop}</CFOP><uCom>${uCom}</uCom><qCom>${formatNumber(
         item.quantidade,
-        4
+        4,
       )}</qCom><vUnCom>${vUnCom}</vUnCom><vProd>${vProd}</vProd><cEANTrib>SEM GTIN</cEANTrib><uTrib>${uCom}</uTrib><qTrib>${formatNumber(
         item.quantidade,
-        4
-      )}</qTrib><vUnTrib>${vUnCom}</vUnTrib><indTot>1</indTot></prod><imposto><ICMS>${icmsXml}</ICMS><PIS>${pisXml}</PIS><COFINS>${cofinsXml}</COFINS></imposto></det>`;
+        4,
+      )}</qTrib><vUnTrib>${vUnCom}</vUnTrib><indTot>1</indTot></prod><imposto><ICMS>${icmsXml}</ICMS>${pisXml}${cofinsXml}</imposto></det>`;
     })
     .join("");
 
   return `<?xml version="1.0" encoding="UTF-8"?><NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${params.key}" versao="4.00"><ide><cUF>${cUF}</cUF><cNF>${params.cNF}</cNF><natOp>Venda</natOp><mod>65</mod><serie>${serie}</serie><nNF>${nNF}</nNF><dhEmi>${dhEmi}</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>${municipioCodigo}</cMunFG><tpImp>4</tpImp><tpEmis>1</tpEmis><cDV>${params.key.slice(-1)}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>1</finNFe><indFinal>1</indFinal><indPres>1</indPres><procEmi>0</procEmi><verProc>1.0.0</verProc></ide><emit><CNPJ>${onlyDigits(
-    params.emitente.cnpj
+    params.emitente.cnpj,
   ).padStart(14, "0")}</CNPJ><xNome>${sanitizeXml(
-    params.emitente.nome
+    params.emitente.nome,
   )}</xNome><enderEmit><xLgr>${sanitizeXml(
-    emitLogradouro
+    emitLogradouro,
   )}</xLgr><nro>${sanitizeXml(emitNumero)}</nro><xBairro>${sanitizeXml(
-    emitBairro
+    emitBairro,
   )}</xBairro><cMun>${municipioCodigo}</cMun><xMun>${sanitizeXml(
-    emitMunicipio
+    emitMunicipio,
   )}</xMun><UF>${sanitizeXml(emitUf)}</UF><CEP>${sanitizeXml(
-    emitCep
+    emitCep,
   )}</CEP><cPais>${paisCodigo}</cPais><xPais>${paisNome}</xPais></enderEmit><IE>${sanitizeXml(
-    emitIe
+    emitIe,
   )}</IE><CRT>${crt}</CRT></emit>${itensXml}<total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>${formatNumber(
-    totalProdutos
+    totalProdutos,
   )}</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>${formatNumber(
-    totalNF
+    totalNF,
   )}</vNF><vTotTrib>${formatNumber(
-    totalTributos
-  )}</vTotTrib></ICMSTot></total><pag><detPag><tPag>${
+    totalTributos,
+  )}</vTotTrib></ICMSTot></total><transp><modFrete>9</modFrete></transp><pag><detPag><tPag>${
     params.pagamento.codigo
   }</tPag><vPag>${formatNumber(
-    params.pagamento.valor
-  )}</vPag></detPag></pag></infNFe></NFe>`;
+    params.pagamento.valor,
+  )}</vPag></detPag><vTroco>0.00</vTroco></pag></infNFe></NFe>`;
 };
 
 const elementChildren = (node: Element) =>
   Array.from(node.childNodes).filter(
-    (child) => child.nodeType === 1
+    (child) => child.nodeType === 1,
   ) as Element[];
 
 const byLocalName = (node: Element, name: string) =>
@@ -272,7 +271,7 @@ const hasLocalName = (node: Element, name: string) =>
 
 export const validateNfceXmlStructure = (
   xml: string,
-  options?: { requireSignature?: boolean }
+  options?: { requireSignature?: boolean },
 ) => {
   const requireSignature = options?.requireSignature ?? false;
   const parser = new DOMParser({
@@ -302,10 +301,17 @@ export const validateNfceXmlStructure = (
       details: { nfeChildren },
     };
   }
-  if (requireSignature && suplIndex !== -1 && sigIndex === -1) {
+  if (requireSignature && sigIndex === -1) {
     return {
       ok: false,
-      error: "<Signature> ausente para <infNFeSupl>",
+      error: "<Signature> ausente",
+      details: { nfeChildren },
+    };
+  }
+  if (sigIndex !== -1 && sigIndex < infNFeIndex) {
+    return {
+      ok: false,
+      error: "<Signature> antes de <infNFe>",
       details: { nfeChildren },
     };
   }
@@ -319,7 +325,7 @@ export const validateNfceXmlStructure = (
 
   const infNFe = elementChildren(root)[infNFeIndex];
   const infChildren = elementChildren(infNFe).map((node) => node.localName);
-  const requiredOrder = ["ide", "emit", "det", "total", "pag"];
+  const requiredOrder = ["ide", "emit", "det", "total", "transp", "pag"];
   for (const tag of requiredOrder) {
     if (!infChildren.includes(tag)) {
       return {
@@ -333,16 +339,25 @@ export const validateNfceXmlStructure = (
   const emitIndex = infChildren.indexOf("emit");
   const detIndex = infChildren.indexOf("det");
   const totalIndex = infChildren.indexOf("total");
+  const transpIndex = infChildren.indexOf("transp");
   const pagIndex = infChildren.indexOf("pag");
-  if (!(ideIndex < emitIndex && emitIndex < detIndex && detIndex < totalIndex && totalIndex < pagIndex)) {
+  if (
+    !(
+      ideIndex < emitIndex &&
+      emitIndex < detIndex &&
+      detIndex < totalIndex &&
+      totalIndex < transpIndex &&
+      transpIndex < pagIndex
+    )
+  ) {
     return {
       ok: false,
-      error: "Ordem incorreta em <infNFe> (ide/emit/det/total/pag)",
+      error: "Ordem incorreta em <infNFe> (ide/emit/det/total/transp/pag)",
       details: { infNFeChildren: infChildren, requiredOrder },
     };
   }
 
-  if (["transp", "cobr", "dup", "vol", "retTransp"].some((tag) => infChildren.includes(tag))) {
+  if (["cobr", "dup", "vol", "retTransp"].some((tag) => infChildren.includes(tag))) {
     return {
       ok: false,
       error: "Tags proibidas na NFC-e dentro de <infNFe>",
@@ -391,13 +406,13 @@ export const signNfceXml = (
   xml: string,
   certificateBase64: string,
   certificatePassword: string,
-  key: string
+  key: string,
 ) => {
   return XMLSignatureService.signXML(
     xml,
     certificateBase64,
     certificatePassword,
-    `NFe${key}`
+    `NFe${key}`,
   );
 };
 
@@ -406,18 +421,29 @@ export const buildNfceQrUrl = (params: {
   chave: string;
   versaoQr: string;
   tpAmb: string;
+  tpEmis: string;
+  dhEmi?: string;
+  vNF?: string;
+  digVal?: string;
   cscId: string;
   csc: string;
 }) => {
-  const payload = [
-    params.chave,
-    params.versaoQr,
-    params.tpAmb,
-    params.cscId,
-  ].join("|");
+  const base = [params.chave, params.versaoQr, params.tpAmb];
+  const cscIdRaw = onlyDigits(params.cscId);
+  const cscId = cscIdRaw.replace(/^0+(?!$)/, "");
+  const payload =
+    params.tpEmis === "9"
+      ? [
+          ...base,
+          params.dhEmi ? params.dhEmi.slice(8, 10) : "",
+          params.vNF ?? "0.00",
+          params.digVal ?? "",
+          cscId,
+        ].join("|")
+      : [...base, cscId].join("|");
   const hash = crypto
     .createHash("sha1")
     .update(`${payload}${params.csc}`)
     .digest("hex");
-  return `${params.sefazUrl}?p=${payload}|${hash}`;
+  return `${params.sefazUrl.trim()}?p=${payload}|${hash}`;
 };

@@ -45,8 +45,8 @@ const nfceDebugEnabled = process.env.NFCE_DEBUG_XML === "true";
 const injectNfceSupplement = (xml: string, supplement: string) => {
   if (!supplement) return xml;
   if (xml.includes("<infNFeSupl>")) return xml;
-  if (xml.includes("</Signature>")) {
-    return xml.replace(/<\/Signature>/, `</Signature>${supplement}`);
+  if (xml.includes("<Signature")) {
+    return xml.replace(/<Signature/, `${supplement}<Signature`);
   }
   if (xml.includes("</NFe>")) {
     return xml.replace(/<\/NFe>/, `${supplement}</NFe>`);
@@ -80,6 +80,11 @@ const extractAccessKey = (xmlContent: string): string => {
   if (chMatch?.[1]) return chMatch[1];
   const idMatch = xmlContent.match(/<infNFe[^>]*Id="NFe(\d{44})"/);
   return idMatch?.[1] ?? "";
+};
+
+const extractXmlTag = (xmlContent: string, tag: string): string => {
+  const match = xmlContent.match(new RegExp(`<${tag}>([^<]+)</${tag}>`));
+  return match?.[1] ?? "";
 };
 
 const resolveSefazEnvironment = async (
@@ -654,42 +659,40 @@ router.post(
           if (!settings.cscId || !settings.cscToken) {
             throw new Error("CSC nao configurado para NFC-e");
           }
-          const qrBase = uf === "MG" && qrBaseUrl.includes("fazenda.mg.gov.br/nfce/qrcode")
-            ? "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml"
-            : qrBaseUrl;
+          signedXml = signNfceXml(
+            xml,
+            certificateBuffer.toString("base64"),
+            certificatePassword,
+            key,
+          );
+          const tpEmis = extractXmlTag(xml, "tpEmis") || "1";
+          const digVal = extractXmlTag(signedXml, "DigestValue");
+          if (tpEmis === "9" && !digVal) {
+            throw new Error("DigestValue da assinatura nao encontrado");
+          }
+          const dhEmi =
+            extractXmlTag(xml, "dhEmi") || formatNfceDateTime(issueDate);
+          const vNF = extractXmlTag(xml, "vNF") || Number(sale.total).toFixed(2);
+          const qrBase =
+            uf === "MG" && qrBaseUrl.includes("fazenda.mg.gov.br/nfce/qrcode")
+              ? "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml"
+              : qrBaseUrl;
           const qrUrl = buildNfceQrUrl({
             sefazUrl: qrBase,
             chave: key,
             versaoQr: "2",
             tpAmb: resolvedEnvironment === "producao" ? "1" : "2",
+            dhEmi,
+            vNF,
+            digVal,
+            tpEmis,
             cscId: settings.cscId,
             csc: settings.cscToken,
           });
           const urlChave =
             "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml";
           const supplement = `<infNFeSupl><qrCode><![CDATA[${qrUrl.trim()}]]></qrCode><urlChave>${urlChave}</urlChave></infNFeSupl>`;
-
-          const xmlWithSupl = injectNfceSupplement(xml, supplement);
-          const validationWithSupl = validateNfceXmlStructure(xmlWithSupl, {
-            requireSignature: false,
-          });
-          if (!validationWithSupl.ok) {
-            console.error("NFC-e schema local invalid:", validationWithSupl);
-            const details = validationWithSupl.details
-              ? ` | detalhes: ${JSON.stringify(validationWithSupl.details)}`
-              : "";
-            throw new Error(
-              `Schema NFC-e invalido: ${validationWithSupl.error}${details}`,
-            );
-          }
-
-          signedXml = signNfceXml(
-            xmlWithSupl,
-            certificateBuffer.toString("base64"),
-            certificatePassword,
-            key,
-          );
-          const finalXml = signedXml;
+          const finalXml = injectNfceSupplement(signedXml, supplement);
           const validationSigned = validateNfceXmlStructure(finalXml, {
             requireSignature: true,
           });

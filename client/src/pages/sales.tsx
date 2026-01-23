@@ -10,6 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Search,
   Eye,
@@ -112,6 +113,8 @@ export default function Sales() {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [processingBatch, setProcessingBatch] = useState(false);
+  const [selectedSaleIds, setSelectedSaleIds] = useState<number[]>([]);
   const [exportMonth, setExportMonth] = useState<string>(
     (new Date().getMonth() + 1).toString(),
   );
@@ -170,6 +173,56 @@ export default function Sales() {
       });
     } finally {
       setProcessingId(null);
+    }
+  };
+
+  const canTransmitSale = (sale: Sale) =>
+    ["ContingÇ¦ncia", "Pendente Fiscal", "Pendente", "Rejeitada"].includes(
+      sale.nfceStatus,
+    );
+
+  const handleBatchTransmit = async () => {
+    if (selectedSaleIds.length === 0) return;
+    setProcessingBatch(true);
+    toast({
+      title: "Transmitindo em lote...",
+      description: `Enviando ${selectedSaleIds.length} NFC-e para a SEFAZ.`,
+    });
+
+    try {
+      const res = await fetch("/api/fiscal/nfce/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ saleIds: selectedSaleIds }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || "Falha ao transmitir NFC-e");
+      }
+      const results = Array.isArray(data?.results) ? data.results : [];
+      const failures = results.filter((item: any) => !item?.success);
+      if (failures.length > 0) {
+        const firstError = failures[0]?.error || "Falha ao transmitir NFC-e";
+        throw new Error(`${firstError} (${failures.length} falha(s))`);
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+      setSelectedSaleIds([]);
+      toast({
+        title: "Sucesso!",
+        description: "NFC-e transmitidas com sucesso.",
+        className: "bg-emerald-500 text-white border-none",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Falha ao transmitir NFC-e.",
+        variant: "destructive",
+      });
+    } finally {
+      setProcessingBatch(false);
     }
   };
 
@@ -469,6 +522,11 @@ export default function Sales() {
       sale.nfceStatus === "Contingência" ||
       sale.nfceStatus === "Pendente Fiscal",
   );
+
+  const selectableSales = filteredSales.filter(canTransmitSale);
+  const allSelected =
+    selectableSales.length > 0 &&
+    selectableSales.every((sale: Sale) => selectedSaleIds.includes(sale.id));
 
   if (isLoading) {
     return (
@@ -802,6 +860,18 @@ export default function Sales() {
             />
           </div>
           <div className="flex gap-2">
+            <Button
+              onClick={handleBatchTransmit}
+              disabled={selectedSaleIds.length === 0 || processingBatch}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {processingBatch ? (
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Transmitir em lote
+            </Button>
             <Button variant="outline">Somente Autorizadas</Button>
             {contingencySales.length > 0 && (
               <Button
@@ -832,6 +902,22 @@ export default function Sales() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50">
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allSelected}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setSelectedSaleIds(
+                            selectableSales.map((sale: Sale) => sale.id),
+                          );
+                        } else {
+                          setSelectedSaleIds([]);
+                        }
+                      }}
+                      disabled={selectableSales.length === 0}
+                      aria-label="Selecionar todas as NFC-e"
+                    />
+                  </TableHead>
                   <TableHead>Nº Venda</TableHead>
                   <TableHead>Data/Hora</TableHead>
                   <TableHead>Cliente</TableHead>
@@ -845,6 +931,22 @@ export default function Sales() {
               <TableBody>
                 {filteredSales.map((sale: Sale) => (
                   <TableRow key={sale.id}>
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedSaleIds.includes(sale.id)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedSaleIds((prev) => [...prev, sale.id]);
+                          } else {
+                            setSelectedSaleIds((prev) =>
+                              prev.filter((id) => id !== sale.id),
+                            );
+                          }
+                        }}
+                        disabled={!canTransmitSale(sale) || processingBatch}
+                        aria-label={`Selecionar NFC-e ${sale.id}`}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">#{sale.id}</TableCell>
                     <TableCell>{formatDate(sale.createdAt)}</TableCell>
                     <TableCell>{sale.customerName}</TableCell>
