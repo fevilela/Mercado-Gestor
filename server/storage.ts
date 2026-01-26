@@ -239,6 +239,15 @@ export const storage = {
       .orderBy(desc(customers.createdAt));
   },
 
+  async getCustomer(id: number, companyId: number) {
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)))
+      .limit(1);
+    return customer || null;
+  },
+
   async createCustomer(data: InsertCustomer) {
     const [customer] = await db.insert(customers).values(data).returning();
     return customer;
@@ -391,13 +400,30 @@ export const storage = {
 
   async updateCompanySettings(
     companyId: number,
-    data: Partial<InsertCompanySettings>
+    data: Partial<InsertCompanySettings> & {
+      address?: string;
+      city?: string;
+      state?: string;
+      zipCode?: string;
+      cnae?: string;
+      im?: string;
+    }
   ) {
     const existing = await this.getCompanySettings(companyId);
     console.log(
       `Updating settings for company ${companyId}. Existing: ${!!existing}. Data:`,
       data
     );
+
+    const {
+      address,
+      city,
+      state,
+      zipCode,
+      cnae,
+      im,
+      ...settingsData
+    } = data as any;
 
     // Also update the main company table if relevant fields are present
     if (
@@ -407,7 +433,13 @@ export const storage = {
       data.ie ||
       data.regimeTributario ||
       data.email ||
-      data.phone
+      data.phone ||
+      address ||
+      city ||
+      state ||
+      zipCode ||
+      cnae ||
+      im
     ) {
       const companyData: any = {};
       if (data.razaoSocial) companyData.razaoSocial = data.razaoSocial;
@@ -418,6 +450,12 @@ export const storage = {
       if (data.phone) companyData.phone = data.phone;
       if (data.regimeTributario)
         companyData.regimeTributario = data.regimeTributario;
+      if (address) companyData.address = address;
+      if (city) companyData.city = city;
+      if (state) companyData.state = state;
+      if (zipCode) companyData.zipCode = zipCode;
+      if (cnae) companyData.cnae = cnae;
+      if (im) companyData.im = im;
 
       await db
         .update(companies)
@@ -428,14 +466,14 @@ export const storage = {
     if (existing) {
       const [updated] = await db
         .update(companySettings)
-        .set({ ...data, updatedAt: new Date() })
+        .set({ ...settingsData, updatedAt: new Date() })
         .where(eq(companySettings.companyId, companyId))
         .returning();
       return updated;
     } else {
       const [created] = await db
         .insert(companySettings)
-        .values({ ...data, companyId })
+        .values({ ...settingsData, companyId })
         .returning();
       return created;
     }

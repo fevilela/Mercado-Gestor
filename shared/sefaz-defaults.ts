@@ -38,7 +38,7 @@ const SEFAZ_QR_URLS: Record<string, { homologacao?: string; producao?: string }>
     producao: "https://www.nfce.fazenda.sp.gov.br/qrcode",
   },
   MG: {
-    homologacao: "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml",
+    homologacao: "https://hnfce.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml",
     producao: "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml",
   },
   PR: {

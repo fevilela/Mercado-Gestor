@@ -31,6 +31,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -132,6 +140,26 @@ export default function FiscalDocuments() {
     startNumber: "",
     endNumber: "",
     reason: "",
+  });
+  const [cancelNfceDialog, setCancelNfceDialog] = useState({
+    open: false,
+    saleId: 0,
+    reason: "",
+  });
+  const [nfeOps, setNfeOps] = useState({
+    uf: "MG",
+    environment: "homologacao",
+    xmlContent: "",
+    cancelAccessKey: "",
+    cancelProtocol: "",
+    cancelReason: "",
+    cceAccessKey: "",
+    cceText: "",
+    cceSequence: "1",
+    inutilizeSeries: "",
+    inutilizeStart: "",
+    inutilizeEnd: "",
+    inutilizeReason: "",
   });
 
   const [formData, setFormData] = useState({
@@ -294,12 +322,19 @@ export default function FiscalDocuments() {
     },
   });
 
-  const cancelNfceMutation = useMutation<any, Error, number>({
-    mutationFn: async (saleId) => {
+  const cancelNfceMutation = useMutation<
+    any,
+    Error,
+    { saleId: number; reason: string }
+  >({
+    mutationFn: async (payload) => {
       const res = await fetch("/api/fiscal/nfce/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ saleId }),
+        body: JSON.stringify({
+          saleId: payload.saleId,
+          reason: payload.reason,
+        }),
       });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
@@ -310,6 +345,7 @@ export default function FiscalDocuments() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
       toast.success("NFC-e cancelada");
+      setCancelNfceDialog({ open: false, saleId: 0, reason: "" });
     },
     onError: (error) => {
       toast.error(error.message);
@@ -337,6 +373,113 @@ export default function FiscalDocuments() {
     onSuccess: () => {
       toast.success("Inutilizacao registrada");
       setInutilizeForm({ serie: "", startNumber: "", endNumber: "", reason: "" });
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const submitNfeMutation = useMutation<any, Error, typeof nfeOps>({
+    mutationFn: async (payload) => {
+      const res = await fetch("/api/fiscal/sefaz/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          xmlContent: payload.xmlContent,
+          uf: payload.uf,
+          environment: payload.environment,
+        }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Falha ao enviar NF-e");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast.success(`NF-e enviada: ${data.status || "OK"}`);
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const cancelNfeMutation = useMutation<any, Error, typeof nfeOps>({
+    mutationFn: async (payload) => {
+      const res = await fetch("/api/fiscal/sefaz/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessKey: payload.cancelAccessKey,
+          protocol: payload.cancelProtocol,
+          reason: payload.cancelReason,
+          uf: payload.uf,
+          environment: payload.environment,
+        }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Falha ao cancelar NF-e");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast.success(`NF-e cancelada: ${data.status || "OK"}`);
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const cceNfeMutation = useMutation<any, Error, typeof nfeOps>({
+    mutationFn: async (payload) => {
+      const res = await fetch("/api/fiscal/sefaz/correction-letter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessKey: payload.cceAccessKey,
+          correctedContent: payload.cceText,
+          sequence: Number(payload.cceSequence || "1"),
+          uf: payload.uf,
+          environment: payload.environment,
+        }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Falha ao enviar CC-e");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast.success(`CC-e enviada: ${data.status || "OK"}`);
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const inutilizeNfeMutation = useMutation<any, Error, typeof nfeOps>({
+    mutationFn: async (payload) => {
+      const res = await fetch("/api/fiscal/sefaz/inutilize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          series: payload.inutilizeSeries,
+          startNumber: payload.inutilizeStart,
+          endNumber: payload.inutilizeEnd,
+          reason: payload.inutilizeReason,
+          uf: payload.uf,
+          environment: payload.environment,
+        }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Falha ao inutilizar numeracao");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast.success(`Inutilizacao registrada: ${data.status || "OK"}`);
     },
     onError: (error) => {
       toast.error(error.message);
@@ -553,6 +696,10 @@ export default function FiscalDocuments() {
       return;
     }
     sendNfceMutation.mutate(selectedNfceIds);
+  };
+
+  const updateNfeOps = (field: keyof typeof nfeOps, value: string) => {
+    setNfeOps((prev) => ({ ...prev, [field]: value }));
   };
 
   return (
@@ -930,6 +1077,250 @@ export default function FiscalDocuments() {
                 </div>
               </CardContent>
             </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Operacoes SEFAZ (NF-e)</CardTitle>
+                <CardDescription>
+                  Envio, cancelamento, carta de correcao e inutilizacao
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    Necessario certificado digital configurado para a empresa.
+                  </AlertDescription>
+                </Alert>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>UF</Label>
+                    <Input
+                      value={nfeOps.uf}
+                      onChange={(e) => updateNfeOps("uf", e.target.value)}
+                      data-testid="input-nfe-uf"
+                    />
+                  </div>
+                  <div>
+                    <Label>Ambiente</Label>
+                    <Select
+                      value={nfeOps.environment}
+                      onValueChange={(val) => updateNfeOps("environment", val)}
+                    >
+                      <SelectTrigger data-testid="select-nfe-environment">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="homologacao">
+                          Homologacao
+                        </SelectItem>
+                        <SelectItem value="producao">Producao</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>XML NF-e</Label>
+                  <Textarea
+                    value={nfeOps.xmlContent}
+                    onChange={(e) => updateNfeOps("xmlContent", e.target.value)}
+                    rows={6}
+                    data-testid="input-nfe-xml"
+                  />
+                  <Button
+                    onClick={() => {
+                      if (!nfeOps.xmlContent.trim()) {
+                        toast.error("Informe o XML da NF-e");
+                        return;
+                      }
+                      submitNfeMutation.mutate(nfeOps);
+                    }}
+                    disabled={submitNfeMutation.isPending}
+                    data-testid="button-submit-nfe"
+                  >
+                    {submitNfeMutation.isPending && (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    )}
+                    Enviar NF-e
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <Label>Chave de acesso</Label>
+                    <Input
+                      value={nfeOps.cancelAccessKey}
+                      onChange={(e) =>
+                        updateNfeOps("cancelAccessKey", e.target.value)
+                      }
+                      data-testid="input-nfe-cancel-key"
+                    />
+                  </div>
+                  <div>
+                    <Label>Protocolo (nProt)</Label>
+                    <Input
+                      value={nfeOps.cancelProtocol}
+                      onChange={(e) =>
+                        updateNfeOps("cancelProtocol", e.target.value)
+                      }
+                      data-testid="input-nfe-cancel-protocol"
+                    />
+                  </div>
+                  <div>
+                    <Label>Justificativa</Label>
+                    <Input
+                      value={nfeOps.cancelReason}
+                      onChange={(e) =>
+                        updateNfeOps("cancelReason", e.target.value)
+                      }
+                      data-testid="input-nfe-cancel-reason"
+                    />
+                  </div>
+                </div>
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    if (
+                      nfeOps.cancelReason.trim().length < 15 ||
+                      nfeOps.cancelAccessKey.trim().length !== 44
+                    ) {
+                      toast.error(
+                        "Informe chave (44 digitos) e justificativa (min 15)"
+                      );
+                      return;
+                    }
+                    cancelNfeMutation.mutate(nfeOps);
+                  }}
+                  disabled={cancelNfeMutation.isPending}
+                  data-testid="button-cancel-nfe"
+                >
+                  {cancelNfeMutation.isPending && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  )}
+                  Cancelar NF-e
+                </Button>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <Label>Chave de acesso (CC-e)</Label>
+                    <Input
+                      value={nfeOps.cceAccessKey}
+                      onChange={(e) =>
+                        updateNfeOps("cceAccessKey", e.target.value)
+                      }
+                      data-testid="input-nfe-cce-key"
+                    />
+                  </div>
+                  <div>
+                    <Label>Sequencia</Label>
+                    <Input
+                      value={nfeOps.cceSequence}
+                      onChange={(e) =>
+                        updateNfeOps("cceSequence", e.target.value)
+                      }
+                      data-testid="input-nfe-cce-seq"
+                    />
+                  </div>
+                  <div>
+                    <Label>Texto da correcao</Label>
+                    <Input
+                      value={nfeOps.cceText}
+                      onChange={(e) => updateNfeOps("cceText", e.target.value)}
+                      data-testid="input-nfe-cce-text"
+                    />
+                  </div>
+                </div>
+                <Button
+                  onClick={() => {
+                    if (
+                      nfeOps.cceAccessKey.trim().length !== 44 ||
+                      nfeOps.cceText.trim().length < 15
+                    ) {
+                      toast.error(
+                        "Informe chave (44 digitos) e texto (min 15)"
+                      );
+                      return;
+                    }
+                    cceNfeMutation.mutate(nfeOps);
+                  }}
+                  disabled={cceNfeMutation.isPending}
+                  data-testid="button-cce-nfe"
+                >
+                  {cceNfeMutation.isPending && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  )}
+                  Enviar CC-e
+                </Button>
+
+                <div className="grid grid-cols-4 gap-4">
+                  <div>
+                    <Label>Serie</Label>
+                    <Input
+                      value={nfeOps.inutilizeSeries}
+                      onChange={(e) =>
+                        updateNfeOps("inutilizeSeries", e.target.value)
+                      }
+                      data-testid="input-nfe-inut-serie"
+                    />
+                  </div>
+                  <div>
+                    <Label>Numero inicial</Label>
+                    <Input
+                      value={nfeOps.inutilizeStart}
+                      onChange={(e) =>
+                        updateNfeOps("inutilizeStart", e.target.value)
+                      }
+                      data-testid="input-nfe-inut-start"
+                    />
+                  </div>
+                  <div>
+                    <Label>Numero final</Label>
+                    <Input
+                      value={nfeOps.inutilizeEnd}
+                      onChange={(e) =>
+                        updateNfeOps("inutilizeEnd", e.target.value)
+                      }
+                      data-testid="input-nfe-inut-end"
+                    />
+                  </div>
+                  <div>
+                    <Label>Justificativa</Label>
+                    <Input
+                      value={nfeOps.inutilizeReason}
+                      onChange={(e) =>
+                        updateNfeOps("inutilizeReason", e.target.value)
+                      }
+                      data-testid="input-nfe-inut-reason"
+                    />
+                  </div>
+                </div>
+                <Button
+                  onClick={() => {
+                    if (
+                      !nfeOps.inutilizeSeries.trim() ||
+                      !nfeOps.inutilizeStart.trim() ||
+                      !nfeOps.inutilizeEnd.trim() ||
+                      nfeOps.inutilizeReason.trim().length < 15
+                    ) {
+                      toast.error(
+                        "Preencha serie, intervalo e justificativa (min 15)"
+                      );
+                      return;
+                    }
+                    inutilizeNfeMutation.mutate(nfeOps);
+                  }}
+                  disabled={inutilizeNfeMutation.isPending}
+                  data-testid="button-inutilize-nfe"
+                >
+                  {inutilizeNfeMutation.isPending && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  )}
+                  Inutilizar numeracao
+                </Button>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* NFC-e */}
@@ -1038,7 +1429,19 @@ export default function FiscalDocuments() {
                                     size="sm"
                                     variant="destructive"
                                     disabled={!canCancel || cancelNfceMutation.isPending}
-                                    onClick={() => cancelNfceMutation.mutate(sale.id)}
+                                    onClick={() => {
+                                      if (!sale.nfceKey || !sale.nfceProtocol) {
+                                        toast.error(
+                                          "NFC-e sem chave ou protocolo. Nao e possivel cancelar."
+                                        );
+                                        return;
+                                      }
+                                      setCancelNfceDialog({
+                                        open: true,
+                                        saleId: sale.id,
+                                        reason: "",
+                                      });
+                                    }}
                                     data-testid={`button-cancel-nfce-${sale.id}`}
                                   >
                                     Cancelar
@@ -1052,6 +1455,61 @@ export default function FiscalDocuments() {
                     </TableBody>
                   </Table>
                 </div>
+
+                <Dialog
+                  open={cancelNfceDialog.open}
+                  onOpenChange={(open) =>
+                    setCancelNfceDialog((prev) => ({ ...prev, open }))
+                  }
+                >
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Cancelar NFC-e</DialogTitle>
+                      <DialogDescription>
+                        Informe a justificativa do cancelamento (min 15
+                        caracteres).
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                      <Label>Justificativa</Label>
+                      <Textarea
+                        value={cancelNfceDialog.reason}
+                        onChange={(e) =>
+                          setCancelNfceDialog((prev) => ({
+                            ...prev,
+                            reason: e.target.value,
+                          }))
+                        }
+                        rows={4}
+                        data-testid="input-cancel-nfce-reason"
+                      />
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        variant="destructive"
+                        onClick={() => {
+                          if (cancelNfceDialog.reason.trim().length < 15) {
+                            toast.error(
+                              "Justificativa obrigatoria (min 15 caracteres)"
+                            );
+                            return;
+                          }
+                          cancelNfceMutation.mutate({
+                            saleId: cancelNfceDialog.saleId,
+                            reason: cancelNfceDialog.reason.trim(),
+                          });
+                        }}
+                        disabled={cancelNfceMutation.isPending}
+                        data-testid="button-confirm-cancel-nfce"
+                      >
+                        {cancelNfceMutation.isPending && (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        )}
+                        Confirmar cancelamento
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
 
                 <Card>
                   <CardHeader>

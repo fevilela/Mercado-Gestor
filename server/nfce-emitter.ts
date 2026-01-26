@@ -81,15 +81,52 @@ const toNumber = (value: any) => {
 
 const formatNumber = (value: number, decimals = 2) => value.toFixed(decimals);
 
-export const formatNfceDateTime = (value: Date) => {
+const DEFAULT_NFCE_TIMEZONE =
+  process.env.NFCE_TZ || "America/Sao_Paulo";
+
+const getTimeZoneOffsetMinutes = (value: Date, timeZone: string) => {
+  if (timeZone === "America/Sao_Paulo") return -180;
+  try {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      timeZoneName: "shortOffset",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    const tzName = formatter
+      .formatToParts(value)
+      .find((part) => part.type === "timeZoneName")?.value;
+    if (tzName) {
+      const match = tzName.match(/GMT([+-]\d{1,2})(?::?(\d{2}))?/);
+      if (match) {
+        const hours = Number(match[1]);
+        const minutes = Number(match[2] || "0");
+        return hours * 60 + (hours < 0 ? -minutes : minutes);
+      }
+    }
+  } catch {
+    // ignore and fall back
+  }
+  return -value.getTimezoneOffset();
+};
+
+export const formatNfceDateTime = (
+  value: Date,
+  timeZone: string = DEFAULT_NFCE_TIMEZONE,
+) => {
   const pad = (num: number) => String(num).padStart(2, "0");
-  const year = value.getFullYear();
-  const month = pad(value.getMonth() + 1);
-  const day = pad(value.getDate());
-  const hours = pad(value.getHours());
-  const minutes = pad(value.getMinutes());
-  const seconds = pad(value.getSeconds());
-  const offsetMinutes = -value.getTimezoneOffset();
+  const offsetMinutes = getTimeZoneOffsetMinutes(value, timeZone);
+  // Convert absolute time to the target offset and read via UTC getters
+  const localMillis = value.getTime() + offsetMinutes * 60_000;
+  const local = new Date(localMillis);
+  const year = local.getUTCFullYear();
+  const month = pad(local.getUTCMonth() + 1);
+  const day = pad(local.getUTCDate());
+  const hours = pad(local.getUTCHours());
+  const minutes = pad(local.getUTCMinutes());
+  const seconds = pad(local.getUTCSeconds());
   const sign = offsetMinutes >= 0 ? "+" : "-";
   const absOffset = Math.abs(offsetMinutes);
   const offsetHours = pad(Math.floor(absOffset / 60));
@@ -156,6 +193,7 @@ export const buildNfceXml = (params: {
   number: number;
   uf: string;
   municipioCodigo: string;
+  tpEmis?: string;
   emitente: {
     cnpj: string;
     ie?: string | null;
@@ -172,6 +210,7 @@ export const buildNfceXml = (params: {
   itens: Array<{
     id: number;
     nome: string;
+    ean?: string | null;
     ncm?: string | null;
     cfop?: string | null;
     unidade?: string | null;
@@ -181,6 +220,16 @@ export const buildNfceXml = (params: {
   }>;
   pagamento: { codigo: string; valor: number };
   crt?: string | null;
+  dest?: {
+    cpfCnpj?: string | null;
+    uf?: string | null;
+  } | null;
+  respTec?: {
+    cnpj: string;
+    contato: string;
+    email: string;
+    fone: string;
+  } | null;
 }) => {
   const dhEmi = formatNfceDateTime(params.issueDate);
   const cUF = UF_CODE[params.uf] || "35";
@@ -193,6 +242,10 @@ export const buildNfceXml = (params: {
   );
   const totalTributos = 0;
   const totalNF = totalProdutos;
+  const vTrocoValue =
+    params.pagamento.valor < totalNF
+      ? Math.max(0, totalNF - params.pagamento.valor)
+      : 0;
   const crt = params.crt || "1";
   const isSimples = crt === "1" || crt === "2";
   const emitIe = params.emitente.ie?.trim() ? params.emitente.ie : "ISENTO";
@@ -206,12 +259,46 @@ export const buildNfceXml = (params: {
   const municipioCodigo = normalizeMunicipioCodigo(params.municipioCodigo);
   const paisCodigo = "1058";
   const paisNome = "BRASIL";
+  const destDigits = onlyDigits(params.dest?.cpfCnpj);
+  const destIsCpf = destDigits.length === 11;
+  const destIsCnpj = destDigits.length === 14;
+  const destUf = normalizeText(params.dest?.uf);
+  const idDest =
+    (destIsCpf || destIsCnpj) &&
+    destUf &&
+    emitUf &&
+    destUf.toUpperCase() !== emitUf.toUpperCase()
+      ? "2"
+      : "1";
+  const destXml = destIsCpf
+    ? `<dest><CPF>${destDigits}</CPF></dest>`
+    : destIsCnpj
+      ? `<dest><CNPJ>${destDigits}</CNPJ></dest>`
+      : "";
+  const respTec = params.respTec;
+  const respTecXml =
+    respTec &&
+    respTec.cnpj &&
+    respTec.contato &&
+    respTec.email &&
+    respTec.fone
+      ? `<infRespTec><CNPJ>${onlyDigits(respTec.cnpj).padStart(
+          14,
+          "0",
+        )}</CNPJ><xContato>${sanitizeXml(
+          respTec.contato,
+        )}</xContato><email>${sanitizeXml(
+          respTec.email,
+        )}</email><fone>${onlyDigits(respTec.fone)}</fone></infRespTec>`
+      : "";
 
   const itensXml = params.itens
     .map((item, idx) => {
       const cfop = normalizeCfop(item.cfop || "5102");
       const ncm = normalizeNcm(item.ncm || "00000000");
       const uCom = item.unidade || "UN";
+      const ean = normalizeText(item.ean || "");
+      const eanTag = ean ? sanitizeXml(ean) : "SEM GTIN";
       const vUnCom = formatNumber(item.valorUnitario);
       const vProd = formatNumber(item.valorTotal);
       const icmsXml = isSimples
@@ -219,19 +306,21 @@ export const buildNfceXml = (params: {
         : `<ICMS00><orig>0</orig><CST>00</CST><modBC>3</modBC><vBC>0.00</vBC><pICMS>0.00</pICMS><vICMS>0.00</vICMS></ICMS00>`;
       const pisXml = `<PIS><PISNT><CST>07</CST></PISNT></PIS>`;
       const cofinsXml = `<COFINS><COFINSNT><CST>07</CST></COFINSNT></COFINS>`;
-      return `<det nItem="${idx + 1}"><prod><cProd>${item.id}</cProd><cEAN>SEM GTIN</cEAN><xProd>${sanitizeXml(
+      return `<det nItem="${idx + 1}"><prod><cProd>${item.id}</cProd><cEAN>${eanTag}</cEAN><xProd>${sanitizeXml(
         item.nome,
       )}</xProd><NCM>${ncm}</NCM><CFOP>${cfop}</CFOP><uCom>${uCom}</uCom><qCom>${formatNumber(
         item.quantidade,
         4,
-      )}</qCom><vUnCom>${vUnCom}</vUnCom><vProd>${vProd}</vProd><cEANTrib>SEM GTIN</cEANTrib><uTrib>${uCom}</uTrib><qTrib>${formatNumber(
+      )}</qCom><vUnCom>${vUnCom}</vUnCom><vProd>${vProd}</vProd><cEANTrib>${eanTag}</cEANTrib><uTrib>${uCom}</uTrib><qTrib>${formatNumber(
         item.quantidade,
         4,
       )}</qTrib><vUnTrib>${vUnCom}</vUnTrib><indTot>1</indTot></prod><imposto><ICMS>${icmsXml}</ICMS>${pisXml}${cofinsXml}</imposto></det>`;
     })
     .join("");
 
-  return `<?xml version="1.0" encoding="UTF-8"?><NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${params.key}" versao="4.00"><ide><cUF>${cUF}</cUF><cNF>${params.cNF}</cNF><natOp>Venda</natOp><mod>65</mod><serie>${serie}</serie><nNF>${nNF}</nNF><dhEmi>${dhEmi}</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>${municipioCodigo}</cMunFG><tpImp>4</tpImp><tpEmis>1</tpEmis><cDV>${params.key.slice(-1)}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>1</finNFe><indFinal>1</indFinal><indPres>1</indPres><procEmi>0</procEmi><verProc>1.0.0</verProc></ide><emit><CNPJ>${onlyDigits(
+  const tpEmis = params.tpEmis || "1";
+
+  return `<?xml version="1.0" encoding="UTF-8"?><NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${params.key}" versao="4.00"><ide><cUF>${cUF}</cUF><cNF>${params.cNF}</cNF><natOp>Venda</natOp><mod>65</mod><serie>${serie}</serie><nNF>${nNF}</nNF><dhEmi>${dhEmi}</dhEmi><tpNF>1</tpNF><idDest>${idDest}</idDest><cMunFG>${municipioCodigo}</cMunFG><tpImp>4</tpImp><tpEmis>${tpEmis}</tpEmis><cDV>${params.key.slice(-1)}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>1</finNFe><indFinal>1</indFinal><indPres>1</indPres><indIntermed>0</indIntermed><procEmi>0</procEmi><verProc>1.0.0</verProc></ide><emit><CNPJ>${onlyDigits(
     params.emitente.cnpj,
   ).padStart(14, "0")}</CNPJ><xNome>${sanitizeXml(
     params.emitente.nome,
@@ -245,7 +334,7 @@ export const buildNfceXml = (params: {
     emitCep,
   )}</CEP><cPais>${paisCodigo}</cPais><xPais>${paisNome}</xPais></enderEmit><IE>${sanitizeXml(
     emitIe,
-  )}</IE><CRT>${crt}</CRT></emit>${itensXml}<total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>${formatNumber(
+  )}</IE><CRT>${crt}</CRT></emit>${destXml}${itensXml}<total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>${formatNumber(
     totalProdutos,
   )}</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>${formatNumber(
     totalNF,
@@ -255,7 +344,9 @@ export const buildNfceXml = (params: {
     params.pagamento.codigo
   }</tPag><vPag>${formatNumber(
     params.pagamento.valor,
-  )}</vPag></detPag><vTroco>0.00</vTroco></pag></infNFe></NFe>`;
+  )}</vPag></detPag>${
+    vTrocoValue > 0 ? `<vTroco>${formatNumber(vTrocoValue)}</vTroco>` : ""
+  }</pag>${respTecXml}</infNFe></NFe>`;
 };
 
 const elementChildren = (node: Element) =>
@@ -282,6 +373,13 @@ export const validateNfceXmlStructure = (
   if (!root || root.localName !== "NFe") {
     return { ok: false, error: "XML sem raiz <NFe>", details: {} };
   }
+  if (root.namespaceURI !== "http://www.portalfiscal.inf.br/nfe") {
+    return {
+      ok: false,
+      error: "Namespace invalido em <NFe>",
+      details: { namespace: root.namespaceURI },
+    };
+  }
 
   const nfeChildren = elementChildren(root).map((node) => node.localName);
   const infNFeIndex = nfeChildren.indexOf("infNFe");
@@ -292,15 +390,25 @@ export const validateNfceXmlStructure = (
       details: { nfeChildren },
     };
   }
-  const suplIndex = nfeChildren.indexOf("infNFeSupl");
-  const sigIndex = nfeChildren.indexOf("Signature");
-  if (suplIndex !== -1 && suplIndex < infNFeIndex) {
+  const selfClosingRegex = /<[^>]+\/>/g;
+  const infNFeMatch = xml.match(/<infNFe\b[\s\S]*<\/infNFe>/);
+  if (infNFeMatch && selfClosingRegex.test(infNFeMatch[0])) {
     return {
       ok: false,
-      error: "<infNFeSupl> antes de <infNFe>",
-      details: { nfeChildren },
+      error: "Tag auto-fechada detectada em <infNFe>",
+      details: { snippet: infNFeMatch[0].match(selfClosingRegex)?.[0] },
     };
   }
+  const suplMatch = xml.match(/<infNFeSupl\b[\s\S]*<\/infNFeSupl>/);
+  if (suplMatch && selfClosingRegex.test(suplMatch[0])) {
+    return {
+      ok: false,
+      error: "Tag auto-fechada detectada em <infNFeSupl>",
+      details: { snippet: suplMatch[0].match(selfClosingRegex)?.[0] },
+    };
+  }
+  const suplIndex = nfeChildren.indexOf("infNFeSupl");
+  const sigIndex = nfeChildren.indexOf("Signature");
   if (requireSignature && sigIndex === -1) {
     return {
       ok: false,
@@ -308,19 +416,29 @@ export const validateNfceXmlStructure = (
       details: { nfeChildren },
     };
   }
-  if (sigIndex !== -1 && sigIndex < infNFeIndex) {
-    return {
-      ok: false,
-      error: "<Signature> antes de <infNFe>",
-      details: { nfeChildren },
-    };
+  if (suplIndex !== -1) {
+    const expectedSuplIndex = infNFeIndex + 1;
+    if (suplIndex !== expectedSuplIndex) {
+      return {
+        ok: false,
+        error: "<infNFeSupl> deve estar imediatamente apos <infNFe>",
+        details: { nfeChildren },
+      };
+    }
   }
-  if (requireSignature && suplIndex !== -1 && sigIndex !== -1 && sigIndex < suplIndex) {
-    return {
-      ok: false,
-      error: "<Signature> antes de <infNFeSupl>",
-      details: { nfeChildren },
-    };
+  if (sigIndex !== -1) {
+    const expectedSigIndex =
+      suplIndex !== -1 ? suplIndex + 1 : infNFeIndex + 1;
+    if (sigIndex !== expectedSigIndex) {
+      return {
+        ok: false,
+        error:
+          suplIndex !== -1
+            ? "<Signature> deve vir imediatamente apos <infNFeSupl>"
+            : "<Signature> deve vir imediatamente apos <infNFe>",
+        details: { nfeChildren },
+      };
+    }
   }
 
   const infNFe = elementChildren(root)[infNFeIndex];
@@ -337,17 +455,25 @@ export const validateNfceXmlStructure = (
   }
   const ideIndex = infChildren.indexOf("ide");
   const emitIndex = infChildren.indexOf("emit");
+  const destIndex = infChildren.indexOf("dest");
   const detIndex = infChildren.indexOf("det");
   const totalIndex = infChildren.indexOf("total");
   const transpIndex = infChildren.indexOf("transp");
   const pagIndex = infChildren.indexOf("pag");
+  const respTecIndex = infChildren.indexOf("infRespTec");
+  const destOrderOk =
+    destIndex === -1 || (emitIndex < destIndex && destIndex < detIndex);
+  const respTecOrderOk =
+    respTecIndex === -1 || (pagIndex !== -1 && pagIndex < respTecIndex);
   if (
     !(
       ideIndex < emitIndex &&
+      destOrderOk &&
       emitIndex < detIndex &&
       detIndex < totalIndex &&
       totalIndex < transpIndex &&
-      transpIndex < pagIndex
+      transpIndex < pagIndex &&
+      respTecOrderOk
     )
   ) {
     return {
@@ -357,7 +483,9 @@ export const validateNfceXmlStructure = (
     };
   }
 
-  if (["cobr", "dup", "vol", "retTransp"].some((tag) => infChildren.includes(tag))) {
+  if (
+    ["cobr", "dup", "vol", "retTransp"].some((tag) => infChildren.includes(tag))
+  ) {
     return {
       ok: false,
       error: "Tags proibidas na NFC-e dentro de <infNFe>",
@@ -399,6 +527,74 @@ export const validateNfceXmlStructure = (
     }
   }
 
+  if (suplIndex !== -1) {
+    const supl = elementChildren(root)[suplIndex];
+    if (supl.namespaceURI !== "http://www.portalfiscal.inf.br/nfe") {
+      return {
+        ok: false,
+        error: "Namespace invalido em <infNFeSupl>",
+        details: { namespace: supl.namespaceURI },
+      };
+    }
+    const suplChildren = elementChildren(supl).map((node) => node.localName);
+    if (suplChildren.join(",") !== "qrCode,urlChave") {
+      return {
+        ok: false,
+        error: "Ordem invalida em <infNFeSupl> (qrCode -> urlChave)",
+        details: { suplChildren },
+      };
+    }
+    const qrNode = elementChildren(supl).find(
+      (node) => node.localName === "qrCode",
+    );
+    const qrText = qrNode?.textContent || "";
+    if (!qrText.trim()) {
+      return {
+        ok: false,
+        error: "qrCode invalido (vazio)",
+        details: { qrCode: qrText },
+      };
+    }
+    if (qrText.trim() !== qrText) {
+      return {
+        ok: false,
+        error: "QR Code contem whitespace externo",
+        details: { qrCode: qrText },
+      };
+    }
+    const urlNode = elementChildren(supl).find(
+      (node) => node.localName === "urlChave",
+    );
+    const urlText = urlNode?.textContent || "";
+    if (!urlText.trim()) {
+      return {
+        ok: false,
+        error: "urlChave invalido (vazio)",
+        details: { urlChave: urlText },
+      };
+    }
+  }
+
+  if (requireSignature && sigIndex !== -1) {
+    const sigNode = elementChildren(root)[sigIndex];
+    const algoNode = elementChildren(sigNode).find(
+      (node) => node.localName === "SignedInfo",
+    );
+    const sigMethod =
+      algoNode &&
+      elementChildren(algoNode).find(
+        (node) => node.localName === "SignatureMethod",
+      );
+    const algo = sigMethod?.getAttribute("Algorithm") || "";
+    if (algo && !algo.includes("rsa-sha1")) {
+      return {
+        ok: false,
+        error: "Algoritmo de assinatura invalido (esperado SHA1)",
+        details: { algorithm: algo },
+      };
+    }
+  }
+
   return { ok: true, details: { nfeChildren, infNFeChildren: infChildren } };
 };
 
@@ -418,6 +614,7 @@ export const signNfceXml = (
 
 export const buildNfceQrUrl = (params: {
   sefazUrl: string;
+  uf?: string;
   chave: string;
   versaoQr: string;
   tpAmb: string;
@@ -425,12 +622,37 @@ export const buildNfceQrUrl = (params: {
   dhEmi?: string;
   vNF?: string;
   digVal?: string;
+  cDest?: string;
   cscId: string;
   csc: string;
 }) => {
-  const base = [params.chave, params.versaoQr, params.tpAmb];
   const cscIdRaw = onlyDigits(params.cscId);
-  const cscId = cscIdRaw.replace(/^0+(?!$)/, "");
+  const cscId = cscIdRaw.replace(/^0+/, "") || "0";
+  const cscNormalized = String(params.csc || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .toLowerCase();
+  const isMg =
+    params.uf?.toUpperCase() === "MG" ||
+    params.sefazUrl.toLowerCase().includes("fazenda.mg.gov.br");
+  if (isMg) {
+    const versaoQr = onlyDigits(params.versaoQr || "2") || "2";
+    const hash = crypto
+      .createHash("sha1")
+      .update(`${params.chave}${cscId}${cscNormalized}`)
+      .digest("hex")
+      .toUpperCase();
+    const payload = [
+      params.chave,
+      versaoQr,
+      params.tpAmb,
+      cscId,
+      hash,
+    ].join("|");
+    return `${params.sefazUrl.trim()}?p=${payload}`.trim();
+  }
+
+  const base = [params.chave, params.versaoQr, params.tpAmb];
   const payload =
     params.tpEmis === "9"
       ? [
@@ -442,8 +664,8 @@ export const buildNfceQrUrl = (params: {
         ].join("|")
       : [...base, cscId].join("|");
   const hash = crypto
-    .createHash("sha1")
+    .createHash("sha256")
     .update(`${payload}${params.csc}`)
     .digest("hex");
-  return `${params.sefazUrl.trim()}?p=${payload}|${hash}`;
+  return `${params.sefazUrl.trim()}?p=${payload}|${hash}`.trim();
 };

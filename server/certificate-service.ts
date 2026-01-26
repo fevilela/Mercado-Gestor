@@ -30,7 +30,7 @@ export class CertificateService {
     companyId: number,
     certificateBuffer: Buffer,
     password: string,
-    cnpj: string = "00000000000000"
+    cnpj: string = "00000000000000",
   ): Promise<{
     success: boolean;
     message: string;
@@ -40,7 +40,7 @@ export class CertificateService {
       // Validar se é um certificado válido
       // Em produção, parsear o PKCS#12 usando biblioteca como node-forge
       const thumbprint = crypto
-        .createHash("sha1")
+        .createHash("sha256")
         .update(certificateBuffer)
         .digest("hex")
         .toUpperCase();
@@ -93,8 +93,8 @@ export class CertificateService {
         .where(
           and(
             eq(digitalCertificates.companyId, companyId),
-            eq(digitalCertificates.isActive, true)
-          )
+            eq(digitalCertificates.isActive, true),
+          ),
         )
         .limit(1);
 
@@ -113,7 +113,7 @@ export class CertificateService {
       let decrypted: Buffer;
       try {
         decrypted = this.decryptCertificate(
-          Buffer.from(cert.certificateData, "base64")
+          Buffer.from(cert.certificateData, "base64"),
         );
       } catch (error) {
         console.error("Erro ao descriptografar certificado:", error);
@@ -159,7 +159,7 @@ export class CertificateService {
   }
 
   async validateCertificate(
-    companyId: number
+    companyId: number,
   ): Promise<CertificateInfo | null> {
     try {
       const [cert] = await db
@@ -175,7 +175,7 @@ export class CertificateService {
       const validUntil = new Date(cert.validUntil!);
       const now = new Date();
       const daysUntilExpiry = Math.floor(
-        (validUntil.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+        (validUntil.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
       );
 
       return {
@@ -195,7 +195,7 @@ export class CertificateService {
   private encryptCertificate(buffer: Buffer): Buffer {
     const key = Buffer.from(
       process.env.CERT_ENCRYPTION_KEY || "default-key-change-in-production",
-      "utf-8"
+      "utf-8",
     ).slice(0, 32);
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv("aes-256-cbc", key, iv);
@@ -205,7 +205,7 @@ export class CertificateService {
   private decryptCertificate(buffer: Buffer): Buffer {
     const key = Buffer.from(
       process.env.CERT_ENCRYPTION_KEY || "default-key-change-in-production",
-      "utf-8"
+      "utf-8",
     ).slice(0, 32);
     const iv = buffer.slice(0, 16);
     const encrypted = buffer.slice(16);
@@ -216,7 +216,7 @@ export class CertificateService {
   private encryptPassword(password: string): string {
     const key = Buffer.from(
       process.env.PASSWORD_ENCRYPTION_KEY || "default-key-change-in-production",
-      "utf-8"
+      "utf-8",
     ).slice(0, 32);
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv("aes-256-cbc", key, iv);
@@ -231,7 +231,7 @@ export class CertificateService {
   private decryptPassword(encrypted: string): string {
     const key = Buffer.from(
       process.env.PASSWORD_ENCRYPTION_KEY || "default-key-change-in-production",
-      "utf-8"
+      "utf-8",
     ).slice(0, 32);
     const buffer = Buffer.from(encrypted, "base64");
     const iv = buffer.slice(0, 16);

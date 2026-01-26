@@ -1,12 +1,14 @@
-// Serviço de Integração com SEFAZ e Prefeituras
+import { Tools } from "node-sped-nfe";
+
 export interface SefazConfig {
   environment: "homologacao" | "producao";
-  certificatePath: string;
+  uf: string;
+  certificateBuffer: Buffer;
   certificatePassword: string;
-  sefazUrl?: string;
-  uf?: string;
+  cnpj?: string;
   timeout?: number;
-  proxy?: string;
+  xmllintPath?: string;
+  opensslPath?: string;
 }
 
 export interface SubmissionResult {
@@ -15,6 +17,9 @@ export interface SubmissionResult {
   timestamp: Date;
   status: string;
   message: string;
+  key?: string;
+  signedXml?: string;
+  rawResponse?: string;
 }
 
 export interface CancellationResult {
@@ -23,6 +28,8 @@ export interface CancellationResult {
   timestamp: Date;
   eventId?: string;
   message: string;
+  status?: string;
+  rawResponse?: string;
 }
 
 export interface CorrectionLetterResult {
@@ -30,6 +37,8 @@ export interface CorrectionLetterResult {
   protocol: string;
   timestamp: Date;
   message: string;
+  status?: string;
+  rawResponse?: string;
 }
 
 export interface InutilizationResult {
@@ -37,7 +46,75 @@ export interface InutilizationResult {
   protocol: string;
   timestamp: Date;
   message: string;
+  status?: string;
+  rawResponse?: string;
 }
+
+const extractTag = (tag: string, source: string): string => {
+  const match = source.match(
+    new RegExp(`<[^>]*${tag}[^>]*>([^<]+)<\\/[^>]*${tag}>`),
+  );
+  return match?.[1] ?? "";
+};
+
+const extractBlock = (tag: string, source: string): string => {
+  const match = source.match(
+    new RegExp(`<[^>]*${tag}[^>]*>([\\s\\S]*?)<\\/[^>]*${tag}>`),
+  );
+  return match?.[1] ?? "";
+};
+
+const stripEnviNFe = (xmlContent: string): string => {
+  if (!xmlContent.includes("<enviNFe")) return xmlContent;
+  const nfeMatch = xmlContent.match(/<NFe[\s\S]*<\/NFe>/);
+  return nfeMatch?.[0] ?? xmlContent;
+};
+
+const hasSignature = (xmlContent: string): boolean =>
+  /<\s*Signature\b/.test(xmlContent);
+
+const resolveFinalStatus = (xmlContent: string) => {
+  const outerStatus = extractTag("cStat", xmlContent);
+  const outerMessage = extractTag("xMotivo", xmlContent);
+  let status = outerStatus;
+  let message = outerMessage;
+  let protocol = extractTag("nProt", xmlContent);
+  let key = extractTag("chNFe", xmlContent);
+
+  const protBlock = extractBlock("protNFe", xmlContent);
+  if (protBlock) {
+    const innerStatus = extractTag("cStat", protBlock);
+    const innerMessage = extractTag("xMotivo", protBlock);
+    const innerProtocol = extractTag("nProt", protBlock);
+    const innerKey = extractTag("chNFe", protBlock);
+    if (innerStatus) status = innerStatus;
+    if (innerMessage) message = innerMessage;
+    if (innerProtocol) protocol = innerProtocol;
+    if (innerKey) key = innerKey;
+  }
+
+  return { status, message, protocol, key };
+};
+
+const resolveEventStatus = (xmlContent: string) => {
+  const outerStatus = extractTag("cStat", xmlContent);
+  const outerMessage = extractTag("xMotivo", xmlContent);
+  let status = outerStatus;
+  let message = outerMessage;
+  let protocol = extractTag("nProt", xmlContent);
+  const inner =
+    extractBlock("infEvento", xmlContent) ||
+    extractBlock("infRetEvento", xmlContent);
+  if (inner) {
+    const innerStatus = extractTag("cStat", inner);
+    const innerMessage = extractTag("xMotivo", inner);
+    const innerProtocol = extractTag("nProt", inner);
+    if (innerStatus) status = innerStatus;
+    if (innerMessage) message = innerMessage;
+    if (innerProtocol) protocol = innerProtocol;
+  }
+  return { status, message, protocol };
+};
 
 export class SefazService {
   private config: SefazConfig;
@@ -46,41 +123,53 @@ export class SefazService {
     this.config = config;
   }
 
-  // Enviar NF-e para SEFAZ
-  async submitNFe(xmlContent: string): Promise<SubmissionResult> {
-    try {
-      // Implementação simulada - em produção usar biblioteca como nodeca-nfe
-      // Simular resposta SEFAZ
-      const protocol = `${Date.now()}${Math.random().toString().slice(2, 8)}`;
-
-      return {
-        success: true,
-        protocol: protocol,
-        timestamp: new Date(),
-        status: "authorized",
-        message: "NF-e enviada com sucesso (modo teste)",
-      };
-    } catch (error) {
-      return {
-        success: false,
-        protocol: "",
-        timestamp: new Date(),
-        status: "error",
-        message: error instanceof Error ? error.message : "Erro ao enviar NF-e",
-      };
-    }
+  private buildTools(mod: "55" | "65") {
+    return new Tools(
+      {
+        mod,
+        UF: this.config.uf,
+        tpAmb: this.config.environment === "producao" ? 1 : 2,
+        versao: "4.00",
+        timeout: this.config.timeout ?? 30,
+        xmllint: this.config.xmllintPath ?? process.env.XMLLINT_PATH ?? "xmllint",
+        openssl: this.config.opensslPath ?? undefined,
+        CNPJ: this.config.cnpj,
+      },
+      {
+        pfx: this.config.certificateBuffer,
+        senha: this.config.certificatePassword,
+      },
+    );
   }
 
-  async queryReceipt(xmlContent: string): Promise<SubmissionResult> {
+  async submitNFe(xmlContent: string): Promise<SubmissionResult> {
     try {
-      const protocol = `${Date.now()}${Math.random().toString().slice(2, 8)}`;
+      const tools = this.buildTools("55");
+      const xmlBody = stripEnviNFe(xmlContent);
+      const signedXml = hasSignature(xmlBody)
+        ? xmlBody
+        : await tools.xmlSign(xmlBody, { tag: "infNFe" });
+
+      const response = await tools.sefazEnviaLote(signedXml, {
+        idLote: Date.now(),
+        indSinc: 1,
+        compactar: false,
+      });
+
+      const parsed = resolveFinalStatus(String(response || ""));
+      const status = parsed.status || "0";
+      const message = parsed.message || "Resposta SEFAZ sem cStat";
+      const success = status === "100" || status === "150";
 
       return {
-        success: true,
-        protocol: protocol,
+        success,
+        protocol: parsed.protocol || "",
         timestamp: new Date(),
-        status: "processed",
-        message: "Recibo consultado com sucesso (modo teste)",
+        status,
+        message,
+        key: parsed.key || "",
+        signedXml,
+        rawResponse: String(response || ""),
       };
     } catch (error) {
       return {
@@ -89,29 +178,79 @@ export class SefazService {
         timestamp: new Date(),
         status: "error",
         message:
-          error instanceof Error ? error.message : "Erro ao consultar recibo",
+          error instanceof Error ? error.message : "Erro ao enviar NF-e",
       };
     }
   }
 
-  // Cancelar NF-e
-  async cancelNFe(
-    nfeNumber: string,
-    nfeSeries: string,
-    reason: string
-  ): Promise<CancellationResult> {
+  async submitNFCe(xmlContent: string): Promise<SubmissionResult> {
     try {
-      const protocol = `${Date.now()}${Math.random().toString().slice(2, 8)}`;
+      const tools = this.buildTools("65");
+      const xmlBody = stripEnviNFe(xmlContent);
+      if (!hasSignature(xmlBody)) {
+        throw new Error("XML NFC-e sem assinatura. Assine antes do envio.");
+      }
+
+      const response = await tools.sefazEnviaLote(xmlBody, {
+        idLote: Date.now(),
+        indSinc: 1,
+        compactar: false,
+      });
+
+      const parsed = resolveFinalStatus(String(response || ""));
+      const status = parsed.status || "0";
+      const message = parsed.message || "Resposta SEFAZ sem cStat";
+      const success = status === "100" || status === "150";
 
       return {
-        success: true,
-        protocol: protocol,
+        success,
+        protocol: parsed.protocol || "",
         timestamp: new Date(),
-        eventId: `ID${nfeSeries.padStart(2, "0")}${nfeNumber.padStart(
-          9,
-          "0"
-        )}01`,
-        message: "NF-e cancelada com sucesso (modo teste)",
+        status,
+        message,
+        key: parsed.key || "",
+        signedXml: xmlBody,
+        rawResponse: String(response || ""),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        protocol: "",
+        timestamp: new Date(),
+        status: "error",
+        message:
+          error instanceof Error ? error.message : "Erro ao enviar NFC-e",
+      };
+    }
+  }
+
+  async cancelNFe(
+    accessKey: string,
+    protocol: string,
+    reason: string,
+  ): Promise<CancellationResult> {
+    try {
+      const tools = this.buildTools("55");
+      const response = await tools.sefazEvento({
+        chNFe: accessKey,
+        tpEvento: "110111",
+        nProt: protocol,
+        xJust: reason,
+        nSeqEvento: 1,
+      });
+
+      const parsed = resolveEventStatus(String(response || ""));
+      const status = parsed.status || "0";
+      const success = ["135", "136", "155"].includes(status);
+
+      return {
+        success,
+        protocol: parsed.protocol || "",
+        timestamp: new Date(),
+        eventId: `ID110111${accessKey}01`,
+        message: parsed.message || "Resposta SEFAZ sem xMotivo",
+        status,
+        rawResponse: String(response || ""),
       };
     } catch (error) {
       return {
@@ -124,20 +263,70 @@ export class SefazService {
     }
   }
 
-  // Enviar Carta de Correção
-  async sendCorrectionLetter(
-    nfeNumber: string,
-    nfeSeries: string,
-    correctionData: any
-  ): Promise<CorrectionLetterResult> {
+  async cancelNFCe(
+    accessKey: string,
+    protocol: string,
+    reason: string,
+  ): Promise<CancellationResult> {
     try {
-      const protocol = `${Date.now()}${Math.random().toString().slice(2, 8)}`;
+      const tools = this.buildTools("65");
+      const response = await tools.sefazEvento({
+        chNFe: accessKey,
+        tpEvento: "110111",
+        nProt: protocol,
+        xJust: reason,
+        nSeqEvento: 1,
+      });
+
+      const parsed = resolveEventStatus(String(response || ""));
+      const status = parsed.status || "0";
+      const success = ["135", "136", "155"].includes(status);
 
       return {
-        success: true,
-        protocol: protocol,
+        success,
+        protocol: parsed.protocol || "",
         timestamp: new Date(),
-        message: "Carta de Correção enviada com sucesso (modo teste)",
+        eventId: `ID110111${accessKey}01`,
+        message: parsed.message || "Resposta SEFAZ sem xMotivo",
+        status,
+        rawResponse: String(response || ""),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        protocol: "",
+        timestamp: new Date(),
+        message:
+          error instanceof Error ? error.message : "Erro ao cancelar NFC-e",
+      };
+    }
+  }
+
+  async sendCorrectionLetter(
+    accessKey: string,
+    correctionText: string,
+    sequence: number = 1,
+  ): Promise<CorrectionLetterResult> {
+    try {
+      const tools = this.buildTools("55");
+      const response = await tools.sefazEvento({
+        chNFe: accessKey,
+        tpEvento: "110110",
+        xJust: correctionText,
+        nSeqEvento: sequence,
+      });
+
+      const parsed = resolveEventStatus(String(response || ""));
+      const status = parsed.status || "0";
+      const success = ["135", "136", "155"].includes(status);
+
+      return {
+        success,
+        protocol: parsed.protocol || "",
+        timestamp: new Date(),
+        message: parsed.message || "Resposta SEFAZ sem xMotivo",
+        status,
+        rawResponse: String(response || ""),
       };
     } catch (error) {
       return {
@@ -147,26 +336,38 @@ export class SefazService {
         message:
           error instanceof Error
             ? error.message
-            : "Erro ao enviar Carta de Correção",
+            : "Erro ao enviar Carta de Correcao",
       };
     }
   }
 
-  // Inutilizar numeração
   async inutilizeNumbers(
     series: string,
     startNumber: number,
     endNumber: number,
-    reason: string
+    reason: string,
+    mod: "55" | "65" = "55",
   ): Promise<InutilizationResult> {
     try {
-      const protocol = `${Date.now()}${Math.random().toString().slice(2, 8)}`;
+      const tools = this.buildTools(mod);
+      const response = await tools.sefazInutiliza({
+        nSerie: String(series),
+        nIni: Number(startNumber),
+        nFin: Number(endNumber),
+        xJust: reason,
+      });
+
+      const parsed = resolveFinalStatus(String(response || ""));
+      const status = parsed.status || "0";
+      const success = ["102", "135", "155"].includes(status);
 
       return {
-        success: true,
-        protocol: protocol,
+        success,
+        protocol: parsed.protocol || "",
         timestamp: new Date(),
-        message: `Numeração inutilizada com sucesso (${startNumber} a ${endNumber}) - modo teste`,
+        message: parsed.message || "Resposta SEFAZ sem xMotivo",
+        status,
+        rawResponse: String(response || ""),
       };
     } catch (error) {
       return {
@@ -176,75 +377,39 @@ export class SefazService {
         message:
           error instanceof Error
             ? error.message
-            : "Erro ao inutilizar numeração",
+            : "Erro ao inutilizar numeracao",
       };
     }
   }
 
-  // Consultar status da autorização
-  async checkAuthorizationStatus(protocol: string): Promise<any> {
+  async queryReceipt(_xmlContent: string): Promise<SubmissionResult> {
+    return {
+      success: false,
+      protocol: "",
+      timestamp: new Date(),
+      status: "error",
+      message: "Consulta de recibo nao suportada nesta integracao",
+    };
+  }
+
+  async checkAuthorizationStatus(accessKey: string): Promise<any> {
     try {
+      const tools = this.buildTools("55");
+      const response = await tools.consultarNFe(accessKey);
+      const parsed = resolveFinalStatus(String(response || ""));
       return {
         success: true,
-        status: "100",
-        message: "NF-e autorizada",
+        status: parsed.status,
+        message: parsed.message,
         authorizedAt: new Date(),
+        protocol: parsed.protocol,
+        rawResponse: String(response || ""),
       };
     } catch (error) {
       return {
         success: false,
         message:
           error instanceof Error ? error.message : "Erro ao consultar status",
-      };
-    }
-  }
-
-  // Modo Contingência: SVC (Servidor Virtual de Contingência)
-  async activateContingencyMode(
-    mode: "offline" | "svc" | "svc_rs" | "svc_an"
-  ): Promise<{
-    success: boolean;
-    message: string;
-    mode: string;
-  }> {
-    // Em modo contingência, as NF-es são emitidas e assinadas localmente
-    // mas só sincronizadas quando a conexão voltar
-    const contingencyUrls = {
-      offline: "local-storage", // Armazenamento local
-      svc: "https://nfe.sefaz.rs.gov.br/webservice/NFeAutorizacao4", // SVC Nacional
-      svc_rs: "https://nfe.sefaz.rs.gov.br/webservice/NFeAutorizacao4", // SVC RS
-      svc_an: "https://nfe.sefaz.go.gov.br/webservice/NFeAutorizacao4", // SVC Ambiente Nacional
-    };
-
-    return {
-      success: true,
-      message: `Modo contingência ${mode} ativado com sucesso`,
-      mode: mode,
-    };
-  }
-
-  // Testar conexão com SEFAZ
-  async testConnection(): Promise<{
-    success: boolean;
-    message: string;
-    responseTime: number;
-  }> {
-    const startTime = Date.now();
-    try {
-      const responseTime = Date.now() - startTime;
-
-      return {
-        success: true,
-        message: "Conexão com SEFAZ estabelecida com sucesso (modo teste)",
-        responseTime,
-      };
-    } catch (error) {
-      const responseTime = Date.now() - startTime;
-      return {
-        success: false,
-        message:
-          error instanceof Error ? error.message : "Erro ao testar conexão",
-        responseTime,
       };
     }
   }

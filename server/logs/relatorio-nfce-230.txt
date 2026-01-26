@@ -1,0 +1,24 @@
+﻿Relatorio Tecnico - NFC-e Rejeicao 230 (MG)
+Data/Hora: 2026-01-24 11:41:07
+
+Ambiente: 2 (2=Homologacao)
+UF: MG
+CNPJ emitente (XML): 63484324000162
+IE emitente (XML): 0053474030035
+Municipio (cMunFG): 3138203
+Chave NFC-e: 31260163484324000162650010000000981179175944
+Endpoint: https://hnfce.fazenda.mg.gov.br/nfce/services/NFeAutorizacao4
+
+Diagnostico automatico:
+- Certificado CNPJ: 63484324000162 (confere com emitente)
+- Consulta cadastro: cStat 111 (OK) | IE 0053474030035 | Municipio 3138203
+- Rejeicao na autorizacao NFC-e: cStat 230 (IE do emitente nao cadastrada)
+
+Observacao:
+Cadastro SIARE indica NFC-e habilitado em homologacao.
+
+Anexos sugeridos:
+- XML enviado: server\logs\nfce-27-signed.xml
+- Resposta SEFAZ (rawResponse) com cStat 230
+- Print do SIARE (NFC-e habilitado)
+

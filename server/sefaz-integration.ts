@@ -19,6 +19,19 @@ export interface SefazResponse {
   message: string;
   timestamp: Date;
   responseTime?: number;
+  ie?: string;
+  cnpj?: string;
+  nome?: string;
+  uf?: string;
+  situacao?: string;
+  cnae?: string;
+  logradouro?: string;
+  numero?: string;
+  bairro?: string;
+  municipio?: string;
+  municipioCodigo?: string;
+  rawResponse?: string;
+  endpoint?: string;
 }
 
 export class SefazIntegration {
@@ -813,12 +826,19 @@ export class SefazIntegration {
         };
       }
 
-      const baseUrl = this.getSefazUrl(state, this.environment);
+      const baseUrl =
+        state.toUpperCase() === "MG"
+          ? this.environment === "producao"
+            ? "https://nfce.fazenda.mg.gov.br/nfce/services"
+            : "https://hnfce.fazenda.mg.gov.br/nfce/services"
+          : this.getSefazUrl(state, this.environment);
       const wsdlUrl = baseUrl.toLowerCase().includes("?wsdl")
         ? baseUrl
             .replace(/StatusServico4/gi, "Autorizacao4")
             .replace(/NFeStatusServico4/gi, "NFeAutorizacao4")
-        : `${baseUrl}/NFeAutorizacao4/NFeAutorizacao4.asmx?wsdl`;
+        : baseUrl.toLowerCase().includes("/nfce/services")
+          ? `${baseUrl}/NFeAutorizacao4`
+          : `${baseUrl}/NFeAutorizacao4/NFeAutorizacao4.asmx?wsdl`;
       const statusUrl = wsdlUrl.replace(/\?wsdl$/i, "");
       const servername = new URL(statusUrl).hostname;
 
@@ -879,6 +899,8 @@ export class SefazIntegration {
           protocol?: string;
           key?: string;
           responseTime: number;
+          endpoint: string;
+          rawResponse: string;
         }>((resolve, reject) => {
           const startTime = Date.now();
           const req = https.request(
@@ -926,6 +948,8 @@ export class SefazIntegration {
                       protocol: innerProtocol,
                       key: innerKey,
                       responseTime: Date.now() - startTime,
+                      endpoint: statusUrl,
+                      rawResponse: body,
                     });
                   }
                 }
@@ -935,6 +959,8 @@ export class SefazIntegration {
                   protocol,
                   key,
                   responseTime: Date.now() - startTime,
+                  endpoint: statusUrl,
+                  rawResponse: body,
                 });
               });
             }
@@ -957,6 +983,8 @@ export class SefazIntegration {
             key: result.key,
             timestamp: new Date(),
             responseTime: result.responseTime,
+            endpoint: result.endpoint,
+            rawResponse: result.rawResponse,
           };
         } catch (error) {
           lastError = error;
@@ -994,6 +1022,236 @@ export class SefazIntegration {
 
   clearCache(): void {
     cache.flushAll();
+  }
+
+  async consultaCadastro(
+    companyId: number,
+    state: string,
+    params: { cnpj?: string; ie?: string; cpf?: string },
+  ): Promise<SefazResponse> {
+    try {
+      const fiscalStatus = await getFiscalCertificateStatus(companyId);
+      if (!fiscalStatus.isValid) {
+        return {
+          success: false,
+          message: fiscalStatus.message,
+          timestamp: new Date(),
+        };
+      }
+
+      const certificateBuffer =
+        await this.certificateService.getCertificate(companyId);
+      const certificatePassword =
+        await this.certificateService.getCertificatePassword(companyId);
+      if (!certificateBuffer || !certificatePassword) {
+        return {
+          success: false,
+          message: "Certificado digital nao configurado",
+          timestamp: new Date(),
+        };
+      }
+
+      const normalizedState = state.toUpperCase();
+      const baseUrl =
+        normalizedState === "MG"
+          ? this.environment === "producao"
+            ? "https://nfe.fazenda.mg.gov.br/nfe2/services"
+            : "https://hnfe.fazenda.mg.gov.br/nfe2/services"
+          : this.getSefazUrl(state, this.environment);
+      const wsdlUrl = baseUrl.toLowerCase().includes("?wsdl")
+        ? baseUrl
+            .replace(/StatusServico4/gi, "CadConsultaCadastro4")
+            .replace(/NFeStatusServico4/gi, "CadConsultaCadastro4")
+        : baseUrl.toLowerCase().includes("/nfce/services") ||
+            baseUrl.toLowerCase().includes("/nfe2/services")
+          ? `${baseUrl}/CadConsultaCadastro4`
+          : `${baseUrl}/CadConsultaCadastro4/CadConsultaCadastro4.asmx?wsdl`;
+      const statusUrl = wsdlUrl.replace(/\?wsdl$/i, "");
+      const servername = new URL(statusUrl).hostname;
+
+      const caPath = process.env.SEFAZ_CA_CERT_PATH;
+      const ca = caPath ? fs.readFileSync(caPath) : undefined;
+      const strictSSL = process.env.SEFAZ_STRICT_SSL !== "false";
+      const clientPemPath = process.env.SEFAZ_CLIENT_PEM_PATH;
+      const clientPem = clientPemPath
+        ? fs.readFileSync(clientPemPath)
+        : undefined;
+      const tlsOptions = {
+        pfx: certificateBuffer,
+        passphrase: certificatePassword,
+        minVersion: "TLSv1.2" as any,
+        maxVersion: "TLSv1.2" as any,
+        ciphers: "DEFAULT:@SECLEVEL=1",
+        honorCipherOrder: true,
+        secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+        ca,
+        rejectUnauthorized: strictSSL,
+        servername,
+        ...(clientPem ? { cert: clientPem, key: clientPem } : {}),
+      };
+
+      const cnpj = params.cnpj ? params.cnpj.replace(/\D/g, "") : "";
+      const ie = params.ie ? params.ie.replace(/\D/g, "") : "";
+      const cpf = params.cpf ? params.cpf.replace(/\D/g, "") : "";
+      const uf = state.toUpperCase();
+      const idTag = cnpj
+        ? `<CNPJ>${cnpj}</CNPJ>`
+        : ie
+          ? `<IE>${ie}</IE>`
+          : cpf
+            ? `<CPF>${cpf}</CPF>`
+            : "";
+      if (!idTag) {
+        return {
+          success: false,
+          message: "Informe CNPJ, IE ou CPF para consulta",
+          timestamp: new Date(),
+        };
+      }
+
+      const payloadVersion = uf === "MG" ? "2.00" : "4.00";
+      const payload = `<ConsCad xmlns="http://www.portalfiscal.inf.br/nfe" versao="${payloadVersion}"><infCons><xServ>CONS-CAD</xServ><UF>${uf}</UF>${idTag}</infCons></ConsCad>`;
+      const actionUrl =
+        "http://www.portalfiscal.inf.br/nfe/wsdl/CadConsultaCadastro4/consultaCadastro";
+
+      const sendSoap = async (soapVersion: "1.1" | "1.2") => {
+        const envelope =
+          soapVersion === "1.1"
+            ? `<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/CadConsultaCadastro4">${payload}</nfeDadosMsg></soap:Body></soap:Envelope>`
+            : `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/CadConsultaCadastro4">${payload}</nfeDadosMsg></soap12:Body></soap12:Envelope>`;
+        const headers: Record<string, string | number> = {
+          "Content-Length": Buffer.byteLength(envelope),
+        };
+        if (soapVersion === "1.1") {
+          headers["Content-Type"] = "text/xml; charset=utf-8";
+          headers["SOAPAction"] = actionUrl;
+        } else {
+          headers["Content-Type"] = `application/soap+xml; charset=utf-8; action="${actionUrl}"`;
+        }
+
+        return await new Promise<{
+          status?: string;
+          message?: string;
+          ie?: string;
+          cnpj?: string;
+          nome?: string;
+          uf?: string;
+          situacao?: string;
+          cnae?: string;
+          logradouro?: string;
+          numero?: string;
+          bairro?: string;
+          municipio?: string;
+          municipioCodigo?: string;
+          responseTime: number;
+          raw: string;
+        }>((resolve, reject) => {
+          const startTime = Date.now();
+          const req = https.request(
+            statusUrl,
+            {
+              method: "POST",
+              agent: new https.Agent(tlsOptions),
+              headers,
+            },
+            (res) => {
+              let body = "";
+              res.setEncoding("utf8");
+              res.on("data", (chunk) => {
+                body += chunk;
+              });
+              res.on("end", () => {
+                const extractTag = (tag: string, source: string) => {
+                  const match = source.match(
+                    new RegExp(`<[^>]*${tag}[^>]*>([^<]+)<\\/[^>]*${tag}>`),
+                  );
+                  return match?.[1];
+                };
+                resolve({
+                  status: extractTag("cStat", body),
+                  message: extractTag("xMotivo", body),
+                  ie: extractTag("IE", body),
+                  cnpj: extractTag("CNPJ", body),
+                  nome: extractTag("xNome", body),
+                  uf: extractTag("UF", body),
+                  situacao: extractTag("cSit", body),
+                  cnae: extractTag("CNAE", body),
+                  logradouro: extractTag("xLgr", body),
+                  numero: extractTag("nro", body),
+                  bairro: extractTag("xBairro", body),
+                  municipio: extractTag("xMun", body),
+                  municipioCodigo: extractTag("cMun", body),
+                  responseTime: Date.now() - startTime,
+                  raw: body,
+                });
+              });
+            },
+          );
+          req.on("error", (error) => reject(error));
+          req.write(envelope);
+          req.end();
+        });
+      };
+
+      let lastError: unknown;
+      for (const soapVersion of ["1.2", "1.1"] as const) {
+        try {
+          const result = await sendSoap(soapVersion);
+          if (!result.status || !result.message) {
+            return {
+              success: false,
+              message:
+                "Resposta SEFAZ inesperada (" +
+                statusUrl +
+                "): " +
+                result.raw.slice(0, 200),
+              timestamp: new Date(),
+              responseTime: result.responseTime,
+              rawResponse: result.raw,
+            };
+          }
+          return {
+            success: result.status === "111" || result.status === "112",
+            status: result.status,
+            message: result.message,
+            timestamp: new Date(),
+            responseTime: result.responseTime,
+            ie: result.ie,
+            cnpj: result.cnpj,
+            nome: result.nome,
+            uf: result.uf,
+            situacao: result.situacao,
+            cnae: result.cnae,
+            logradouro: result.logradouro,
+            numero: result.numero,
+            bairro: result.bairro,
+            municipio: result.municipio,
+            municipioCodigo: result.municipioCodigo,
+            rawResponse: result.raw,
+          };
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      return {
+        success: false,
+        message:
+          lastError instanceof Error
+            ? lastError.message
+            : "Erro ao consultar cadastro",
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Erro ao consultar cadastro",
+        timestamp: new Date(),
+      };
+    }
   }
 }
 

@@ -25,6 +25,7 @@ import {
   signNfceXml,
   validateNfceXmlStructure,
 } from "./nfce-emitter";
+import { getIbgeMunicipioCode } from "./ibge-municipios";
 import { storage } from "./storage";
 import {
   requireAuth,
@@ -44,20 +45,35 @@ const nfceDebugEnabled = process.env.NFCE_DEBUG_XML === "true";
 
 const injectNfceSupplement = (xml: string, supplement: string) => {
   if (!supplement) return xml;
-  if (xml.includes("<infNFeSupl>")) return xml;
-  if (xml.includes("<Signature")) {
-    return xml.replace(/<Signature/, `${supplement}<Signature`);
+  let output = xml;
+  if (output.includes("<infNFeSupl>")) {
+    output = output.replace(/<infNFeSupl[\s\S]*?<\/infNFeSupl>/, "");
   }
-  if (xml.includes("</NFe>")) {
-    return xml.replace(/<\/NFe>/, `${supplement}</NFe>`);
+  if (output.includes("</infNFe>")) {
+    return output.replace(/<\/infNFe>/, `</infNFe>${supplement}`);
   }
-  return xml;
+  if (output.includes("<Signature")) {
+    return output.replace(/<Signature/, `${supplement}<Signature`);
+  }
+  if (output.includes("</NFe>")) {
+    return output.replace(/<\/NFe>/, `${supplement}</NFe>`);
+  }
+  return output;
 };
 
 const wrapNfceBatch = (xml: string) => {
   if (xml.includes("<enviNFe")) return xml;
   const body = xml.replace(/<\?xml[^>]*\?>/i, "").trim();
   return `<?xml version="1.0" encoding="UTF-8"?><enviNFe versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe"><idLote>${Date.now()}</idLote><indSinc>1</indSinc>${body}</enviNFe>`;
+};
+
+const normalizeEmitIe = (ieRaw: string | null | undefined, uf: string) => {
+  const trimmed = String(ieRaw ?? "").trim();
+  if (!trimmed) return "";
+  if (trimmed.toUpperCase() === "ISENTO") return "ISENTO";
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return "";
+  return uf === "MG" ? digits.padStart(13, "0") : digits;
 };
 
 const saveNfceDebugXml = async (
@@ -73,6 +89,23 @@ const saveNfceDebugXml = async (
   return filePath;
 };
 
+const validateMunicipioIbge = async (params: {
+  uf: string;
+  city: string | null | undefined;
+  municipioCodigo: string;
+}) => {
+  try {
+    const expected = await getIbgeMunicipioCode(params.uf, params.city);
+    if (expected && expected != params.municipioCodigo) {
+      throw new Error(
+        `Codigo do municipio (IBGE) divergente. Esperado ${expected}, recebido ${params.municipioCodigo}.`,
+      );
+    }
+  } catch (error) {
+    if (error instanceof Error) throw error;
+  }
+};
+
 const router = Router();
 
 const extractAccessKey = (xmlContent: string): string => {
@@ -85,6 +118,44 @@ const extractAccessKey = (xmlContent: string): string => {
 const extractXmlTag = (xmlContent: string, tag: string): string => {
   const match = xmlContent.match(new RegExp(`<${tag}>([^<]+)</${tag}>`));
   return match?.[1] ?? "";
+};
+
+const parseNfceAccessKey = (key: string) => {
+  if (!/^\d{44}$/.test(key)) return null;
+  const model = key.slice(20, 22);
+  if (model !== "65") return null;
+  const year = 2000 + Number(key.slice(2, 4));
+  const month = Number(key.slice(4, 6));
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    month < 1 ||
+    month > 12
+  ) {
+    return null;
+  }
+  return {
+    ufCode: key.slice(0, 2),
+    year,
+    month,
+    serie: Number(key.slice(22, 25)),
+    number: Number(key.slice(25, 34)),
+    tpEmis: key.slice(34, 35),
+    cNF: key.slice(35, 43),
+  };
+};
+
+const buildIssueDateFromKey = (
+  keyInfo: { year: number; month: number },
+  fallback: Date,
+) => {
+  const issueDate = new Date(fallback);
+  const day = issueDate.getDate();
+  const daysInMonth = new Date(keyInfo.year, keyInfo.month, 0).getDate();
+  issueDate.setFullYear(keyInfo.year);
+  issueDate.setMonth(keyInfo.month - 1);
+  issueDate.setDate(Math.min(day, daysInMonth));
+  return issueDate;
 };
 
 const resolveSefazEnvironment = async (
@@ -523,12 +594,83 @@ router.post(
         });
       }
 
+      let certCnpj: string | null = null;
+      try {
+        const certInfo = XMLSignatureService.extractCertificateInfo(
+          certificateBuffer.toString("base64"),
+          certificatePassword,
+        );
+        certCnpj = certInfo.cnpj ? certInfo.cnpj.replace(/\D/g, "") : null;
+      } catch (error) {
+        console.warn("[NFCe] Falha ao extrair CNPJ do certificado:", error);
+      }
+
+      if (certCnpj) {
+        console.info("[NFCe] Certificado CNPJ:", certCnpj);
+        const companyCnpj = String(company.cnpj || "").replace(/\D/g, "");
+        if (companyCnpj && certCnpj !== companyCnpj) {
+          return res.status(400).json({
+            error:
+              "CNPJ do certificado digital nao corresponde ao CNPJ da empresa",
+          });
+        }
+      }
+
       const paymentMethods = await storage.getPaymentMethods(companyId);
+      let fiscalConfig = await storage.getFiscalConfig(companyId);
+      if (!fiscalConfig) {
+        fiscalConfig = await storage.createFiscalConfig({ companyId });
+      }
       const { SefazIntegration } = await import("./sefaz-integration");
       const integration = new SefazIntegration(
         resolvedEnvironment,
         sefazUrl || undefined,
       );
+
+      const buildDiagnostics = async () => {
+        const companyCnpj = String(company.cnpj || "").replace(/\D/g, "");
+        const emitIeRaw = String(company.ie || "").trim();
+        const emitIeNormalized = normalizeEmitIe(emitIeRaw, uf);
+        const emitIeDigits =
+          emitIeNormalized && emitIeNormalized !== "ISENTO"
+            ? emitIeNormalized
+            : "ISENTO";
+        const diagnostics: Record<string, any> = {
+          environment: resolvedEnvironment,
+          uf,
+          companyCnpj,
+          certCnpj,
+          ieRaw: emitIeRaw,
+          ieDigits: emitIeDigits,
+          ieUsed: emitIeNormalized,
+          municipioCodigo: String(settings.sefazMunicipioCodigo || "").replace(
+            /\D/g,
+            "",
+          ),
+        };
+        try {
+          if (emitIeDigits !== "ISENTO") {
+            const consulta = await integration.consultaCadastro(companyId, uf, {
+              cnpj: companyCnpj,
+              ie: emitIeDigits,
+            });
+            diagnostics.consultaCadastro = {
+              success: consulta.success,
+              status: consulta.status,
+              message: consulta.message,
+              ie: consulta.ie,
+              cnpj: consulta.cnpj,
+              situacao: consulta.situacao,
+              municipioCodigo: consulta.municipioCodigo,
+              uf: consulta.uf,
+            };
+          }
+        } catch (error) {
+          diagnostics.consultaCadastroError =
+            error instanceof Error ? error.message : String(error);
+        }
+        return diagnostics;
+      };
 
       const results = [];
       for (const saleId of saleIds) {
@@ -553,56 +695,163 @@ router.post(
         }
 
         let signedXml = "";
+        let nfceKeyUsed = "";
+        let nfceCnfUsed = "";
+        let serieUsed = 1;
+        let numberUsed = 1;
+        let issueDate = new Date();
+        let tpEmisUsed = "1";
         try {
+          const diagnostics = await buildDiagnostics();
           const items = await storage.getSaleItems(saleId);
           const resolvedItems = await Promise.all(
             items.map(async (item) => {
-              if (item.ncm && String(item.ncm).trim()) {
-                return item;
-              }
               const product = await storage.getProduct(
                 item.productId,
                 companyId,
               );
               return {
                 ...item,
-                ncm: product?.ncm ?? item.ncm,
+                ncm: item.ncm || product?.ncm,
+                ean: product?.ean || null,
               };
             }),
           );
-          let numbering;
-          try {
-            numbering = await storage.getNextDocumentNumber(
-              companyId,
-              "NFC-e",
-              1,
+          const existingKey = String(sale.nfceKey || "").replace(/\D/g, "");
+          const parsedKey = parseNfceAccessKey(existingKey);
+          if (parsedKey) {
+            issueDate = buildIssueDateFromKey(
+              parsedKey,
+              sale.createdAt ? new Date(sale.createdAt) : new Date(),
             );
-          } catch (error) {
-            numbering = await storage.getNextDocumentNumber(
-              companyId,
-              "NFCe",
-              1,
-            );
+            nfceKeyUsed = existingKey;
+            nfceCnfUsed = parsedKey.cNF;
+            tpEmisUsed = parsedKey.tpEmis || "1";
+            serieUsed = Number.isFinite(parsedKey.serie)
+              ? parsedKey.serie
+              : serieUsed;
+            numberUsed = Number.isFinite(parsedKey.number)
+              ? parsedKey.number
+              : numberUsed;
+          } else {
+            let numbering;
+            try {
+              numbering = await storage.getNextDocumentNumber(
+                companyId,
+                "NFC-e",
+                1,
+              );
+            } catch (error) {
+              numbering = await storage.getNextDocumentNumber(
+                companyId,
+                "NFCe",
+                1,
+              );
+            }
+            issueDate = new Date();
+            const { key, cNF } = generateNfceKey({
+              uf,
+              cnpj: company.cnpj,
+              issueDate,
+              serie: numbering.numbering.series,
+              number: numbering.number,
+              tpEmis: "1",
+            });
+            nfceKeyUsed = key;
+            nfceCnfUsed = cNF;
+            serieUsed = numbering.numbering.series;
+            numberUsed = numbering.number;
+            tpEmisUsed = "1";
           }
-          const issueDate = new Date();
-          const { key, cNF } = generateNfceKey({
-            uf,
-            cnpj: company.cnpj,
-            issueDate,
-            serie: numbering.numbering.series,
-            number: numbering.number,
-            tpEmis: "1",
-          });
-          const emitIe = String(company.ie || "").replace(/\D/g, "");
+          let emitIeRaw = String(company.ie || "").trim();
+          let emitIeNormalized = normalizeEmitIe(emitIeRaw, uf);
+          let cadastroEndereco: {
+            logradouro?: string;
+            numero?: string;
+            bairro?: string;
+            municipio?: string;
+            uf?: string;
+            municipioCodigo?: string;
+          } | null = null;
+          if (emitIeNormalized && emitIeNormalized !== "ISENTO") {
+            try {
+              const consulta = await integration.consultaCadastro(
+                companyId,
+                uf,
+                {
+                  cnpj: company.cnpj,
+                  ie: emitIeNormalized,
+                },
+              );
+              if (consulta.success && consulta.ie) {
+                emitIeRaw = consulta.ie;
+                emitIeNormalized = normalizeEmitIe(emitIeRaw, uf);
+                cadastroEndereco = {
+                  logradouro: consulta.logradouro || undefined,
+                  numero: consulta.numero || undefined,
+                  bairro: consulta.bairro || undefined,
+                  municipio: consulta.municipio || undefined,
+                  uf: consulta.uf || undefined,
+                  municipioCodigo: consulta.municipioCodigo || undefined,
+                };
+              }
+            } catch (error) {
+              console.warn(
+                "[NFCe] Falha ao consultar cadastro para IE:",
+                error,
+              );
+            }
+          }
+          const emitIe = emitIeNormalized || "";
           if (!emitIe) {
             throw new Error("IE do emitente nao configurada");
           }
-          const municipioCodigo = String(
-            settings.sefazMunicipioCodigo || "",
-          ).replace(/\D/g, "");
+          const municipioCodigo =
+            (cadastroEndereco?.municipioCodigo || "").replace(/\D/g, "") ||
+            String(settings.sefazMunicipioCodigo || "").replace(/\D/g, "");
           if (municipioCodigo.length < 7) {
             throw new Error("Codigo do municipio SEFAZ invalido");
           }
+          const ufCodeMap: Record<string, string> = {
+            AC: "12",
+            AL: "27",
+            AM: "13",
+            AP: "16",
+            BA: "29",
+            CE: "23",
+            DF: "53",
+            ES: "32",
+            GO: "52",
+            MA: "21",
+            MG: "31",
+            MS: "50",
+            MT: "51",
+            PA: "15",
+            PB: "25",
+            PE: "26",
+            PI: "22",
+            PR: "41",
+            RJ: "33",
+            RN: "24",
+            RO: "11",
+            RR: "14",
+            RS: "43",
+            SC: "42",
+            SE: "28",
+            SP: "35",
+            TO: "17",
+          };
+          const ufCode = ufCodeMap[uf] || "";
+          if (ufCode && !municipioCodigo.startsWith(ufCode)) {
+            throw new Error(
+              `Codigo do municipio SEFAZ invalido para UF ${uf} (esperado prefixo ${ufCode})`,
+            );
+          }
+          await validateMunicipioIbge({
+            uf,
+            city: company.city,
+            municipioCodigo,
+          });
           const paymentMethod = paymentMethods.find(
             (method) => method.name === sale.paymentMethod,
           );
@@ -610,31 +859,57 @@ router.post(
             paymentMethod?.nfceCode,
             paymentMethod?.type,
           );
+          let cDest = "1";
+          let customer: { cpfCnpj?: string | null; state?: string | null } | null =
+            null;
+          let customerCpfCnpj = "";
+          try {
+            if (sale.customerId) {
+              customer = await storage.getCustomer(
+                sale.customerId,
+                companyId,
+              );
+              customerCpfCnpj = String(customer?.cpfCnpj || "").replace(
+                /\D/g,
+                "",
+              );
+              if (customerCpfCnpj.length === 11 || customerCpfCnpj.length === 14) {
+                cDest = "2";
+              }
+            }
+          } catch {
+            cDest = "1";
+            customer = null;
+            customerCpfCnpj = "";
+          }
           const xml = buildNfceXml({
-            key,
-            cNF,
+            key: nfceKeyUsed,
+            cNF: nfceCnfUsed,
             issueDate,
             environment: resolvedEnvironment,
-            serie: numbering.numbering.series,
-            number: numbering.number,
+            serie: serieUsed,
+            number: numberUsed,
             uf,
             municipioCodigo,
+            tpEmis: tpEmisUsed,
             emitente: {
               cnpj: company.cnpj,
               ie: emitIe,
               nome: company.razaoSocial,
               endereco: {
-                logradouro: company.address,
-                numero: "",
-                bairro: "",
-                municipio: company.city,
-                uf: company.state,
+                logradouro:
+                  cadastroEndereco?.logradouro || company.address || "",
+                numero: cadastroEndereco?.numero || "",
+                bairro: cadastroEndereco?.bairro || "",
+                municipio: cadastroEndereco?.municipio || company.city || "",
+                uf: cadastroEndereco?.uf || company.state || "",
                 cep: company.zipCode,
               },
             },
             itens: resolvedItems.map((item) => ({
               id: item.productId,
               nome: item.productName,
+              ean: item.ean,
               ncm: item.ncm,
               cfop: null,
               unidade: "UN",
@@ -644,6 +919,30 @@ router.post(
             })),
             pagamento: { codigo: paymentCode, valor: Number(sale.total) },
             crt: settings.crt || "1",
+            dest: {
+              cpfCnpj: customerCpfCnpj || null,
+              uf: customer?.state || null,
+            },
+            respTec: (() => {
+              const cnpj = String(fiscalConfig?.respTecCnpj || "").trim();
+              const contato = String(fiscalConfig?.respTecContato || "").trim();
+              const email = String(fiscalConfig?.respTecEmail || "").trim();
+              const fone = String(fiscalConfig?.respTecFone || "").trim();
+              if (!cnpj && !contato && !email && !fone) {
+                if (uf === "MG") {
+                  throw new Error(
+                    "infRespTec obrigatorio em MG. Preencha o Responsavel Tecnico na Configuracao Fiscal.",
+                  );
+                }
+                return null;
+              }
+              if (!cnpj || !contato || !email || !fone) {
+                throw new Error(
+                  "infRespTec incompleto: preencha CNPJ, Contato, Email e Telefone na Configuracao Fiscal.",
+                );
+              }
+              return { cnpj, contato, email, fone };
+            })(),
           });
           const validation = validateNfceXmlStructure(xml, {
             requireSignature: false,
@@ -653,47 +952,77 @@ router.post(
             const details = validation.details
               ? ` | detalhes: ${JSON.stringify(validation.details)}`
               : "";
-            throw new Error(`Schema NFC-e invalido: ${validation.error}${details}`);
+            throw new Error(
+              `Schema NFC-e invalido: ${validation.error}${details}`,
+            );
           }
 
           if (!settings.cscId || !settings.cscToken) {
             throw new Error("CSC nao configurado para NFC-e");
           }
-          signedXml = signNfceXml(
+          const tpEmis = extractXmlTag(xml, "tpEmis") || "1";
+          const signedXmlForDigest = signNfceXml(
             xml,
             certificateBuffer.toString("base64"),
             certificatePassword,
-            key,
+            nfceKeyUsed,
           );
-          const tpEmis = extractXmlTag(xml, "tpEmis") || "1";
-          const digVal = extractXmlTag(signedXml, "DigestValue");
+          const digVal = extractXmlTag(signedXmlForDigest, "DigestValue");
           if (tpEmis === "9" && !digVal) {
             throw new Error("DigestValue da assinatura nao encontrado");
           }
           const dhEmi =
             extractXmlTag(xml, "dhEmi") || formatNfceDateTime(issueDate);
-          const vNF = extractXmlTag(xml, "vNF") || Number(sale.total).toFixed(2);
+          const vNF =
+            extractXmlTag(xml, "vNF") || Number(sale.total).toFixed(2);
           const qrBase =
-            uf === "MG" && qrBaseUrl.includes("fazenda.mg.gov.br/nfce/qrcode")
-              ? "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml"
+            uf === "MG" && qrBaseUrl.endsWith("/portalnfce/sistema/qrcode")
+              ? `${qrBaseUrl}.xhtml`
               : qrBaseUrl;
           const qrUrl = buildNfceQrUrl({
             sefazUrl: qrBase,
-            chave: key,
+            uf,
+            chave: nfceKeyUsed,
             versaoQr: "2",
             tpAmb: resolvedEnvironment === "producao" ? "1" : "2",
             dhEmi,
             vNF,
             digVal,
             tpEmis,
+            cDest,
             cscId: settings.cscId,
             csc: settings.cscToken,
           });
+          if (process.env.NFCE_DEBUG_QR === "1") {
+            console.log("[NFCe] QR payload", {
+              chave: nfceKeyUsed,
+              tpAmb: resolvedEnvironment === "producao" ? "1" : "2",
+              cscId: settings.cscId,
+              qrUrl,
+            });
+          }
           const urlChave =
-            "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml";
-          const supplement = `<infNFeSupl><qrCode><![CDATA[${qrUrl.trim()}]]></qrCode><urlChave>${urlChave}</urlChave></infNFeSupl>`;
+            resolvedEnvironment === "producao"
+              ? "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml"
+              : "https://hnfce.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml";
+          const qrCodeValue = String(qrUrl || "").replace(/\s+/g, "");
+          const urlChaveValue = String(urlChave || "").trim();
+          if (!qrCodeValue) {
+            throw new Error("qrCode da NFC-e vazio");
+          }
+          if (!urlChaveValue) {
+            throw new Error("urlChave da NFC-e vazio");
+          }
+          const supplement = `<infNFeSupl><qrCode><![CDATA[${qrCodeValue}]]></qrCode><urlChave>${urlChaveValue}</urlChave></infNFeSupl>`;
+          signedXml = signNfceXml(
+            xml,
+            certificateBuffer.toString("base64"),
+            certificatePassword,
+            nfceKeyUsed,
+          );
           const finalXml = injectNfceSupplement(signedXml, supplement);
-          const validationSigned = validateNfceXmlStructure(finalXml, {
+          signedXml = finalXml;
+          const validationSigned = validateNfceXmlStructure(signedXml, {
             requireSignature: true,
           });
           if (!validationSigned.ok) {
@@ -706,13 +1035,15 @@ router.post(
             );
           }
 
-          const batchXml = wrapNfceBatch(finalXml);
+          const sefazService = new SefazService({
+            environment: resolvedEnvironment,
+            uf: String(uf || "SP").toUpperCase(),
+            certificateBuffer,
+            certificatePassword,
+            cnpj: String(company.cnpj || "").replace(/\D/g, ""),
+          });
 
-          const result = await integration.authorizeNFCe(
-            companyId,
-            uf,
-            batchXml,
-          );
+          const result = await sefazService.submitNFCe(signedXml);
 
           if (result.success && result.status === "100") {
             await storage.updateSaleNfceStatus(
@@ -720,7 +1051,7 @@ router.post(
               companyId,
               "Autorizada",
               result.protocol || undefined,
-              result.key || key,
+              result.key || nfceKeyUsed,
               null,
             );
             const authorizedAt = new Date();
@@ -730,8 +1061,8 @@ router.post(
             await storage.saveFiscalXml({
               companyId,
               documentType: "NFCe",
-              documentKey: result.key || key,
-              xmlContent: finalXml,
+              documentKey: result.key || nfceKeyUsed,
+              xmlContent: signedXml,
               qrCodeUrl: qrUrl,
               authorizedAt,
               expiresAt,
@@ -741,21 +1072,28 @@ router.post(
               success: true,
               status: result.status,
               message: result.message,
-              key: result.key || key,
+              key: result.key || nfceKeyUsed,
               qrCodeUrl: qrUrl,
+              ...(result.rawResponse
+                ? { rawResponse: result.rawResponse }
+                : {}),
             });
           } else {
             const debugPath = await saveNfceDebugXml(
               saleId,
-              batchXml,
+              signedXml,
               "signed",
             );
+            const probableCause =
+              result.status === "230"
+                ? "IE nao cadastrada no servico NFC-e da SEFAZ/ambiente. Verifique credenciamento NFC-e, IE e CNPJ do emitente."
+                : undefined;
             await storage.updateSaleNfceStatus(
               saleId,
               companyId,
               "Pendente Fiscal",
               sale.nfceProtocol || undefined,
-              sale.nfceKey || undefined,
+              nfceKeyUsed || sale.nfceKey || undefined,
               result.message || "Erro ao autorizar NFC-e",
             );
             results.push({
@@ -763,6 +1101,11 @@ router.post(
               success: false,
               status: result.status,
               error: result.message || "Erro ao autorizar NFC-e",
+              ...(result.rawResponse
+                ? { rawResponse: result.rawResponse }
+                : {}),
+              ...(probableCause ? { probableCause } : {}),
+              diagnostics,
               ...(debugPath ? { debugXmlPath: debugPath } : {}),
             });
           }
@@ -773,7 +1116,7 @@ router.post(
             companyId,
             "Pendente Fiscal",
             sale.nfceProtocol || undefined,
-            sale.nfceKey || undefined,
+            nfceKeyUsed || sale.nfceKey || undefined,
             error instanceof Error ? error.message : "Erro ao emitir NFC-e",
           );
           results.push({
@@ -795,6 +1138,52 @@ router.post(
   },
 );
 
+// Debug: mostrar dados fiscais usados para emitir NFC-e
+router.get(
+  "/nfce/debug",
+  requireAuth,
+  requirePermission("fiscal:emit_nfce"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+      const settings = await storage.getCompanySettings(companyId);
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+      const uf = settings?.sefazUf || company.state || "SP";
+      const emitIeRaw = String(company.ie || "").trim();
+      const emitIe = normalizeEmitIe(emitIeRaw, uf);
+      const municipioCodigo = String(
+        settings?.sefazMunicipioCodigo || "",
+      ).replace(/\D/g, "");
+
+      res.json({
+        companyId,
+        uf,
+        cnpj: String(company.cnpj || "").replace(/\D/g, ""),
+        ieRaw: emitIeRaw,
+        ieUsed: emitIe,
+        city: company.city || null,
+        municipioCodigo,
+        sefazEnvironment: settings?.fiscalEnvironment || "homologacao",
+        sefazUrlHomologacao: settings?.sefazUrlHomologacao || null,
+        sefazUrlProducao: settings?.sefazUrlProducao || null,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao carregar debug NFC-e",
+      });
+    }
+  },
+);
+
 router.post(
   "/nfce/cancel",
   requireAuth,
@@ -808,8 +1197,14 @@ router.post(
       }
 
       const saleId = Number(req.body.saleId);
+      const reason = String(req.body.reason || "").trim();
       if (!saleId) {
         return res.status(400).json({ error: "Venda nao informada" });
+      }
+      if (reason.length < 15) {
+        return res.status(400).json({
+          error: "Justificativa obrigatoria (min 15 caracteres)",
+        });
       }
 
       const sale = await storage.getSale(saleId, companyId);
@@ -823,6 +1218,40 @@ router.post(
         });
       }
 
+      const accessKey = String(sale.nfceKey || "").replace(/\D/g, "");
+      const protocol = String(sale.nfceProtocol || "").trim();
+      if (!accessKey || accessKey.length !== 44) {
+        return res
+          .status(400)
+          .json({ error: "Chave NFC-e invalida ou ausente" });
+      }
+      if (!protocol) {
+        return res
+          .status(400)
+          .json({ error: "Protocolo NFC-e ausente" });
+      }
+
+      const settings = await storage.getCompanySettings(companyId);
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+      const uf = String(settings?.sefazUf || company.state || "SP").toUpperCase();
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado",
+        });
+      }
+
       const createdAt = sale.createdAt ? new Date(sale.createdAt) : null;
       if (createdAt) {
         const diffMs = Date.now() - createdAt.getTime();
@@ -831,6 +1260,45 @@ router.post(
             error: "Prazo legal para cancelamento expirado",
           });
         }
+      }
+
+      const sefazService = new SefazService({
+        environment: resolvedEnvironment,
+        uf,
+        certificateBuffer,
+        certificatePassword,
+        cnpj: String(company.cnpj || "").replace(/\D/g, ""),
+      });
+
+      const result = await sefazService.cancelNFCe(
+        accessKey,
+        protocol,
+        reason,
+      );
+
+      await logSefazTransmission({
+        companyId,
+        action: "nfce-cancel",
+        environment: resolvedEnvironment,
+        requestPayload: { saleId, accessKey, protocol, reason, uf },
+        responsePayload: result,
+        success: result.success,
+      });
+
+      if (!result.success) {
+        await storage.updateSaleNfceStatus(
+          saleId,
+          companyId,
+          "Pendente Fiscal",
+          sale.nfceProtocol || undefined,
+          sale.nfceKey || undefined,
+          result.message || "Erro ao cancelar NFC-e",
+        );
+        return res.status(400).json({
+          error: result.message || "Falha ao cancelar NFC-e",
+          status: result.status,
+          rawResponse: result.rawResponse,
+        });
       }
 
       const updated = await storage.updateSaleNfceStatus(
@@ -885,6 +1353,60 @@ router.post(
         });
       }
 
+      const settings = await storage.getCompanySettings(companyId);
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+      const uf = String(settings?.sefazUf || company.state || "SP").toUpperCase();
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado",
+        });
+      }
+
+      const sefazService = new SefazService({
+        environment: resolvedEnvironment,
+        uf,
+        certificateBuffer,
+        certificatePassword,
+        cnpj: String(company.cnpj || "").replace(/\D/g, ""),
+      });
+
+      const result = await sefazService.inutilizeNumbers(
+        serie,
+        startNumber,
+        endNumber,
+        reason,
+        "65",
+      );
+
+      await logSefazTransmission({
+        companyId,
+        action: "nfce-inutilize",
+        environment: resolvedEnvironment,
+        requestPayload: { serie, startNumber, endNumber, reason, uf },
+        responsePayload: result,
+        success: result.success,
+      });
+
+      if (!result.success) {
+        return res.status(400).json({
+          error: result.message || "Falha ao inutilizar numeracao",
+          status: result.status,
+          rawResponse: result.rawResponse,
+        });
+      }
+
       const record = await storage.createNfeNumberInutilization({
         companyId,
         nfeSeries: serie,
@@ -893,7 +1415,13 @@ router.post(
         reason,
       });
 
-      res.json({ success: true, record });
+      res.json({
+        success: true,
+        record,
+        protocol: result.protocol,
+        status: result.status,
+        message: result.message,
+      });
     } catch (error) {
       res.status(400).json({
         error:
@@ -1361,6 +1889,11 @@ router.post(
         environment,
       );
 
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
       const { CertificateService } = await import("./certificate-service");
       const certService = new CertificateService();
       const certificateBuffer = await certService.getCertificate(companyId);
@@ -1373,56 +1906,28 @@ router.post(
         });
       }
 
-      let signedXml = xmlContent;
-      let signed = false;
-      try {
-        const certificateBase64 = certificateBuffer.toString("base64");
-        signedXml = XMLSignatureService.signXML(
-          xmlContent,
-          certificateBase64,
-          certificatePassword,
-        );
-        signed = true;
-      } catch (signError) {
-        await logSefazTransmission({
-          companyId,
-          action: "submit",
-          environment: resolvedEnvironment,
-          requestPayload: { xmlContent, uf },
-          responsePayload: {
-            error:
-              signError instanceof Error
-                ? signError.message
-                : "Erro ao assinar XML",
-          },
-          success: false,
-        });
-        console.error("Erro ao assinar XML:", signError);
-        return res.status(400).json({
-          error: `Falha ao assinar XML: ${
-            signError instanceof Error ? signError.message : "Desconhecido"
-          }`,
-        });
-      }
-
+      const ufNormalized = String(uf).toUpperCase();
       const sefazService = new SefazService({
         environment: resolvedEnvironment,
-        uf,
-        certificatePath: "",
-        certificatePassword: "",
+        uf: ufNormalized,
+        certificateBuffer,
+        certificatePassword,
+        cnpj: String(company.cnpj || "").replace(/\D/g, ""),
       });
 
-      const result = await sefazService.submitNFe(signedXml);
+      const result = await sefazService.submitNFe(xmlContent);
+      const signedXml = result.signedXml || xmlContent;
+      const signed = Boolean(result.signedXml);
       await logSefazTransmission({
         companyId,
         action: "submit",
         environment: resolvedEnvironment,
-        requestPayload: { xmlContent: signedXml, uf, signed },
+        requestPayload: { xmlContent: signedXml, uf: ufNormalized, signed },
         responsePayload: result,
         success: result.success,
       });
       if (result.success) {
-        const accessKey = extractAccessKey(signedXml);
+        const accessKey = result.key || extractAccessKey(signedXml);
         if (accessKey) {
           const authorizedAt = result.timestamp ?? new Date();
           const expiresAt = new Date(
@@ -1473,18 +1978,83 @@ router.post(
 );
 
 router.post(
+  "/sefaz/consulta-cadastro",
+  requireAuth,
+  requirePermission("fiscal:emit_nfce"),
+  requireValidFiscalCertificate(),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const settings = await storage.getCompanySettings(companyId);
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      const resolvedEnvironment = await resolveSefazEnvironment(
+        companyId,
+        req.body?.environment,
+      );
+      const uf = String(
+        req.body?.uf || settings?.sefazUf || company.state || "SP",
+      ).toUpperCase();
+      const cnpj = String(req.body?.cnpj || company.cnpj || "").replace(
+        /\D/g,
+        "",
+      );
+      const ie = String(req.body?.ie || company.ie || "").trim();
+      const cpf = String(req.body?.cpf || "").trim();
+
+      const { SefazIntegration } = await import("./sefaz-integration");
+      const integration = new SefazIntegration(
+        resolvedEnvironment,
+        (resolvedEnvironment === "producao"
+          ? settings?.sefazUrlProducao
+          : settings?.sefazUrlHomologacao) || undefined,
+      );
+      const result = await integration.consultaCadastro(companyId, uf, {
+        cnpj,
+        ie,
+        cpf,
+      });
+
+      await logSefazTransmission({
+        companyId,
+        action: "consulta-cadastro",
+        environment: resolvedEnvironment,
+        requestPayload: { uf, cnpj, ie: String(ie || ""), cpf },
+        responsePayload: result,
+        success: result.success,
+      });
+
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error ? error.message : "Erro ao consultar cadastro",
+      });
+    }
+  },
+);
+
+router.post(
   "/sefaz/cancel",
   requireAuth,
   requirePermission("fiscal:cancel_nfe"),
   requireValidFiscalCertificate(),
   async (req, res) => {
     try {
-      const { nfeNumber, nfeSeries, reason, environment, uf } = req.body;
+      const { nfeNumber, nfeSeries, reason, environment, uf, accessKey, protocol } =
+        req.body;
       const companyId = getCompanyId(req);
       if (!companyId) {
         return res.status(401).json({ error: "Empresa nao identificada" });
       }
-      if (!nfeNumber || !nfeSeries || !reason) {
+      if (!reason) {
         return res.status(400).json({ error: "Campos obrigatorios ausentes" });
       }
 
@@ -1493,16 +2063,47 @@ router.post(
         environment,
       );
 
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado para esta empresa",
+        });
+      }
+
+      const resolvedAccessKey = String(accessKey || "").replace(/\D/g, "");
+      const resolvedProtocol = String(protocol || "").trim();
+      if (!resolvedAccessKey || resolvedAccessKey.length !== 44) {
+        return res.status(400).json({
+          error: "Chave de acesso (44 digitos) obrigatoria para cancelamento",
+        });
+      }
+      if (!resolvedProtocol) {
+        return res.status(400).json({
+          error: "Protocolo de autorizacao (nProt) obrigatorio para cancelamento",
+        });
+      }
+
       const sefazService = new SefazService({
         environment: resolvedEnvironment,
-        uf: uf || "SP",
-        certificatePath: "",
-        certificatePassword: "",
+        uf: String(uf || "SP").toUpperCase(),
+        certificateBuffer,
+        certificatePassword,
+        cnpj: String(company.cnpj || "").replace(/\D/g, ""),
       });
 
       const result = await sefazService.cancelNFe(
-        String(nfeNumber),
-        String(nfeSeries),
+        resolvedAccessKey,
+        resolvedProtocol,
         String(reason),
       );
 
@@ -1510,7 +2111,14 @@ router.post(
         companyId,
         action: "cancel",
         environment: resolvedEnvironment,
-        requestPayload: { nfeNumber, nfeSeries, reason, uf },
+        requestPayload: {
+          nfeNumber,
+          nfeSeries,
+          reason,
+          uf,
+          accessKey: resolvedAccessKey,
+          protocol: resolvedProtocol,
+        },
         responsePayload: result,
         success: result.success,
       });
@@ -1544,12 +2152,14 @@ router.post(
         correctedContent,
         environment,
         uf,
+        accessKey,
+        sequence,
       } = req.body;
       const companyId = getCompanyId(req);
       if (!companyId) {
         return res.status(401).json({ error: "Empresa nao identificada" });
       }
-      if (!nfeNumber || !nfeSeries || !correctionReason || !correctedContent) {
+      if (!correctionReason && !correctedContent) {
         return res.status(400).json({ error: "Campos obrigatorios ausentes" });
       }
 
@@ -1558,17 +2168,46 @@ router.post(
         environment,
       );
 
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado para esta empresa",
+        });
+      }
+
+      const resolvedAccessKey = String(accessKey || "").replace(/\D/g, "");
+      if (!resolvedAccessKey || resolvedAccessKey.length !== 44) {
+        return res.status(400).json({
+          error: "Chave de acesso (44 digitos) obrigatoria para CC-e",
+        });
+      }
+
+      const correctionText = String(correctedContent || correctionReason).trim();
+      const seqNumber =
+        typeof sequence === "number" && sequence > 0 ? sequence : 1;
+
       const sefazService = new SefazService({
         environment: resolvedEnvironment,
-        uf: uf || "SP",
-        certificatePath: "",
-        certificatePassword: "",
+        uf: String(uf || "SP").toUpperCase(),
+        certificateBuffer,
+        certificatePassword,
+        cnpj: String(company.cnpj || "").replace(/\D/g, ""),
       });
 
       const result = await sefazService.sendCorrectionLetter(
-        String(nfeNumber),
-        String(nfeSeries),
-        { correctionReason, correctedContent },
+        resolvedAccessKey,
+        correctionText,
+        seqNumber,
       );
 
       await logSefazTransmission({
@@ -1581,6 +2220,8 @@ router.post(
           correctionReason,
           correctedContent,
           uf,
+          accessKey: resolvedAccessKey,
+          sequence: seqNumber,
         },
         responsePayload: result,
         success: result.success,
@@ -1625,11 +2266,29 @@ router.post(
         environment,
       );
 
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado para esta empresa",
+        });
+      }
+
       const sefazService = new SefazService({
         environment: resolvedEnvironment,
-        uf: uf || "SP",
-        certificatePath: "",
-        certificatePassword: "",
+        uf: String(uf || "SP").toUpperCase(),
+        certificateBuffer,
+        certificatePassword,
+        cnpj: String(company.cnpj || "").replace(/\D/g, ""),
       });
 
       const result = await sefazService.inutilizeNumbers(

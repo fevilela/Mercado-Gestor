@@ -78,6 +78,10 @@ interface CompanySettings {
   nomeFantasia?: string;
   email?: string;
   phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
   regimeTributario?: string;
   cnae?: string;
   im?: string;
@@ -149,6 +153,7 @@ export default function Settings() {
   );
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadingCnpj, setLoadingCnpj] = useState(false);
   const [settings, setSettings] = useState<CompanySettings>({
     cnpj: company?.cnpj || "",
     ie: "",
@@ -159,6 +164,10 @@ export default function Settings() {
     regimeTributario: "Simples Nacional",
     cnae: "",
     im: "",
+    address: "",
+    city: "",
+    state: "",
+    zipCode: "",
     crt: "1",
     fiscalEnvironment: "homologacao",
     fiscalEnabled: false,
@@ -614,6 +623,80 @@ export default function Settings() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
+  const fetchCnpjData = async () => {
+    const cnpj = String(settings.cnpj || "").replace(/\D/g, "");
+    if (cnpj.length !== 14 || loadingCnpj) {
+      return;
+    }
+
+    setLoadingCnpj(true);
+    try {
+      const response = await fetch(`/api/lookup-cnpj?cnpj=${cnpj}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSettings((prev) => ({
+          ...prev,
+          razaoSocial: data.razaoSocial || prev.razaoSocial,
+          nomeFantasia: data.nomeFantasia || prev.nomeFantasia,
+          email: data.email || prev.email,
+          phone: data.phone || prev.phone,
+          address: data.address || prev.address,
+          city: data.city || prev.city,
+          state: data.state || prev.state,
+          zipCode: data.zipCode || prev.zipCode,
+        }));
+        toast({
+          title: "CNPJ encontrado",
+          description: "Dados da Receita preenchidos.",
+        });
+      }
+    } catch (error) {
+      console.error("Erro ao buscar CNPJ:", error);
+      toast({
+        title: "Aviso",
+        description: "Não foi possível buscar os dados do CNPJ.",
+        variant: "destructive",
+      });
+    }
+
+    try {
+      const response = await fetch("/api/fiscal/sefaz/consulta-cadastro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ cnpj }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.success) {
+          const endereco =
+            data.logradouro
+              ? `${data.logradouro}${data.numero ? `, ${data.numero}` : ""}${
+                  data.bairro ? ` - ${data.bairro}` : ""
+                }`
+              : "";
+          setSettings((prev) => ({
+            ...prev,
+            ie: data.ie || prev.ie,
+            cnae: data.cnae || prev.cnae,
+            razaoSocial: data.nome || prev.razaoSocial,
+            address: endereco || prev.address,
+            city: data.municipio || prev.city,
+            state: data.uf || prev.state,
+          }));
+          toast({
+            title: "Cadastro SEFAZ",
+            description: "IE e CNAE preenchidos.",
+          });
+        }
+      }
+    } catch (error) {
+      console.warn("Erro ao consultar cadastro SEFAZ:", error);
+    } finally {
+      setLoadingCnpj(false);
+    }
+  };
+
   const applySefazDefaults = (
     ufValue: string,
     current: CompanySettings
@@ -687,7 +770,14 @@ export default function Settings() {
                       placeholder="00.000.000/0000-00"
                       value={settings.cnpj || ""}
                       onChange={(e) => updateSetting("cnpj", e.target.value)}
+                      onBlur={fetchCnpjData}
                     />
+                    {loadingCnpj && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-2">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Buscando dados do CNPJ...
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="ie">Inscrição Estadual</Label>
@@ -760,6 +850,46 @@ export default function Settings() {
                       placeholder="31999999999"
                       value={settings.phone || ""}
                       onChange={(e) => updateSetting("phone", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="address">Endereço</Label>
+                    <Input
+                      id="address"
+                      placeholder="Rua, número, bairro"
+                      value={settings.address || ""}
+                      onChange={(e) => updateSetting("address", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="zipCode">CEP</Label>
+                    <Input
+                      id="zipCode"
+                      placeholder="00000-000"
+                      value={settings.zipCode || ""}
+                      onChange={(e) => updateSetting("zipCode", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="city">Cidade</Label>
+                    <Input
+                      id="city"
+                      placeholder="Cidade"
+                      value={settings.city || ""}
+                      onChange={(e) => updateSetting("city", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="state">UF</Label>
+                    <Input
+                      id="state"
+                      placeholder="UF"
+                      value={settings.state || ""}
+                      onChange={(e) => updateSetting("state", e.target.value)}
                     />
                   </div>
                 </div>
@@ -1012,7 +1142,6 @@ export default function Settings() {
                       Token CSC (Código de Segurança do Contribuinte)
                     </Label>
                     <Input
-                      type="password"
                       value={settings.cscToken || ""}
                       onChange={(e) =>
                         updateSetting("cscToken", e.target.value)

@@ -643,6 +643,10 @@ export const fiscalConfigs = pgTable("fiscal_configs", {
   regimeTributario: text("regime_tributario")
     .notNull()
     .default("Simples Nacional"),
+  respTecCnpj: text("resp_tec_cnpj"),
+  respTecContato: text("resp_tec_contato"),
+  respTecEmail: text("resp_tec_email"),
+  respTecFone: text("resp_tec_fone"),
   nfeEnabled: boolean("nfe_enabled").default(false),
   nfceEnabled: boolean("nfce_enabled").default(true),
   nfseEnabled: boolean("nfse_enabled").default(false),

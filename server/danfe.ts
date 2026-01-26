@@ -135,10 +135,18 @@ export async function generateDanfeNFeA4(xmlContent: string): Promise<Buffer> {
           },
         ],
       },
-      { text: `Data emissao: ${ide.dhEmi ?? ide.dEmi ?? ""}`, margin: [0, 10, 0, 0] },
+      {
+        text: `Data emissao: ${ide.dhEmi ?? ide.dEmi ?? ""}`,
+        margin: [0, 10, 0, 0],
+      },
     ],
     styles: {
-      title: { fontSize: 13, bold: true, alignment: "center", margin: [0, 0, 0, 10] },
+      title: {
+        fontSize: 13,
+        bold: true,
+        alignment: "center",
+        margin: [0, 0, 0, 10],
+      },
       subtitle: { fontSize: 11, bold: true, margin: [0, 0, 0, 6] },
       small: { fontSize: 8, margin: [0, 0, 0, 4] },
     },
@@ -185,15 +193,19 @@ function buildNFCeQrUrl(params: {
     digVal,
     cscId,
   ].join("|");
-  const hash = crypto.createHash("sha1").update(payload + csc).digest("hex");
+  const hash = crypto
+    .createHash("sha256")
+    .update(payload + csc)
+    .digest("hex");
   return `${sefazUrl}?p=${payload}|${hash}`;
 }
 
 export async function generateDanfeNFCeThermal(
   xmlContent: string,
-  opts: { sefazUrl: string; cscId: string; csc: string }
+  opts: { sefazUrl: string; cscId: string; csc: string },
 ): Promise<Buffer> {
-  const { ide, emit, dest, total, det, chave, inf } = await parseNFe(xmlContent);
+  const { ide, emit, dest, total, det, chave, inf } =
+    await parseNFe(xmlContent);
   const totalTributos = numberString(total.vTotTrib);
   const totalsBody = [
     ["Subtotal", formatCurrency(numberString(total.vProd))],
@@ -225,7 +237,9 @@ export async function generateDanfeNFCeThermal(
       csc: opts.csc,
     });
 
-  const qrCodeDataUrl = await QRCode.toDataURL(qrUrl, { errorCorrectionLevel: "M" });
+  const qrCodeDataUrl = await QRCode.toDataURL(qrUrl, {
+    errorCorrectionLevel: "M",
+  });
 
   const docDefinition = {
     pageSize: { width: 227, height: "auto" },
@@ -234,12 +248,31 @@ export async function generateDanfeNFCeThermal(
     content: [
       { text: emit.xNome ?? "", style: "title" },
       { text: `CNPJ: ${emit.CNPJ ?? ""}`, margin: [0, 2, 0, 2] },
-      { text: emit.enderEmit?.xLgr ? `${emit.enderEmit.xLgr}, ${emit.enderEmit.nro}` : "" },
-      { text: `Bairro: ${emit.enderEmit?.xBairro ?? ""} - ${emit.enderEmit?.xMun ?? ""}` },
-      { text: `UF: ${emit.enderEmit?.UF ?? ""} CEP: ${emit.enderEmit?.CEP ?? ""}`, margin: [0, 0, 0, 6] },
-      { text: "DANFE NFC-e - Documento Auxiliar da Nota Fiscal de Consumidor Eletronica", style: "subtitle" },
-      { text: `Numero: ${ide.nNF ?? ""} Serie: ${ide.serie ?? ""}`, margin: [0, 2, 0, 4] },
-      { text: `Chave de Acesso: ${chave}`, style: "small", margin: [0, 0, 0, 6] },
+      {
+        text: emit.enderEmit?.xLgr
+          ? `${emit.enderEmit.xLgr}, ${emit.enderEmit.nro}`
+          : "",
+      },
+      {
+        text: `Bairro: ${emit.enderEmit?.xBairro ?? ""} - ${emit.enderEmit?.xMun ?? ""}`,
+      },
+      {
+        text: `UF: ${emit.enderEmit?.UF ?? ""} CEP: ${emit.enderEmit?.CEP ?? ""}`,
+        margin: [0, 0, 0, 6],
+      },
+      {
+        text: "DANFE NFC-e - Documento Auxiliar da Nota Fiscal de Consumidor Eletronica",
+        style: "subtitle",
+      },
+      {
+        text: `Numero: ${ide.nNF ?? ""} Serie: ${ide.serie ?? ""}`,
+        margin: [0, 2, 0, 4],
+      },
+      {
+        text: `Chave de Acesso: ${chave}`,
+        style: "small",
+        margin: [0, 0, 0, 6],
+      },
       {
         table: {
           widths: [15, "*", 40, 35, 45],
@@ -273,23 +306,43 @@ export async function generateDanfeNFCeThermal(
       },
       {
         columns: [
-          { width: "*", text: "Consulta via leitor de QR Code", alignment: "center" },
+          {
+            width: "*",
+            text: "Consulta via leitor de QR Code",
+            alignment: "center",
+          },
         ],
         margin: [0, 4, 0, 4],
       },
       {
         columns: [
-          { width: "*", image: qrCodeDataUrl, fit: [120, 120], alignment: "center" },
+          {
+            width: "*",
+            image: qrCodeDataUrl,
+            fit: [120, 120],
+            alignment: "center",
+          },
         ],
         margin: [0, 0, 0, 6],
       },
       { text: qrUrl, style: "small", alignment: "center" },
-      { text: `Data emissao: ${ide.dhEmi ?? ide.dEmi ?? ""}`, margin: [0, 6, 0, 0] },
-      { text: `Consumidor: ${dest.xNome ?? "Nao identificado"}`, margin: [0, 2, 0, 0] },
+      {
+        text: `Data emissao: ${ide.dhEmi ?? ide.dEmi ?? ""}`,
+        margin: [0, 6, 0, 0],
+      },
+      {
+        text: `Consumidor: ${dest.xNome ?? "Nao identificado"}`,
+        margin: [0, 2, 0, 0],
+      },
     ],
     styles: {
       title: { fontSize: 10, bold: true, alignment: "center" },
-      subtitle: { fontSize: 8, bold: true, alignment: "center", margin: [0, 2, 0, 4] },
+      subtitle: {
+        fontSize: 8,
+        bold: true,
+        alignment: "center",
+        margin: [0, 2, 0, 4],
+      },
       small: { fontSize: 7 },
     },
   };

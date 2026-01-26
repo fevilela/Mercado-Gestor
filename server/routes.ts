@@ -1050,7 +1050,16 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const settings = await storage.getCompanySettings(companyId);
-        res.json(settings || {});
+        const company = await storage.getCompanyById(companyId);
+        res.json({
+          ...(settings || {}),
+          address: company?.address || "",
+          city: company?.city || "",
+          state: company?.state || "",
+          zipCode: company?.zipCode || "",
+          cnae: company?.cnae || settings?.cnae || "",
+          im: company?.im || settings?.im || "",
+        });
       } catch (error) {
         res.status(500).json({ error: "Failed to fetch settings" });
       }
@@ -1063,15 +1072,33 @@ export async function registerRoutes(
       if (!companyId) return res.status(401).json({ error: "Não autenticado" });
 
       // Temporarily simplified for debugging and quick fix
-      const validated = insertCompanySettingsSchema.partial().parse(req.body);
+      const {
+        address,
+        city,
+        state,
+        zipCode,
+        cnae,
+        im,
+        ...rest
+      } = req.body || {};
+      const validated = insertCompanySettingsSchema.partial().parse(rest);
       const settings = await storage.updateCompanySettings(
         companyId,
-        validated
+        { ...validated, address, city, state, zipCode, cnae, im }
       );
+      const company = await storage.getCompanyById(companyId);
       console.log(
         `Settings updated for company ${companyId}: ${JSON.stringify(settings)}`
       );
-      res.json(settings);
+      res.json({
+        ...(settings || {}),
+        address: company?.address || "",
+        city: company?.city || "",
+        state: company?.state || "",
+        zipCode: company?.zipCode || "",
+        cnae: company?.cnae || settings?.cnae || "",
+        im: company?.im || settings?.im || "",
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors });
@@ -2661,6 +2688,11 @@ export async function registerRoutes(
         city: data.municipio || "",
         state: data.uf || "",
         zipCode: data.cep || "",
+        cnae:
+          Array.isArray(data.atividade_principal) &&
+          data.atividade_principal[0]?.code
+            ? String(data.atividade_principal[0].code).replace(/\D/g, "")
+            : "",
       });
     } catch (error) {
       console.error("Erro ao buscar CNPJ:", error);
@@ -3127,6 +3159,46 @@ export async function registerRoutes(
       } catch (error) {
         console.error("Failed to fetch certificate:", error);
         res.status(500).json({ error: "Failed to fetch certificate" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/digital-certificate/debug",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÃ£o autenticado" });
+
+        const certBuffer = await certificateService.getCertificate(companyId);
+        const certPassword =
+          await certificateService.getCertificatePassword(companyId);
+        if (!certBuffer || !certPassword) {
+          return res.json({ installed: false });
+        }
+
+        const candidates =
+          XMLSignatureService.extractCertificateCnpjCandidates(
+            certBuffer.toString("base64"),
+            certPassword
+          );
+        const info = XMLSignatureService.extractCertificateInfo(
+          certBuffer.toString("base64"),
+          certPassword
+        );
+        res.json({
+          installed: true,
+          cnpj: info.cnpj,
+          subjectName: info.subjectName,
+          issuer: info.issuer,
+          candidates,
+        });
+      } catch (error) {
+        console.error("Failed to debug certificate:", error);
+        res.status(500).json({ error: "Failed to debug certificate" });
       }
     }
   );
