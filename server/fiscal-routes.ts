@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Router } from "express";
 import {
   NFeSalesValidationSchema,
   NFCeValidationSchema,
@@ -12,19 +12,33 @@ import {
 import { CFOPValidator } from "./cfop-validator";
 import { CSOSNCalculator } from "./csosn-calculator";
 import { TaxCalculator } from "./tax-calculator";
+import { TaxMatrixService } from "./tax-matrix";
 import { SefazService } from "./sefaz-service";
-import { XMLSignatureService } from "./xml-signature";
 import { storage } from "./storage";
 import { requireAuth, getCompanyId } from "./middleware";
+import { CEST_REGEX, isCestRequired } from "@shared/schema";
 
 const router = Router();
 
 // ============================================
 // NF-e (Modelo 55) Routes
 // ============================================
-router.post("/nfe/validate", async (req, res) => {
+router.post("/nfe/validate", requireAuth, async (req, res) => {
   try {
+    const companyId = getCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ error: "Não autenticado" });
+    }
+
     const validation = NFeSalesValidationSchema.parse(req.body);
+    const { ibptToken } = req.body as { ibptToken?: string };
+
+    const companySettings = await storage.getCompanySettings(companyId);
+    const taxRegime =
+      (companySettings?.regimeTributario as
+        | "Simples Nacional"
+        | "Lucro Real"
+        | "Lucro Presumido") ?? "Simples Nacional";
 
     // Validar CFOP
     const cfopResult = await CFOPValidator.validateCFOP(validation.cfopCode, {
@@ -44,8 +58,59 @@ router.post("/nfe/validate", async (req, res) => {
       });
     }
 
+    const resolvedItems = [];
+
     // Validar CSOSN para cada item
     for (const item of validation.items) {
+      const product = await storage.getProduct(item.productId, companyId);
+      if (!product) {
+        return res.status(400).json({
+          valid: false,
+          error: `Produto ${item.productId} não encontrado`,
+        });
+      }
+
+      const ncm = item.ncm || product.ncm;
+      const cest = product.cest;
+
+      if (isCestRequired(ncm) && !cest) {
+        return res.status(400).json({
+          valid: false,
+          error: `CEST obrigatório para o NCM ${ncm} (produto ${item.productId})`,
+        });
+      }
+
+      if (cest && !CEST_REGEX.test(cest)) {
+        return res.status(400).json({
+          valid: false,
+          error: `CEST inválido para o produto ${item.productId}`,
+        });
+      }
+
+      const matrixResult = TaxMatrixService.resolve({
+        customerType:
+          validation.customerType === "consumidor"
+            ? "consumidor_final"
+            : "revenda",
+        originUF: validation.originState,
+        destinationUF: validation.destinyState,
+        taxRegime,
+      });
+
+      if (item.cfop !== matrixResult.cfop) {
+        return res.status(400).json({
+          valid: false,
+          error: `CFOP inválido para o item ${item.productId}`,
+        });
+      }
+
+      if (matrixResult.csosn && item.csosn !== matrixResult.csosn) {
+        return res.status(400).json({
+          valid: false,
+          error: `CSOSN inválido para o item ${item.productId}`,
+        });
+      }
+
       const csosnResult = await CSOSNCalculator.validateCSOSNxCFOP({
         cfopCode: item.cfop,
         csosnCode: item.csosn,
@@ -58,11 +123,34 @@ router.post("/nfe/validate", async (req, res) => {
           error: `Item inválido: ${csosnResult.error}`,
         });
       }
+
+      const ibpt =
+        ibptToken && companySettings?.cnpj && ncm
+          ? await TaxCalculator.fetchIbptTaxes({
+              token: ibptToken,
+              cnpj: companySettings.cnpj,
+              uf: validation.originState,
+              codigo: ncm,
+              descricao: item.description,
+              unidade: item.unit,
+              valor: item.totalValue,
+            })
+          : null;
+
+      resolvedItems.push({
+        ...item,
+        ncm,
+        cest,
+        taxMatrix: matrixResult,
+        ibpt,
+      });
     }
 
     res.json({
       valid: true,
       cfop: cfopResult.cfop,
+      items: resolvedItems,
+      taxRegime,
       message: "NF-e validada com sucesso",
     });
   } catch (error) {
@@ -398,16 +486,22 @@ router.get("/nfe/pending", async (req, res) => {
 // Submeter NF-e para SEFAZ
 router.post("/sefaz/submit", async (req, res) => {
   try {
-    const { xmlContent, environment = "homologacao" } = req.body;
+    const { xmlContent, environment = "homologacao", uf, sefazUrl } = req.body;
 
     if (!xmlContent) {
       return res.status(400).json({ error: "XML content é obrigatório" });
     }
 
+    if (!uf) {
+      return res.status(400).json({ error: "UF é obrigatória" });
+    }
+
     const sefazService = new SefazService({
       environment: environment as "homologacao" | "producao",
+      uf,
       certificatePath: "",
       certificatePassword: "",
+      sefazUrl,
     });
 
     const result = await sefazService.submitNFe(xmlContent);
@@ -419,246 +513,34 @@ router.post("/sefaz/submit", async (req, res) => {
   }
 });
 
-// Cancelar NF-e
-router.post("/sefaz/cancel", async (req, res) => {
+// Consultar Recibo SEFAZ
+router.post("/sefaz/receipt", async (req, res) => {
   try {
-    const {
-      nfeNumber,
-      nfeSeries,
-      reason,
-      environment = "homologacao",
-    } = req.body;
+    const { xmlContent, environment = "homologacao", uf, sefazUrl } = req.body;
 
-    if (!nfeNumber || !nfeSeries || !reason) {
-      return res.status(400).json({
-        error: "nfeNumber, nfeSeries e reason são obrigatórios",
-      });
+    if (!xmlContent) {
+      return res.status(400).json({ error: "XML content é obrigatório" });
+    }
+
+    if (!uf) {
+      return res.status(400).json({ error: "UF é obrigatória" });
     }
 
     const sefazService = new SefazService({
       environment: environment as "homologacao" | "producao",
+      uf,
       certificatePath: "",
       certificatePassword: "",
+      sefazUrl,
     });
 
-    const result = await sefazService.cancelNFe(nfeNumber, nfeSeries, reason);
+    const result = await sefazService.queryReceipt(xmlContent);
     res.json(result);
   } catch (error) {
     res.status(400).json({
-      error: error instanceof Error ? error.message : "Erro ao cancelar NF-e",
+      error: error instanceof Error ? error.message : "Erro ao consultar recibo",
     });
   }
 });
-
-// Enviar Carta de Correção
-router.post("/sefaz/correction-letter", async (req, res) => {
-  try {
-    const {
-      nfeNumber,
-      nfeSeries,
-      correctionReason,
-      correctedContent,
-      environment = "homologacao",
-    } = req.body;
-
-    if (!nfeNumber || !nfeSeries || !correctionReason || !correctedContent) {
-      return res.status(400).json({
-        error:
-          "nfeNumber, nfeSeries, correctionReason e correctedContent são obrigatórios",
-      });
-    }
-
-    const sefazService = new SefazService({
-      environment: environment as "homologacao" | "producao",
-      certificatePath: "",
-      certificatePassword: "",
-    });
-
-    const result = await sefazService.sendCorrectionLetter(
-      nfeNumber,
-      nfeSeries,
-      {
-        correctionReason,
-        correctedContent,
-      }
-    );
-    res.json(result);
-  } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Erro ao enviar Carta de Correção",
-    });
-  }
-});
-
-// Inutilizar Numeração
-router.post("/sefaz/inutilize", async (req, res) => {
-  try {
-    const {
-      series,
-      startNumber,
-      endNumber,
-      reason,
-      environment = "homologacao",
-    } = req.body;
-
-    if (!series || !startNumber || !endNumber || !reason) {
-      return res.status(400).json({
-        error: "series, startNumber, endNumber e reason são obrigatórios",
-      });
-    }
-
-    const sefazService = new SefazService({
-      environment: environment as "homologacao" | "producao",
-      certificatePath: "",
-      certificatePassword: "",
-    });
-
-    const result = await sefazService.inutilizeNumbers(
-      series,
-      parseInt(startNumber),
-      parseInt(endNumber),
-      reason
-    );
-    res.json(result);
-  } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error ? error.message : "Erro ao inutilizar numeração",
-    });
-  }
-});
-
-// Ativar Modo Contingência
-router.post("/sefaz/contingency", async (req, res) => {
-  try {
-    const { mode = "offline" } = req.body;
-
-    if (!["offline", "svc", "svc_rs", "svc_an"].includes(mode)) {
-      return res.status(400).json({
-        error: "Modo de contingência inválido (offline, svc, svc_rs, svc_an)",
-      });
-    }
-
-    const sefazService = new SefazService({
-      environment: "homologacao",
-      certificatePath: "",
-      certificatePassword: "",
-    });
-
-    const result = await sefazService.activateContingencyMode(
-      mode as "offline" | "svc" | "svc_rs" | "svc_an"
-    );
-    res.json(result);
-  } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Erro ao ativar modo contingência",
-    });
-  }
-});
-
-// Consultar Status de Autorização
-router.get("/sefaz/status/:protocol", async (req, res) => {
-  try {
-    const { protocol } = req.params;
-
-    if (!protocol) {
-      return res.status(400).json({ error: "Protocol é obrigatório" });
-    }
-
-    const sefazService = new SefazService({
-      environment: "homologacao",
-      certificatePath: "",
-      certificatePassword: "",
-    });
-
-    const result = await sefazService.checkAuthorizationStatus(protocol);
-    res.json(result);
-  } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error ? error.message : "Erro ao consultar status",
-    });
-  }
-});
-
-// Testar Conexão com SEFAZ
-router.post(
-  "/sefaz/test-connection",
-  requireAuth,
-  async (req: Request, res: Response) => {
-    try {
-      const { environment = "homologacao" } = req.body;
-      const companyId = getCompanyId(req);
-
-      if (!companyId) {
-        return res.status(401).json({ error: "Não autenticado" });
-      }
-
-      // Em PRODUÇÃO, certificado é obrigatório
-      if (environment === "producao") {
-        const certificate = await storage.getDigitalCertificate(companyId);
-        if (!certificate) {
-          return res.status(400).json({
-            error:
-              "Certificado digital não configurado. Instale um certificado e-CNPJ antes de testar em PRODUÇÃO.",
-            certificateRequired: true,
-          });
-        }
-
-        // Validar se certificado ainda é válido
-        const validation = await storage.validateDigitalCertificate(companyId);
-        if (!validation.isValid) {
-          return res.status(400).json({
-            error: validation.message,
-            certificateRequired: true,
-          });
-        }
-      } else {
-        // Em HOMOLOGAÇÃO, certificado é opcional para testes
-        const certificate = await storage.getDigitalCertificate(companyId);
-        if (certificate) {
-          const validation = await storage.validateDigitalCertificate(
-            companyId
-          );
-          if (!validation.isValid) {
-            return res.status(400).json({
-              error: validation.message,
-              certificateRequired: false,
-              message:
-                "Certificado inválido, mas você pode continuar testando em homologação sem certificado",
-            });
-          }
-        }
-      }
-
-      const sefazService = new SefazService({
-        environment: environment as "homologacao" | "producao",
-        certificatePath: "",
-        certificatePassword: "",
-      });
-
-      const result = await sefazService.testConnection();
-      res.json({
-        ...result,
-        environment,
-        message:
-          environment === "homologacao"
-            ? "Teste de conexão em HOMOLOGAÇÃO (sem assinatura obrigatória)"
-            : "Teste de conexão em PRODUÇÃO (certificado obrigatório)",
-      });
-    } catch (error) {
-      res.status(400).json({
-        error:
-          error instanceof Error ? error.message : "Erro ao testar conexão",
-      });
-    }
-  }
-);
 
 export default router;
