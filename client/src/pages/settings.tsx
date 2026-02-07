@@ -29,6 +29,38 @@ import {
 import { Link } from "wouter";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { getSefazDefaults } from "@shared/sefaz-defaults";
+
+const UFS = [
+  "AC",
+  "AL",
+  "AM",
+  "AP",
+  "BA",
+  "CE",
+  "DF",
+  "ES",
+  "GO",
+  "MA",
+  "MG",
+  "MS",
+  "MT",
+  "PA",
+  "PB",
+  "PE",
+  "PI",
+  "PR",
+  "RJ",
+  "RN",
+  "RO",
+  "RR",
+  "RS",
+  "SC",
+  "SE",
+  "SP",
+  "TO",
+];
+
 import { useAuth } from "@/lib/auth";
 import {
   Select,
@@ -44,14 +76,26 @@ interface CompanySettings {
   ie?: string;
   razaoSocial?: string;
   nomeFantasia?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
   regimeTributario?: string;
   cnae?: string;
   im?: string;
+  crt?: string;
+  fiscalEnvironment?: string;
   fiscalEnabled?: boolean;
   cscToken?: string;
   cscId?: string;
   stoneCode?: string;
   stoneEnabled?: boolean;
+  stoneClientId?: string;
+  stoneClientSecret?: string;
+  stoneTerminalId?: string;
+  stoneEnvironment?: string;
   mpAccessToken?: string;
   mpTerminalId?: string;
   mpEnabled?: boolean;
@@ -71,6 +115,12 @@ interface CompanySettings {
   nfseEnabled?: boolean;
   cteEnabled?: boolean;
   mdfeEnabled?: boolean;
+  sefazUrlHomologacao?: string;
+  sefazUrlProducao?: string;
+  sefazUf?: string;
+  sefazMunicipioCodigo?: string;
+  sefazQrCodeUrlHomologacao?: string;
+  sefazQrCodeUrlProducao?: string;
 }
 
 interface PosTerminal {
@@ -81,6 +131,15 @@ interface PosTerminal {
   requiresSangria: boolean;
   requiresSuprimento: boolean;
   isActive: boolean;
+}
+
+interface SimplesAliquot {
+  id?: number;
+  annex: string;
+  rangeStart: string;
+  rangeEnd: string;
+  nominalAliquot: string;
+  effectiveAliquot: string;
 }
 
 export default function Settings() {
@@ -94,19 +153,32 @@ export default function Settings() {
   );
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadingCnpj, setLoadingCnpj] = useState(false);
   const [settings, setSettings] = useState<CompanySettings>({
     cnpj: company?.cnpj || "",
     ie: "",
     razaoSocial: company?.razaoSocial || "",
     nomeFantasia: company?.nomeFantasia || "",
+    email: company?.email || "",
+    phone: company?.phone || "",
     regimeTributario: "Simples Nacional",
     cnae: "",
     im: "",
+    address: "",
+    city: "",
+    state: "",
+    zipCode: "",
+    crt: "1",
+    fiscalEnvironment: "homologacao",
     fiscalEnabled: false,
     cscToken: "",
     cscId: "",
     stoneCode: "",
     stoneEnabled: false,
+    stoneClientId: "",
+    stoneClientSecret: "",
+    stoneTerminalId: "",
+    stoneEnvironment: "producao",
     mpAccessToken: "",
     mpTerminalId: "",
     mpEnabled: false,
@@ -122,6 +194,12 @@ export default function Settings() {
     nfseEnabled: false,
     cteEnabled: false,
     mdfeEnabled: false,
+    sefazUrlHomologacao: "",
+    sefazUrlProducao: "",
+    sefazUf: "SP",
+    sefazMunicipioCodigo: "",
+    sefazQrCodeUrlHomologacao: "",
+    sefazQrCodeUrlProducao: "",
     barcodeScannerEnabled: true,
     barcodeScannerAutoAdd: true,
     barcodeScannerBeep: true,
@@ -133,6 +211,16 @@ export default function Settings() {
   const [editingTerminal, setEditingTerminal] = useState<PosTerminal | null>(
     null
   );
+  const [simplesAliquots, setSimplesAliquots] = useState<SimplesAliquot[]>([]);
+  const [newSimplesAliquot, setNewSimplesAliquot] =
+    useState<SimplesAliquot>({
+      annex: "I",
+      rangeStart: "0",
+      rangeEnd: "0",
+      nominalAliquot: "0",
+      effectiveAliquot: "0",
+    });
+  const [savingSimplesAliquot, setSavingSimplesAliquot] = useState(false);
   const [newTerminal, setNewTerminal] = useState<PosTerminal>({
     name: "",
     code: "",
@@ -147,7 +235,26 @@ export default function Settings() {
   useEffect(() => {
     fetchSettings();
     fetchTerminals();
+    fetchSimplesAliquots();
   }, []);
+
+  useEffect(() => {
+    if (stoneStatus === "connected") {
+      setStoneStatus("idle");
+    }
+  }, [
+    settings.stoneClientId,
+    settings.stoneClientSecret,
+    settings.stoneTerminalId,
+    settings.stoneEnvironment,
+    settings.stoneEnabled,
+  ]);
+
+  useEffect(() => {
+    if (mpStatus === "connected") {
+      setMpStatus("idle");
+    }
+  }, [settings.mpAccessToken, settings.mpTerminalId, settings.mpEnabled]);
 
   const fetchSettings = async () => {
     setLoading(true);
@@ -155,8 +262,13 @@ export default function Settings() {
       const response = await fetch("/api/settings");
       if (response.ok) {
         const data = await response.json();
-        if (data && Object.keys(data).length > 0) {
-          setSettings((prev) => ({ ...prev, ...data }));
+                        if (data && Object.keys(data).length > 0) {
+          setSettings((prev) =>
+            applySefazDefaults(data.sefazUf || prev.sefazUf || "SP", {
+              ...prev,
+              ...data,
+            })
+          );
         }
       }
     } catch (error) {
@@ -175,6 +287,18 @@ export default function Settings() {
       }
     } catch (error) {
       console.error("Failed to fetch terminals:", error);
+    }
+  };
+
+  const fetchSimplesAliquots = async () => {
+    try {
+      const response = await fetch("/api/simples-aliquots");
+      if (response.ok) {
+        const data = await response.json();
+        setSimplesAliquots(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch Simples Nacional aliquots:", error);
     }
   };
 
@@ -275,6 +399,69 @@ export default function Settings() {
     }
   };
 
+  const handleCreateSimplesAliquot = async () => {
+    setSavingSimplesAliquot(true);
+    try {
+      const response = await fetch("/api/simples-aliquots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newSimplesAliquot),
+      });
+
+      if (response.ok) {
+        const created = await response.json();
+        setSimplesAliquots([created, ...simplesAliquots]);
+        setNewSimplesAliquot({
+          annex: "I",
+          rangeStart: "0",
+          rangeEnd: "0",
+          nominalAliquot: "0",
+          effectiveAliquot: "0",
+        });
+        toast({
+          title: "Sucesso!",
+          description: "AlÇðquota de Simples Nacional cadastrada.",
+        });
+      } else {
+        const error = await response.json();
+        throw new Error(error.error || "Erro ao cadastrar alÇðquota");
+      }
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error.message || "NÇœo foi possÇðvel salvar a alÇðquota.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingSimplesAliquot(false);
+    }
+  };
+
+  const handleDeleteSimplesAliquot = async (id?: number) => {
+    if (!id) return;
+    if (!confirm("Deseja realmente excluir esta alÇðquota?")) return;
+    try {
+      const response = await fetch(`/api/simples-aliquots/${id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        setSimplesAliquots(simplesAliquots.filter((item) => item.id !== id));
+        toast({
+          title: "Sucesso!",
+          description: "AlÇðquota removida com sucesso.",
+        });
+      } else {
+        throw new Error("Erro ao excluir alÇðquota");
+      }
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "NÇœo foi possÇðvel excluir a alÇðquota.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleSaveSettings = async () => {
     setSaving(true);
     try {
@@ -309,13 +496,113 @@ export default function Settings() {
   };
 
   const handleConnectStone = () => {
+    if (!settings.stoneEnabled) {
+      toast({
+        title: "Ative a integracao",
+        description: "Habilite a Stone antes de conectar o terminal.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (
+      !settings.stoneClientId ||
+      !settings.stoneClientSecret ||
+      !settings.stoneTerminalId
+    ) {
+      toast({
+        title: "Credenciais incompletas",
+        description: "Informe client id, client secret e o terminal.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setStoneStatus("connecting");
-    setTimeout(() => setStoneStatus("connected"), 2000);
+    fetch("/api/payments/stone/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: settings.stoneClientId,
+        clientSecret: settings.stoneClientSecret,
+        terminalId: settings.stoneTerminalId,
+        environment: settings.stoneEnvironment || "producao",
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || "Falha ao validar Stone");
+        }
+        setStoneStatus("connected");
+        toast({
+          title: "Stone conectada",
+          description: "Credenciais validadas com sucesso.",
+        });
+      })
+      .catch((error) => {
+        setStoneStatus("idle");
+        toast({
+          title: "Nao foi possivel conectar",
+          description:
+            error instanceof Error
+              ? error.message
+              : "Falha ao validar credenciais.",
+          variant: "destructive",
+        });
+      });
   };
 
   const handleConnectMP = () => {
+    if (!settings.mpEnabled) {
+      toast({
+        title: "Ative a integracao",
+        description: "Habilite o Mercado Pago antes de vincular a maquininha.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!settings.mpAccessToken || !settings.mpTerminalId) {
+      toast({
+        title: "Credenciais incompletas",
+        description: "Informe o access token e o ID do terminal.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setMpStatus("connecting");
-    setTimeout(() => setMpStatus("connected"), 2000);
+    fetch("/api/payments/mercadopago/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accessToken: settings.mpAccessToken,
+        terminalId: settings.mpTerminalId,
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || "Falha ao validar Mercado Pago");
+        }
+        setMpStatus("connected");
+        toast({
+          title: "Maquininha vinculada",
+          description: "Credenciais validadas com sucesso.",
+        });
+      })
+      .catch((error) => {
+        setMpStatus("idle");
+        toast({
+          title: "Nao foi possivel vincular",
+          description:
+            error instanceof Error
+              ? error.message
+              : "Falha ao validar credenciais.",
+          variant: "destructive",
+        });
+      });
   };
 
   const handleTestPrinter = () => {
@@ -334,6 +621,104 @@ export default function Settings() {
     value: string | boolean
   ) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const fetchCnpjData = async () => {
+    const cnpj = String(settings.cnpj || "").replace(/\D/g, "");
+    if (cnpj.length !== 14 || loadingCnpj) {
+      return;
+    }
+
+    setLoadingCnpj(true);
+    try {
+      const response = await fetch(`/api/lookup-cnpj?cnpj=${cnpj}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSettings((prev) => ({
+          ...prev,
+          razaoSocial: data.razaoSocial || prev.razaoSocial,
+          nomeFantasia: data.nomeFantasia || prev.nomeFantasia,
+          email: data.email || prev.email,
+          phone: data.phone || prev.phone,
+          address: data.address || prev.address,
+          city: data.city || prev.city,
+          state: data.state || prev.state,
+          zipCode: data.zipCode || prev.zipCode,
+        }));
+        toast({
+          title: "CNPJ encontrado",
+          description: "Dados da Receita preenchidos.",
+        });
+      }
+    } catch (error) {
+      console.error("Erro ao buscar CNPJ:", error);
+      toast({
+        title: "Aviso",
+        description: "Não foi possível buscar os dados do CNPJ.",
+        variant: "destructive",
+      });
+    }
+
+    try {
+      const response = await fetch("/api/fiscal/sefaz/consulta-cadastro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ cnpj }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.success) {
+          const endereco =
+            data.logradouro
+              ? `${data.logradouro}${data.numero ? `, ${data.numero}` : ""}${
+                  data.bairro ? ` - ${data.bairro}` : ""
+                }`
+              : "";
+          setSettings((prev) => ({
+            ...prev,
+            ie: data.ie || prev.ie,
+            cnae: data.cnae || prev.cnae,
+            razaoSocial: data.nome || prev.razaoSocial,
+            address: endereco || prev.address,
+            city: data.municipio || prev.city,
+            state: data.uf || prev.state,
+          }));
+          toast({
+            title: "Cadastro SEFAZ",
+            description: "IE e CNAE preenchidos.",
+          });
+        }
+      }
+    } catch (error) {
+      console.warn("Erro ao consultar cadastro SEFAZ:", error);
+    } finally {
+      setLoadingCnpj(false);
+    }
+  };
+
+  const applySefazDefaults = (
+    ufValue: string,
+    current: CompanySettings
+  ): CompanySettings => {
+    const defaults = getSefazDefaults(ufValue);
+    return {
+      ...current,
+      sefazUf: ufValue,
+      sefazUrlHomologacao:
+        current.sefazUrlHomologacao || defaults.sefazUrlHomologacao,
+      sefazUrlProducao:
+        current.sefazUrlProducao || defaults.sefazUrlProducao,
+      sefazQrCodeUrlHomologacao:
+        current.sefazQrCodeUrlHomologacao ||
+        defaults.sefazQrCodeUrlHomologacao,
+      sefazQrCodeUrlProducao:
+        current.sefazQrCodeUrlProducao || defaults.sefazQrCodeUrlProducao,
+    };
+  };
+
+  const handleSefazUfChange = (value: string) => {
+    setSettings((prev) => applySefazDefaults(value, prev));
   };
 
   if (loading) {
@@ -385,7 +770,14 @@ export default function Settings() {
                       placeholder="00.000.000/0000-00"
                       value={settings.cnpj || ""}
                       onChange={(e) => updateSetting("cnpj", e.target.value)}
+                      onBlur={fetchCnpjData}
                     />
+                    {loadingCnpj && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-2">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Buscando dados do CNPJ...
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="ie">Inscrição Estadual</Label>
@@ -440,6 +832,66 @@ export default function Settings() {
                       updateSetting("nomeFantasia", e.target.value)
                     }
                   />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="email">E-mail</Label>
+                    <Input
+                      id="email"
+                      placeholder="contato@empresa.com"
+                      value={settings.email || ""}
+                      onChange={(e) => updateSetting("email", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Telefone</Label>
+                    <Input
+                      id="phone"
+                      placeholder="31999999999"
+                      value={settings.phone || ""}
+                      onChange={(e) => updateSetting("phone", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="address">Endereço</Label>
+                    <Input
+                      id="address"
+                      placeholder="Rua, número, bairro"
+                      value={settings.address || ""}
+                      onChange={(e) => updateSetting("address", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="zipCode">CEP</Label>
+                    <Input
+                      id="zipCode"
+                      placeholder="00000-000"
+                      value={settings.zipCode || ""}
+                      onChange={(e) => updateSetting("zipCode", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="city">Cidade</Label>
+                    <Input
+                      id="city"
+                      placeholder="Cidade"
+                      value={settings.city || ""}
+                      onChange={(e) => updateSetting("city", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="state">UF</Label>
+                    <Input
+                      id="state"
+                      placeholder="UF"
+                      value={settings.state || ""}
+                      onChange={(e) => updateSetting("state", e.target.value)}
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="regime">Regime Tributário</Label>
@@ -577,13 +1029,119 @@ export default function Settings() {
                   />
                 </div>
                 <Separator />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Ambiente SEFAZ</Label>
+                    <Select
+                      value={settings.fiscalEnvironment || "homologacao"}
+                      onValueChange={(value) =>
+                        updateSetting("fiscalEnvironment", value)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="homologacao">Homologacao</SelectItem>
+                        <SelectItem value="producao">Producao</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>CRT</Label>
+                    <Select
+                      value={settings.crt || "1"}
+                      onValueChange={(value) => updateSetting("crt", value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">1 - Simples Nacional</SelectItem>
+                        <SelectItem value="2">
+                          2 - Simples Nacional - Excesso de Sublimite
+                        </SelectItem>
+                        <SelectItem value="3">3 - Regime Normal</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>UF padrao</Label>
+                    <Select
+                      value={settings.sefazUf || "SP"}
+                      onValueChange={handleSefazUfChange}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {UFS.map((state) => (
+                          <SelectItem key={state} value={state}>
+                            {state}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>SEFAZ URL Homologacao</Label>
+                    <Input
+                      placeholder="https://..."
+                      value={settings.sefazUrlHomologacao || ""}
+                      onChange={(e) =>
+                        updateSetting("sefazUrlHomologacao", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>SEFAZ URL Producao</Label>
+                    <Input
+                      placeholder="https://..."
+                      value={settings.sefazUrlProducao || ""}
+                      onChange={(e) =>
+                        updateSetting("sefazUrlProducao", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Codigo municipio (IBGE)</Label>
+                    <Input
+                      placeholder="Ex: 3138203"
+                      value={settings.sefazMunicipioCodigo || ""}
+                      onChange={(e) =>
+                        updateSetting("sefazMunicipioCodigo", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>URL QR Code Homologacao</Label>
+                    <Input
+                      placeholder="https://.../qrcode.xhtml"
+                      value={settings.sefazQrCodeUrlHomologacao || ""}
+                      onChange={(e) =>
+                        updateSetting("sefazQrCodeUrlHomologacao", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>URL QR Code Producao</Label>
+                    <Input
+                      placeholder="https://.../qrcode.xhtml"
+                      value={settings.sefazQrCodeUrlProducao || ""}
+                      onChange={(e) =>
+                        updateSetting("sefazQrCodeUrlProducao", e.target.value)
+                      }
+                    />
+                  </div>
+                </div>
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label>
                       Token CSC (Código de Segurança do Contribuinte)
                     </Label>
                     <Input
-                      type="password"
                       value={settings.cscToken || ""}
                       onChange={(e) =>
                         updateSetting("cscToken", e.target.value)
@@ -603,13 +1161,163 @@ export default function Settings() {
                 </div>
                 <div className="space-y-2">
                   <Label>Certificado Digital (A1)</Label>
-                  <div className="flex gap-2">
-                    <Input type="file" className="cursor-pointer" />
-                    <Button variant="outline">Carregar</Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Válido até: 15/08/2026
+                  <p className="text-sm text-muted-foreground">
+                    Instale e valide o certificado na tela dedicada.
                   </p>
+                  <Link href="/certificate-config">
+                    <Button variant="outline">
+                      Abrir configuracao de certificado
+                    </Button>
+                  </Link>
+                </div>
+                <div className="space-y-4 pt-4 border-t">
+                  <h3 className="text-lg font-medium">Simples Nacional</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                    <div className="space-y-2">
+                      <Label>Anexo</Label>
+                      <Select
+                        value={newSimplesAliquot.annex}
+                        onValueChange={(value) =>
+                          setNewSimplesAliquot({
+                            ...newSimplesAliquot,
+                            annex: value,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="I">Anexo I</SelectItem>
+                          <SelectItem value="II">Anexo II</SelectItem>
+                          <SelectItem value="III">Anexo III</SelectItem>
+                          <SelectItem value="IV">Anexo IV</SelectItem>
+                          <SelectItem value="V">Anexo V</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Faixa Inicial (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={newSimplesAliquot.rangeStart}
+                        onChange={(e) =>
+                          setNewSimplesAliquot({
+                            ...newSimplesAliquot,
+                            rangeStart: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Faixa Final (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={newSimplesAliquot.rangeEnd}
+                        onChange={(e) =>
+                          setNewSimplesAliquot({
+                            ...newSimplesAliquot,
+                            rangeEnd: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Aliquota Nominal (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={newSimplesAliquot.nominalAliquot}
+                        onChange={(e) =>
+                          setNewSimplesAliquot({
+                            ...newSimplesAliquot,
+                            nominalAliquot: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Aliquota Efetiva (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={newSimplesAliquot.effectiveAliquot}
+                        onChange={(e) =>
+                          setNewSimplesAliquot({
+                            ...newSimplesAliquot,
+                            effectiveAliquot: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      onClick={handleCreateSimplesAliquot}
+                      disabled={savingSimplesAliquot}
+                    >
+                      {savingSimplesAliquot ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Salvando...
+                        </>
+                      ) : (
+                        "Adicionar Aliquota"
+                      )}
+                    </Button>
+                  </div>
+                  {simplesAliquots.length > 0 ? (
+                    <div className="border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead className="border-b">
+                          <tr>
+                            <th className="text-left py-2 px-3">Anexo</th>
+                            <th className="text-left py-2 px-3">Faixa</th>
+                            <th className="text-left py-2 px-3">Nominal</th>
+                            <th className="text-left py-2 px-3">Efetiva</th>
+                            <th className="py-2 px-3" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {simplesAliquots.map((item) => (
+                            <tr
+                              key={item.id}
+                              className="border-b last:border-b-0"
+                            >
+                              <td className="py-2 px-3">{item.annex}</td>
+                              <td className="py-2 px-3">
+                                R$ {item.rangeStart} - R$ {item.rangeEnd}
+                              </td>
+                              <td className="py-2 px-3">
+                                {item.nominalAliquot}%
+                              </td>
+                              <td className="py-2 px-3">
+                                {item.effectiveAliquot}%
+                              </td>
+                              <td className="py-2 px-3 text-right">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() =>
+                                    handleDeleteSimplesAliquot(item.id)
+                                  }
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      Nenhuma al??quota de Simples Nacional cadastrada.
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button variant="outline">Testar Comunicação SEFAZ</Button>
@@ -724,28 +1432,61 @@ export default function Settings() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Stone Code / ID da Loja</Label>
+                    <Label>Client ID</Label>
                     <Input
-                      placeholder="123456789"
-                      value={settings.stoneCode || ""}
+                      placeholder="client_id"
+                      value={settings.stoneClientId || ""}
                       onChange={(e) =>
-                        updateSetting("stoneCode", e.target.value)
+                        updateSetting("stoneClientId", e.target.value)
                       }
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Tipo de Conexão</Label>
-                    <select className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
-                      <option>Integrado (TEF - Valor vai automático)</option>
-                      <option>Manual (POS - Digitar valor na máquina)</option>
-                    </select>
+                    <Label>Client Secret</Label>
+                    <Input
+                      type="password"
+                      placeholder="client_secret"
+                      value={settings.stoneClientSecret || ""}
+                      onChange={(e) =>
+                        updateSetting("stoneClientSecret", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>ID do Terminal (POS)</Label>
+                    <Input
+                      placeholder="terminal_id"
+                      value={settings.stoneTerminalId || ""}
+                      onChange={(e) =>
+                        updateSetting("stoneTerminalId", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Ambiente</Label>
+                    <Select
+                      value={settings.stoneEnvironment || "producao"}
+                      onValueChange={(value) =>
+                        updateSetting("stoneEnvironment", value)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="homologacao">
+                          Homologacao
+                        </SelectItem>
+                        <SelectItem value="producao">Producao</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {stoneStatus === "connected" ? (
                     <div className="rounded-md bg-emerald-100 p-3 flex items-center gap-3 text-emerald-700">
                       <CheckCircle2 className="h-5 w-5" />
                       <div className="text-sm font-medium">
-                        Conectado: Terminal S920
+                        Conectado: Stone
                       </div>
                     </div>
                   ) : (

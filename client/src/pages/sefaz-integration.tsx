@@ -23,6 +23,36 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import Layout from "@/components/layout";
 
+const UFS = [
+  "AC",
+  "AL",
+  "AM",
+  "AP",
+  "BA",
+  "CE",
+  "DF",
+  "ES",
+  "GO",
+  "MA",
+  "MG",
+  "MS",
+  "MT",
+  "PA",
+  "PB",
+  "PE",
+  "PI",
+  "PR",
+  "RJ",
+  "RN",
+  "RO",
+  "RR",
+  "RS",
+  "SC",
+  "SE",
+  "SP",
+  "TO",
+];
+
 interface PendingNFe {
   id: number;
   nfeNumber?: string;
@@ -36,9 +66,26 @@ interface PendingNFe {
 export default function SefazIntegration() {
   const { toast } = useToast();
   const [environment, setEnvironment] = useState("homologacao");
+  const [uf, setUf] = useState("SP");
+  const [documentType, setDocumentType] = useState<"nfe" | "nfce">("nfe");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [selectedNFe, setSelectedNFe] = useState<number | null>(null);
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await fetch("/api/settings");
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data?.fiscalEnvironment) {
+          setEnvironment(data.fiscalEnvironment);
+        }
+      } catch {
+        return;
+      }
+    };
+    loadSettings();
+  }, []);
 
   // Cancelar NF-e
   const [cancelNumber, setCancelNumber] = useState("");
@@ -194,7 +241,7 @@ export default function SefazIntegration() {
       const response = await fetch("/api/fiscal/sefaz/test-connection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ environment }),
+        body: JSON.stringify({ environment, uf, documentType }),
       });
       const data = await response.json();
       setResult(data);
@@ -310,6 +357,32 @@ export default function SefazIntegration() {
             <SelectContent>
               <SelectItem value="homologacao">Homologação</SelectItem>
               <SelectItem value="producao">Produção</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={uf} onValueChange={setUf}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {UFS.map((state) => (
+                <SelectItem key={state} value={state}>
+                  {state}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={documentType}
+            onValueChange={(value) =>
+              setDocumentType(value === "nfce" ? "nfce" : "nfe")
+            }
+          >
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="nfe">NF-e</SelectItem>
+              <SelectItem value="nfce">NFC-e</SelectItem>
             </SelectContent>
           </Select>
           <Button

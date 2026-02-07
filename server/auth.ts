@@ -215,6 +215,7 @@ const DEFAULT_PERMISSIONS = [
 
   // Fiscal
   { module: "fiscal", action: "view", description: "Visualizar fiscal" },
+  { module: "fiscal", action: "manage", description: "Gerenciar fiscal" },
   { module: "fiscal", action: "emit_nfce", description: "Emitir NFC-e" },
   { module: "fiscal", action: "cancel_nfce", description: "Cancelar NFC-e" },
   { module: "fiscal", action: "emit_nfe", description: "Emitir NF-e" },
@@ -462,6 +463,19 @@ async function getUserPermissions(userId: string): Promise<string[]> {
     .limit(1);
   if (!user.length) return [];
 
+  const [role] = await db
+    .select({ isSystemRole: roles.isSystemRole })
+    .from(roles)
+    .where(eq(roles.id, user[0].roleId))
+    .limit(1);
+
+  if (role?.isSystemRole) {
+    const allPermissions = await db
+      .select({ module: permissions.module, action: permissions.action })
+      .from(permissions);
+    return allPermissions.map((p) => `${p.module}:${p.action}`);
+  }
+
   const rolePerms = await db
     .select({
       module: permissions.module,
@@ -574,6 +588,8 @@ authRouter.post("/register", async (req, res) => {
         cnpj: company.cnpj,
         razaoSocial: company.razaoSocial,
         nomeFantasia: company.nomeFantasia,
+        email: company.email,
+        phone: company.phone,
       },
     });
   } catch (error) {

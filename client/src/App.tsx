@@ -13,6 +13,7 @@ import Sales from "@/pages/sales";
 import Contacts from "@/pages/contacts";
 import Reports from "@/pages/reports";
 import Settings from "@/pages/settings";
+import PaymentMethods from "@/pages/payment-methods";
 import Login from "@/pages/login";
 import Register from "@/pages/register";
 import Users from "@/pages/users";
@@ -20,6 +21,7 @@ import Profile from "@/pages/profile";
 import CashHistory from "@/pages/cash-history";
 import FiscalConfig from "@/pages/fiscal-config";
 import FiscalDocuments from "@/pages/fiscal-documents";
+import NFEEmissao from "@/pages/nfe-emissao";
 import SefazIntegration from "@/pages/sefaz-integration";
 import { CertificateConfig } from "@/pages/certificate-config";
 import SequentialNumberingConfig from "@/pages/sequential-numbering-config";
@@ -102,6 +104,9 @@ function Router() {
       <Route path="/settings">
         <ProtectedRoute component={Settings} />
       </Route>
+      <Route path="/payment-methods">
+        <ProtectedRoute component={PaymentMethods} />
+      </Route>
       <Route path="/users">
         <ProtectedRoute component={Users} />
       </Route>
@@ -116,6 +121,9 @@ function Router() {
       </Route>
       <Route path="/fiscal-documents">
         <ProtectedRoute component={FiscalDocuments} />
+      </Route>
+      <Route path="/nfe-emissao">
+        <ProtectedRoute component={NFEEmissao} />
       </Route>
       <Route path="/sefaz">
         <ProtectedRoute component={SefazIntegration} />

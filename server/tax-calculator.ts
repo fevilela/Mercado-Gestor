@@ -229,6 +229,34 @@ export class TaxCalculator {
       chave: typeof data?.chave === "string" ? data.chave : undefined,
       versao: typeof data?.versao === "string" ? data.versao : undefined,
       fonte: typeof data?.fonte === "string" ? data.fonte : undefined,
+  static async fetchIbptTaxes(params: {
+    token: string;
+    cnpj: string;
+    uf: string;
+    codigo: string;
+    descricao: string;
+    unidade: string;
+    valor: number;
+  }): Promise<{
+    nacional: number;
+    importado: number;
+    estadual: number;
+    municipal: number;
+    fonte: string;
+  }> {
+    // ImplementaÇõÇœo simulada: em produÇõÇœo, integrar com o serviÇõ IBPT.
+    const base = params.valor || 0;
+    const nacional = Math.round(base * 0.03 * 100) / 100;
+    const importado = Math.round(base * 0.035 * 100) / 100;
+    const estadual = Math.round(base * 0.01 * 100) / 100;
+    const municipal = Math.round(base * 0.005 * 100) / 100;
+
+    return {
+      nacional,
+      importado,
+      estadual,
+      municipal,
+      fonte: "simulado",
     };
   }
 }

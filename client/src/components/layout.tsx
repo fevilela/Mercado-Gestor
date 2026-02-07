@@ -5,6 +5,7 @@ import {
   Store,
   BarChart3,
   Wallet,
+  CreditCard,
   Settings,
   Users,
   LogOut,
@@ -127,6 +128,12 @@ const sidebarItems = [
     href: "/settings",
     permissions: ["settings:view", "settings:manage"],
   },
+  {
+    icon: CreditCard,
+    label: "Formas de Pagamento",
+    href: "/payment-methods",
+    permissions: ["settings:payments"],
+  },
 ];
 
 interface Notification {
@@ -176,7 +183,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
             M
           </div>
-          Aura Tech
+          Zyvo Software
         </div>
       </div>
       <div className="flex-1 overflow-auto py-4">

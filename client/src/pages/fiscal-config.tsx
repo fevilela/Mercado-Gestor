@@ -38,6 +38,10 @@ interface FiscalConfig {
   nfceCscToken?: string;
   nfeCertificate?: string;
   nfeCertificatePassword?: string;
+  respTecCnpj?: string;
+  respTecContato?: string;
+  respTecEmail?: string;
+  respTecFone?: string;
 }
 
 interface CFOPCode {
@@ -72,6 +76,10 @@ export default function FiscalConfig() {
     nfceCscToken: "",
     nfeCertificate: "",
     nfeCertificatePassword: "",
+    respTecCnpj: "",
+    respTecContato: "",
+    respTecEmail: "",
+    respTecFone: "",
   });
   const [cfopCodes, setCfopCodes] = useState<CFOPCode[]>([]);
   const [taxAliquots, setTaxAliquots] = useState<TaxAliquot[]>([]);
@@ -251,11 +259,91 @@ export default function FiscalConfig() {
 
         <Tabs defaultValue="cfop" className="space-y-4">
           <TabsList>
+            <TabsTrigger value="resp-tec">Responsavel Tecnico</TabsTrigger>
             <TabsTrigger value="cfop">CFOP Codes</TabsTrigger>
             <TabsTrigger value="aliquots">Alíquotas</TabsTrigger>
           </TabsList>
 
           {/* TAB: Configuração removida conforme solicitação. Dados movidos para Configurações > Dados da Empresa */}
+
+          <TabsContent value="resp-tec" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Responsavel Tecnico (NFC-e)</CardTitle>
+                <CardDescription>
+                  Esses dados vao na tag &lt;infRespTec&gt; do XML.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="resptec-cnpj">CNPJ</Label>
+                    <Input
+                      id="resptec-cnpj"
+                      value={config.respTecCnpj || ""}
+                      onChange={(e) =>
+                        setConfig({ ...config, respTecCnpj: e.target.value })
+                      }
+                      placeholder="12345678000199"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="resptec-contato">Contato</Label>
+                    <Input
+                      id="resptec-contato"
+                      value={config.respTecContato || ""}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          respTecContato: e.target.value,
+                        })
+                      }
+                      placeholder="Sistema PDV"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="resptec-email">E-mail</Label>
+                    <Input
+                      id="resptec-email"
+                      type="email"
+                      value={config.respTecEmail || ""}
+                      onChange={(e) =>
+                        setConfig({ ...config, respTecEmail: e.target.value })
+                      }
+                      placeholder="suporte@sistema.com"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="resptec-fone">Telefone</Label>
+                    <Input
+                      id="resptec-fone"
+                      value={config.respTecFone || ""}
+                      onChange={(e) =>
+                        setConfig({ ...config, respTecFone: e.target.value })
+                      }
+                      placeholder="31999999999"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    onClick={handleSaveConfig}
+                    disabled={saving}
+                    data-testid="button-save-resp-tec"
+                  >
+                    {saving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      "Salvar"
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           {/* TAB: CFOP Codes */}
           <TabsContent value="cfop" className="space-y-4">

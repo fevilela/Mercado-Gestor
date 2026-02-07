@@ -18,6 +18,8 @@ interface Company {
   cnpj: string;
   razaoSocial: string;
   nomeFantasia: string | null;
+  email?: string | null;
+  phone?: string | null;
 }
 
 interface User {

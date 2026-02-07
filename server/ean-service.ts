@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const eanSchema = z
   .string()
-  .regex(/^\d{8,14}$/, "EAN deve ter entre 8 e 14 dígitos");
+  .regex(/^\d{8,14}$/, "EAN deve ter entre 8 e 14 digitos");
 
 export interface ProductLookupResult {
   name: string;
@@ -125,19 +125,19 @@ async function lookupEANCode(ean: string): Promise<ProductLookupResult | null> {
 export async function lookupEAN(
   ean: string
 ): Promise<ProductLookupResult | null> {
-  const validation = eanSchema.safeParse(ean);
+  const normalized = ean.replace(/\s+/g, "");
+  const validation = eanSchema.safeParse(normalized);
   if (!validation.success) {
-    throw new Error("Código EAN inválido");
+    return null;
   }
 
-  // Try multiple sources in order
-  let result = await lookupBrasilAPI(ean);
+  let result = await lookupBrasilAPI(normalized);
   if (result) return result;
 
-  result = await lookupOpenFoodFacts(ean);
+  result = await lookupOpenFoodFacts(normalized);
   if (result) return result;
 
-  result = await lookupEANCode(ean);
+  result = await lookupEANCode(normalized);
   if (result) return result;
 
   return null;

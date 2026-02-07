@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -31,10 +31,17 @@ interface CertificateInfo {
   daysUntilExpiration?: number;
 }
 
+interface CompanySettings {
+  cscToken?: string;
+  cscId?: string;
+}
+
 export function CertificateConfig() {
   const [certificateFile, setCertificateFile] = useState<File | null>(null);
   const [certificatePassword, setCertificatePassword] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [cscToken, setCscToken] = useState("");
+  const [cscId, setCscId] = useState("");
 
   const {
     data: certificate,
@@ -44,11 +51,42 @@ export function CertificateConfig() {
     queryKey: ["/api/digital-certificate"],
   });
 
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ["/api/settings"],
+  });
+
+  useEffect(() => {
+    if (settings) {
+      setCscToken(settings.cscToken || "");
+      setCscId(settings.cscId || "");
+    }
+  }, [settings]);
+
+  const saveCscSettings = async () => {
+    const response = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cscToken,
+        cscId,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.error || "Erro ao salvar CSC");
+    }
+  };
+
   const uploadMutation = useMutation({
-    mutationFn: async (formData: FormData) => {
+    mutationFn: async (payload: {
+      certificateData: string;
+      certificatePassword: string;
+    }) => {
       const response = await fetch("/api/digital-certificate/upload", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -101,20 +139,30 @@ export function CertificateConfig() {
 
   const handleUpload = async () => {
     if (!certificateFile || !certificatePassword) {
-      toast.error("Arquivo de certificado e senha são obrigatórios");
+      toast.error("Arquivo de certificado e senha sao obrigatorios");
+      return;
+    }
+
+    if (!cscToken || !cscId) {
+      toast.error("Token CSC e ID do Token sao obrigatorios");
       return;
     }
 
     setIsUploading(true);
     const fileContent = await certificateFile.arrayBuffer();
-    const base64Content = Buffer.from(fileContent).toString("base64");
-
-    const formData = new FormData();
-    formData.append("certificateData", base64Content);
-    formData.append("certificatePassword", certificatePassword);
+    const bytes = new Uint8Array(fileContent);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Content = btoa(binary);
 
     try {
-      await uploadMutation.mutateAsync(formData);
+      await saveCscSettings();
+      await uploadMutation.mutateAsync({
+        certificateData: base64Content,
+        certificatePassword,
+      });
     } finally {
       setIsUploading(false);
     }
@@ -206,7 +254,7 @@ export function CertificateConfig() {
               {certificate.daysUntilExpiration &&
                 certificate.daysUntilExpiration < 30 && (
                   <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 flex gap-2">
-                    <AlertTriangle className="h-5 w-5 flex-shrink-0 text-yellow-600" />
+                    <AlertTriangle className="h-5 w-5 shrink-0 text-yellow-600" />
                     <div>
                       <p className="font-medium text-yellow-900">
                         Certificado próximo do vencimento
@@ -312,13 +360,38 @@ export function CertificateConfig() {
                   />
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Token CSC
+                  </label>
+                  <input
+                    type="password"
+                    value={cscToken}
+                    onChange={(e) => setCscToken(e.target.value)}
+                    placeholder="Digite o token CSC"
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    ID do Token CSC
+                  </label>
+                  <input
+                    value={cscId}
+                    onChange={(e) => setCscId(e.target.value)}
+                    placeholder="000001"
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 flex gap-2">
                   <AlertCircle className="h-5 w-5 flex-shrink-0 text-blue-600" />
                   <div className="text-sm text-blue-700">
-                    <p className="font-medium">Informação de Segurança</p>
+                    <p className="font-medium">Informacao de Seguranca</p>
                     <p>
-                      Seu certificado será criptografado e armazenado com
-                      segurança no servidor
+                      Seu certificado sera criptografado e armazenado com
+                      seguranca no servidor
                     </p>
                   </div>
                 </div>
@@ -326,7 +399,11 @@ export function CertificateConfig() {
                 <Button
                   onClick={handleUpload}
                   disabled={
-                    !certificateFile || !certificatePassword || isUploading
+                    !certificateFile ||
+                    !certificatePassword ||
+                    !cscToken ||
+                    !cscId ||
+                    isUploading
                   }
                   className="w-full"
                   data-testid="button-upload-certificate"

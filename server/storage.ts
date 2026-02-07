@@ -22,8 +22,20 @@ import {
   cfopCodes,
   companies,
   cstCodes,
+  paymentMethods,
+  pdvLoads,
+  simplesNacionalAliquots,
+  sefazTransmissionLogs,
   digitalCertificates,
+  fiscalXmlStorage,
+  manifestDocuments,
   sequentialNumbering,
+  nfeCancellations,
+  nfeCorrectionLetters,
+  nfeNumberInutilization,
+  type InsertNfeCancellation,
+  type InsertNfeCorrectionLetter,
+  type InsertNfeNumberInutilization,
   type InsertProduct,
   type InsertCustomer,
   type InsertSupplier,
@@ -39,9 +51,15 @@ import {
   type InsertCashMovement,
   type InsertFiscalConfig,
   type InsertTaxAliquot,
+  type InsertSimplesNacionalAliquot,
+  type InsertPaymentMethod,
+  type InsertPdvLoad,
   type InsertDigitalCertificate,
   type DigitalCertificate,
   type InsertSequentialNumbering,
+  type InsertFiscalXmlStorage,
+  type InsertManifestDocument,
+  type InsertSefazTransmissionLog,
 } from "@shared/schema";
 import { eq, and, desc, sql, ilike } from "drizzle-orm";
 
@@ -164,6 +182,15 @@ export const storage = {
     return product;
   },
 
+  async getProductByEAN(companyId: number, ean: string) {
+    const [product] = await db
+      .select()
+      .from(products)
+      .where(and(eq(products.companyId, companyId), eq(products.ean, ean)))
+      .limit(1);
+    return product || null;
+  },
+
   async getProductVariations(productId: number) {
     return await db
       .select()
@@ -210,6 +237,15 @@ export const storage = {
       .from(customers)
       .where(eq(customers.companyId, companyId))
       .orderBy(desc(customers.createdAt));
+  },
+
+  async getCustomer(id: number, companyId: number) {
+    const [customer] = await db
+      .select()
+      .from(customers)
+      .where(and(eq(customers.id, id), eq(customers.companyId, companyId)))
+      .limit(1);
+    return customer || null;
   },
 
   async createCustomer(data: InsertCustomer) {
@@ -342,11 +378,12 @@ export const storage = {
     companyId: number,
     nfceStatus: string,
     nfceProtocol?: string,
-    nfceKey?: string
+    nfceKey?: string,
+    nfceError?: string | null
   ) {
     const [sale] = await db
       .update(sales)
-      .set({ nfceStatus, nfceProtocol, nfceKey })
+      .set({ nfceStatus, nfceProtocol, nfceKey, nfceError })
       .where(and(eq(sales.id, id), eq(sales.companyId, companyId)))
       .returning();
     return sale;
@@ -363,7 +400,14 @@ export const storage = {
 
   async updateCompanySettings(
     companyId: number,
-    data: Partial<InsertCompanySettings>
+    data: Partial<InsertCompanySettings> & {
+      address?: string;
+      city?: string;
+      state?: string;
+      zipCode?: string;
+      cnae?: string;
+      im?: string;
+    }
   ) {
     const existing = await this.getCompanySettings(companyId);
     console.log(
@@ -371,21 +415,47 @@ export const storage = {
       data
     );
 
+    const {
+      address,
+      city,
+      state,
+      zipCode,
+      cnae,
+      im,
+      ...settingsData
+    } = data as any;
+
     // Also update the main company table if relevant fields are present
     if (
       data.razaoSocial ||
       data.nomeFantasia ||
       data.cnpj ||
       data.ie ||
-      data.regimeTributario
+      data.regimeTributario ||
+      data.email ||
+      data.phone ||
+      address ||
+      city ||
+      state ||
+      zipCode ||
+      cnae ||
+      im
     ) {
       const companyData: any = {};
       if (data.razaoSocial) companyData.razaoSocial = data.razaoSocial;
       if (data.nomeFantasia) companyData.nomeFantasia = data.nomeFantasia;
       if (data.cnpj) companyData.cnpj = data.cnpj;
       if (data.ie) companyData.ie = data.ie;
+      if (data.email) companyData.email = data.email;
+      if (data.phone) companyData.phone = data.phone;
       if (data.regimeTributario)
         companyData.regimeTributario = data.regimeTributario;
+      if (address) companyData.address = address;
+      if (city) companyData.city = city;
+      if (state) companyData.state = state;
+      if (zipCode) companyData.zipCode = zipCode;
+      if (cnae) companyData.cnae = cnae;
+      if (im) companyData.im = im;
 
       await db
         .update(companies)
@@ -396,17 +466,69 @@ export const storage = {
     if (existing) {
       const [updated] = await db
         .update(companySettings)
-        .set({ ...data, updatedAt: new Date() })
+        .set({ ...settingsData, updatedAt: new Date() })
         .where(eq(companySettings.companyId, companyId))
         .returning();
       return updated;
     } else {
       const [created] = await db
         .insert(companySettings)
-        .values({ ...data, companyId })
+        .values({ ...settingsData, companyId })
         .returning();
       return created;
     }
+  },
+
+  async getPaymentMethods(companyId: number) {
+    return await db
+      .select()
+      .from(paymentMethods)
+      .where(eq(paymentMethods.companyId, companyId))
+      .orderBy(paymentMethods.sortOrder, paymentMethods.name);
+  },
+
+  async createPaymentMethod(data: InsertPaymentMethod) {
+    const [method] = await db
+      .insert(paymentMethods)
+      .values(data)
+      .returning();
+    return method;
+  },
+
+  async updatePaymentMethod(
+    id: number,
+    companyId: number,
+    data: Partial<InsertPaymentMethod>
+  ) {
+    const [method] = await db
+      .update(paymentMethods)
+      .set(data)
+      .where(and(eq(paymentMethods.id, id), eq(paymentMethods.companyId, companyId)))
+      .returning();
+    return method;
+  },
+
+  async deletePaymentMethod(id: number, companyId: number) {
+    const [method] = await db
+      .delete(paymentMethods)
+      .where(and(eq(paymentMethods.id, id), eq(paymentMethods.companyId, companyId)))
+      .returning();
+    return method;
+  },
+
+  async createPdvLoad(data: InsertPdvLoad) {
+    const [load] = await db.insert(pdvLoads).values(data).returning();
+    return load;
+  },
+
+  async getLatestPdvLoad(companyId: number) {
+    const [load] = await db
+      .select()
+      .from(pdvLoads)
+      .where(eq(pdvLoads.companyId, companyId))
+      .orderBy(desc(pdvLoads.createdAt))
+      .limit(1);
+    return load || null;
   },
 
   async getAllPayables(companyId: number) {
@@ -810,6 +932,43 @@ export const storage = {
     return aliquot;
   },
 
+  async listSimplesNacionalAliquots(companyId: number) {
+    return await db
+      .select()
+      .from(simplesNacionalAliquots)
+      .where(eq(simplesNacionalAliquots.companyId, companyId))
+      .orderBy(desc(simplesNacionalAliquots.createdAt));
+  },
+
+  async createSimplesNacionalAliquot(data: InsertSimplesNacionalAliquot) {
+    const [aliquot] = await db
+      .insert(simplesNacionalAliquots)
+      .values(data)
+      .returning();
+    return aliquot;
+  },
+
+  async deleteSimplesNacionalAliquot(id: number, companyId: number) {
+    const [aliquot] = await db
+      .delete(simplesNacionalAliquots)
+      .where(
+        and(
+          eq(simplesNacionalAliquots.id, id),
+          eq(simplesNacionalAliquots.companyId, companyId)
+        )
+      )
+      .returning();
+    return aliquot;
+  },
+
+  async createSefazTransmissionLog(data: InsertSefazTransmissionLog) {
+    const [log] = await db
+      .insert(sefazTransmissionLogs)
+      .values(data)
+      .returning();
+    return log;
+  },
+
   // ============================================
   // DIGITAL CERTIFICATES
   // ============================================
@@ -828,14 +987,14 @@ export const storage = {
     if (existing) {
       const [cert] = await db
         .update(digitalCertificates)
-        .set({ ...data, updatedAt: new Date() })
+        .set({ ...data, isActive: true, updatedAt: new Date() })
         .where(eq(digitalCertificates.companyId, data.companyId))
         .returning();
       return cert;
     } else {
       const [cert] = await db
         .insert(digitalCertificates)
-        .values(data)
+        .values({ ...data, isActive: true })
         .returning();
       return cert;
     }
@@ -983,5 +1142,61 @@ export const storage = {
       .from(sequentialNumbering)
       .where(eq(sequentialNumbering.companyId, companyId))
       .orderBy(sequentialNumbering.documentType, sequentialNumbering.series);
+  },
+
+  async getCompanyById(id: number) {
+    const [company] = await db
+      .select()
+      .from(companies)
+      .where(eq(companies.id, id))
+      .limit(1);
+    return company || null;
+  },
+
+  async createNfeCancellation(data: InsertNfeCancellation) {
+    const [record] = await db.insert(nfeCancellations).values(data).returning();
+    return record;
+  },
+
+  async createNfeCorrectionLetter(data: InsertNfeCorrectionLetter) {
+    const [record] = await db.insert(nfeCorrectionLetters).values(data).returning();
+    return record;
+  },
+
+  async createNfeNumberInutilization(data: InsertNfeNumberInutilization) {
+    const [record] = await db.insert(nfeNumberInutilization).values(data).returning();
+    return record;
+  },
+
+  async saveFiscalXml(data: InsertFiscalXmlStorage) {
+    const [record] = await db.insert(fiscalXmlStorage).values(data).returning();
+    return record;
+  },
+
+  async getFiscalXmlByKey(companyId: number, documentKey: string) {
+    const [record] = await db
+      .select()
+      .from(fiscalXmlStorage)
+      .where(
+        and(
+          eq(fiscalXmlStorage.companyId, companyId),
+          eq(fiscalXmlStorage.documentKey, documentKey)
+        )
+      )
+      .limit(1);
+    return record || null;
+  },
+
+  async saveManifestDocument(data: InsertManifestDocument) {
+    const [record] = await db.insert(manifestDocuments).values(data).returning();
+    return record;
+  },
+
+  async listManifestDocuments(companyId: number) {
+    return await db
+      .select()
+      .from(manifestDocuments)
+      .where(eq(manifestDocuments.companyId, companyId))
+      .orderBy(desc(manifestDocuments.createdAt));
   },
 };

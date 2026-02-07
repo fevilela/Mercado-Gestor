@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import "./types";
 import { getUserPermissions } from "./auth";
+import { getFiscalCertificateStatus } from "./fiscal-certificate";
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.session.userId || !req.session.companyId) {
@@ -40,4 +41,20 @@ export function getCompanyId(req: Request): number | null {
 
 export function getUserId(req: Request): string | null {
   return req.session.userId || null;
+}
+
+export function requireValidFiscalCertificate() {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const companyId = req.session.companyId;
+    if (!companyId) {
+      return res.status(401).json({ error: "Nao autenticado" });
+    }
+
+    const status = await getFiscalCertificateStatus(companyId);
+    if (!status.isValid) {
+      return res.status(403).json({ error: status.message });
+    }
+
+    next();
+  };
 }

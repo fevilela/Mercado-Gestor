@@ -9,6 +9,7 @@ import {
   kitItems,
   customers,
   suppliers,
+  digitalCertificates,
 } from "@shared/schema";
 import {
   insertProductSchema,
@@ -22,6 +23,7 @@ import {
   insertNotificationSchema,
   insertFiscalConfigSchema,
   insertTaxAliquotSchema,
+  insertSimplesNacionalAliquotSchema,
 } from "@shared/schema";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
@@ -35,6 +37,16 @@ import {
 import { CFOPValidator } from "./cfop-validator";
 import { CSOSNCalculator } from "./csosn-calculator";
 import fiscalRouter from "./fiscal-routes";
+import { XMLSignatureService } from "./xml-signature";
+import { authorizePayment, validateMercadoPagoSettings } from "./payment-service";
+import {
+  validateStoneSettings,
+  captureStonePayment,
+  cancelStonePayment,
+  getStonePaymentStatus,
+} from "./stone-connect";
+import { getFiscalCertificateStatus } from "./fiscal-certificate";
+import { certificateService } from "./certificate-service";
 import "./types";
 
 function parseNFeXML(xmlContent: string): Array<{
@@ -219,7 +231,7 @@ export async function registerRoutes(
   app.post(
     "/api/products",
     requireAuth,
-    requirePermission("inventory:manage"),
+    requirePermission("inventory:create"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -289,7 +301,7 @@ export async function registerRoutes(
   app.patch(
     "/api/products/:id",
     requireAuth,
-    requirePermission("inventory:manage"),
+    requirePermission("inventory:edit"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -396,7 +408,7 @@ export async function registerRoutes(
   app.delete(
     "/api/products/:id",
     requireAuth,
-    requirePermission("inventory:manage"),
+    requirePermission("inventory:delete"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -672,10 +684,232 @@ export async function registerRoutes(
     }
   );
 
+  const paymentInfoSchema = z.object({
+    status: z.enum(["approved", "declined", "processing"]),
+    nsu: z.string().optional().nullable(),
+    brand: z.string().optional().nullable(),
+    provider: z.string().optional().nullable(),
+    authorizationCode: z.string().optional().nullable(),
+    providerReference: z.string().optional().nullable(),
+  });
+
   const createSaleRequestSchema = z.object({
     sale: insertSaleSchema,
     items: z.array(insertSaleItemSchema.omit({ saleId: true })),
+    payment: paymentInfoSchema,
   });
+
+  const paymentAuthorizeSchema = z.object({
+    amount: z.number().positive(),
+    method: z.enum(["pix", "credito", "debito"]),
+  });
+
+  const mpValidationSchema = z.object({
+    accessToken: z.string().min(1),
+    terminalId: z.string().min(1),
+  });
+  const stoneValidationSchema = z.object({
+    clientId: z.string().min(1),
+    clientSecret: z.string().min(1),
+    terminalId: z.string().min(1),
+    environment: z.enum(["homologacao", "producao"]).optional(),
+  });
+  const stoneActionSchema = z.object({
+    paymentId: z.string().min(1),
+    environment: z.enum(["homologacao", "producao"]).optional(),
+  });
+
+  app.post(
+    "/api/payments/mercadopago/validate",
+    requireAuth,
+    requirePermission("settings:edit"),
+    async (req, res) => {
+      try {
+        const { accessToken, terminalId } = mpValidationSchema.parse(req.body);
+        const result = await validateMercadoPagoSettings(
+          accessToken,
+          terminalId
+        );
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Falha ao validar Mercado Pago",
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payments/stone/validate",
+    requireAuth,
+    requirePermission("settings:edit"),
+    async (req, res) => {
+      try {
+        const { clientId, clientSecret, terminalId, environment } =
+          stoneValidationSchema.parse(req.body);
+        const result = await validateStoneSettings({
+          clientId,
+          clientSecret,
+          environment: environment === "homologacao" ? "homologacao" : "producao",
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Falha ao validar Stone",
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payments/stone/capture",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { paymentId, environment } = stoneActionSchema.parse(req.body);
+        const settings = await storage.getCompanySettings(companyId);
+        if (!settings?.stoneClientId || !settings?.stoneClientSecret) {
+          return res
+            .status(400)
+            .json({ error: "Stone Connect nao configurado" });
+        }
+        const result = await captureStonePayment({
+          paymentId,
+          clientId: settings.stoneClientId,
+          clientSecret: settings.stoneClientSecret,
+          environment: environment === "homologacao" ? "homologacao" : "producao",
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Erro ao capturar pagamento",
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payments/stone/cancel",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { paymentId, environment } = stoneActionSchema.parse(req.body);
+        const settings = await storage.getCompanySettings(companyId);
+        if (!settings?.stoneClientId || !settings?.stoneClientSecret) {
+          return res
+            .status(400)
+            .json({ error: "Stone Connect nao configurado" });
+        }
+        const result = await cancelStonePayment({
+          paymentId,
+          clientId: settings.stoneClientId,
+          clientSecret: settings.stoneClientSecret,
+          environment: environment === "homologacao" ? "homologacao" : "producao",
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Erro ao cancelar pagamento",
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/payments/stone/status/:id",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const paymentId = String(req.params.id || "").trim();
+        const environment =
+          req.query.environment === "homologacao" ? "homologacao" : "producao";
+        if (!paymentId) {
+          return res.status(400).json({ error: "paymentId obrigatorio" });
+        }
+        const settings = await storage.getCompanySettings(companyId);
+        if (!settings?.stoneClientId || !settings?.stoneClientSecret) {
+          return res
+            .status(400)
+            .json({ error: "Stone Connect nao configurado" });
+        }
+        const result = await getStonePaymentStatus({
+          paymentId,
+          clientId: settings.stoneClientId,
+          clientSecret: settings.stoneClientSecret,
+          environment,
+        });
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Erro ao consultar pagamento",
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payments/authorize",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { amount, method } = paymentAuthorizeSchema.parse(req.body);
+        const settings = await storage.getCompanySettings(companyId);
+        const result = await authorizePayment({
+          amount,
+          method,
+          settings,
+          description: `Venda PDV ${companyId}`,
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error: error instanceof Error ? error.message : "Erro no pagamento",
+        });
+      }
+    }
+  );
 
   app.post(
     "/api/sales",
@@ -688,21 +922,40 @@ export async function registerRoutes(
         if (!companyId)
           return res.status(401).json({ error: "Não autenticado" });
 
-        const { sale, items } = createSaleRequestSchema.parse(req.body);
+        const { sale, items, payment } = createSaleRequestSchema.parse(
+          req.body
+        );
+        if (payment.status !== "approved") {
+          return res.status(402).json({ error: "Pagamento nao autorizado" });
+        }
 
         const settings = await storage.getCompanySettings(companyId);
+        if (settings?.fiscalEnabled) {
+          const fiscalStatus = await getFiscalCertificateStatus(companyId);
+          if (!fiscalStatus.isValid) {
+            return res.status(403).json({ error: fiscalStatus.message });
+          }
+        }
         const isFiscalConfigured = !!(
           settings &&
           settings.fiscalEnabled &&
           settings.cscToken &&
           settings.cscId
         );
+        const isNfceAuto =
+          Boolean(settings?.nfceEnabled) && isFiscalConfigured;
 
         const saleData = {
           ...sale,
           companyId,
           userId,
-          nfceStatus: isFiscalConfigured ? "Autorizada" : "Pendente Fiscal",
+          paymentStatus: payment.status,
+          paymentNsu: payment.nsu || null,
+          paymentBrand: payment.brand || null,
+          paymentProvider: payment.provider || null,
+          paymentAuthorization: payment.authorizationCode || null,
+          paymentReference: payment.providerReference || null,
+          nfceStatus: isNfceAuto ? "Pendente" : "Pendente Fiscal",
           status: isFiscalConfigured ? "Concluído" : "Aguardando Emissão",
         };
 
@@ -732,6 +985,8 @@ export async function registerRoutes(
     status: z.string(),
     protocol: z.string().optional(),
     key: z.string().optional(),
+    error: z.string().nullable().optional(),
+    xmlContent: z.string().optional(),
   });
 
   app.patch(
@@ -745,7 +1000,8 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const id = parseInt(req.params.id);
-        const { status, protocol, key } = updateNfceStatusSchema.parse(
+        const { status, protocol, key, error, xmlContent } =
+          updateNfceStatusSchema.parse(
           req.body
         );
         const sale = await storage.updateSaleNfceStatus(
@@ -753,8 +1009,23 @@ export async function registerRoutes(
           companyId,
           status,
           protocol,
-          key
+          key,
+          error ?? null
         );
+        if (sale && status === "Autorizada" && xmlContent && key) {
+          const authorizedAt = new Date();
+          const expiresAt = new Date(
+            authorizedAt.getTime() + 5 * 365 * 24 * 60 * 60 * 1000
+          );
+          await storage.saveFiscalXml({
+            companyId,
+            documentType: "NFCe",
+            documentKey: key,
+            xmlContent,
+            authorizedAt,
+            expiresAt,
+          });
+        }
         if (!sale) {
           return res.status(404).json({ error: "Sale not found" });
         }
@@ -779,7 +1050,16 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const settings = await storage.getCompanySettings(companyId);
-        res.json(settings || {});
+        const company = await storage.getCompanyById(companyId);
+        res.json({
+          ...(settings || {}),
+          address: company?.address || "",
+          city: company?.city || "",
+          state: company?.state || "",
+          zipCode: company?.zipCode || "",
+          cnae: company?.cnae || settings?.cnae || "",
+          im: company?.im || settings?.im || "",
+        });
       } catch (error) {
         res.status(500).json({ error: "Failed to fetch settings" });
       }
@@ -792,15 +1072,33 @@ export async function registerRoutes(
       if (!companyId) return res.status(401).json({ error: "Não autenticado" });
 
       // Temporarily simplified for debugging and quick fix
-      const validated = insertCompanySettingsSchema.partial().parse(req.body);
+      const {
+        address,
+        city,
+        state,
+        zipCode,
+        cnae,
+        im,
+        ...rest
+      } = req.body || {};
+      const validated = insertCompanySettingsSchema.partial().parse(rest);
       const settings = await storage.updateCompanySettings(
         companyId,
-        validated
+        { ...validated, address, city, state, zipCode, cnae, im }
       );
+      const company = await storage.getCompanyById(companyId);
       console.log(
         `Settings updated for company ${companyId}: ${JSON.stringify(settings)}`
       );
-      res.json(settings);
+      res.json({
+        ...(settings || {}),
+        address: company?.address || "",
+        city: company?.city || "",
+        state: company?.state || "",
+        zipCode: company?.zipCode || "",
+        cnae: company?.cnae || settings?.cnae || "",
+        im: company?.im || settings?.im || "",
+      });
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: error.errors });
@@ -809,19 +1107,256 @@ export async function registerRoutes(
     }
   });
 
+  // ============================================
+  // PAYMENT METHODS
+  // ============================================
+  const paymentMethodSchema = z.object({
+    name: z.string().min(1),
+    type: z.enum(["pix", "credito", "debito", "dinheiro", "outros"]),
+    nfceCode: z.string().optional(),
+    tefMethod: z.enum(["pix", "credito", "debito"]).optional(),
+    isActive: z.boolean().optional(),
+    sortOrder: z.number().int().optional(),
+  });
+
+  app.get(
+    "/api/payment-methods",
+    requireAuth,
+    requirePermission("settings:payments"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const methods = await storage.getPaymentMethods(companyId);
+        res.json(methods);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch payment methods" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payment-methods",
+    requireAuth,
+    requirePermission("settings:payments"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const data = paymentMethodSchema.parse(req.body);
+        const created = await storage.createPaymentMethod({
+          companyId,
+          name: data.name.trim(),
+          type: data.type,
+          nfceCode: data.nfceCode || null,
+          tefMethod: data.tefMethod || null,
+          isActive: data.isActive ?? true,
+          sortOrder: data.sortOrder ?? 0,
+        });
+        res.status(201).json(created);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to create payment method" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/payment-methods/:id",
+    requireAuth,
+    requirePermission("settings:payments"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const id = parseInt(req.params.id);
+        const data = paymentMethodSchema.partial().parse(req.body);
+        const updated = await storage.updatePaymentMethod(id, companyId, {
+          name: data.name?.trim(),
+          type: data.type,
+          nfceCode: data.nfceCode ?? undefined,
+          tefMethod: data.tefMethod ?? undefined,
+          isActive: data.isActive,
+          sortOrder: data.sortOrder,
+        });
+        if (!updated) {
+          return res.status(404).json({ error: "Payment method not found" });
+        }
+        res.json(updated);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to update payment method" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/payment-methods/:id",
+    requireAuth,
+    requirePermission("settings:payments"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const id = parseInt(req.params.id);
+        const deleted = await storage.deletePaymentMethod(id, companyId);
+        if (!deleted) {
+          return res.status(404).json({ error: "Payment method not found" });
+        }
+        res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to delete payment method" });
+      }
+    }
+  );
+
+  // ============================================
+  // PDV LOAD
+  // ============================================
+  app.post(
+    "/api/pdv/load",
+    requireAuth,
+    requirePermission("settings:payments"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+
+        const productsList = await storage.getAllProducts(companyId);
+        const methods = await storage.getPaymentMethods(companyId);
+        const payload = {
+          generatedAt: new Date().toISOString(),
+          products: productsList,
+          paymentMethods: methods.filter((m) => m.isActive !== false),
+        };
+        const load = await storage.createPdvLoad({
+          companyId,
+          payload,
+        });
+
+        res.json({
+          success: true,
+          loadId: load.id,
+          generatedAt: load.createdAt,
+          products: productsList.length,
+          paymentMethods: payload.paymentMethods.length,
+        });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to generate PDV load" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/pdv/load",
+    requireAuth,
+    requirePermission("pos:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const load = await storage.getLatestPdvLoad(companyId);
+        if (!load) {
+          return res.status(404).json({ error: "Nenhuma carga enviada" });
+        }
+        res.json(load.payload || {});
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch PDV load" });
+      }
+    }
+  );
+
   app.get("/api/ean/:code", requireAuth, async (req, res) => {
     try {
+      const companyId = getCompanyId(req);
+      if (!companyId)
+        return res.status(401).json({ error: "Nao autenticado" });
+
       const { code } = req.params;
-      const result = await lookupEAN(code);
+      const normalized = String(code || "").replace(/\s+/g, "");
+      if (!normalized) {
+        return res.status(404).json({ error: "Produto nao encontrado" });
+      }
+
+      const localProduct = await storage.getProductByEAN(
+        companyId,
+        normalized
+      );
+      if (localProduct) {
+        return res.json({
+          name: localProduct.name,
+          brand: localProduct.brand,
+          description: localProduct.description,
+          thumbnail: localProduct.mainImageUrl,
+          ncm: localProduct.ncm,
+          cest: localProduct.cest,
+        });
+      }
+
+      const result = await lookupEAN(normalized);
       if (!result) {
-        return res.status(404).json({ error: "Produto não encontrado" });
+        return res.status(404).json({ error: "Produto nao encontrado" });
       }
-      res.json(result);
+
+      let savedProduct: typeof products.$inferSelect | null = null;
+      try {
+        const [created] = await db
+          .insert(products)
+          .values({
+            companyId,
+            name: result.name,
+            ean: normalized,
+            brand: result.brand || null,
+            description: result.description || null,
+            ncm: result.ncm || null,
+            mainImageUrl: result.thumbnail || null,
+            category: "Importado",
+            unit: "UN",
+            price: "0",
+            stock: 0,
+          })
+          .returning();
+        savedProduct = created || null;
+      } catch (error) {
+        savedProduct = null;
+      }
+
+      if (savedProduct) {
+        return res.json({
+          name: savedProduct.name,
+          brand: savedProduct.brand,
+          description: savedProduct.description,
+          thumbnail: savedProduct.mainImageUrl,
+          ncm: savedProduct.ncm,
+          cest: savedProduct.cest,
+        });
+      }
+
+      res.json({
+        name: result.name,
+        brand: result.brand,
+        description: result.description,
+        thumbnail: result.thumbnail,
+        ncm: result.ncm,
+      });
     } catch (error) {
-      if (error instanceof Error) {
-        return res.status(400).json({ error: error.message });
-      }
-      res.status(500).json({ error: "Falha ao buscar produto" });
+      res.status(404).json({ error: "Produto nao encontrado" });
     }
   });
 
@@ -859,7 +1394,7 @@ export async function registerRoutes(
   app.post(
     "/api/inventory/adjust",
     requireAuth,
-    requirePermission("inventory:manage"),
+    requirePermission("inventory:adjust"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -2153,6 +2688,11 @@ export async function registerRoutes(
         city: data.municipio || "",
         state: data.uf || "",
         zipCode: data.cep || "",
+        cnae:
+          Array.isArray(data.atividade_principal) &&
+          data.atividade_principal[0]?.code
+            ? String(data.atividade_principal[0].code).replace(/\D/g, "")
+            : "",
       });
     } catch (error) {
       console.error("Erro ao buscar CNPJ:", error);
@@ -2512,6 +3052,81 @@ export async function registerRoutes(
     }
   );
 
+  app.get(
+    "/api/simples-aliquots",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÇœo autenticado" });
+
+        const aliquots = await storage.listSimplesNacionalAliquots(companyId);
+        res.json(aliquots);
+      } catch (error) {
+        console.error("Failed to fetch Simples Nacional aliquots:", error);
+        res.status(500).json({ error: "Failed to fetch Simples aliquots" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/simples-aliquots",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÇœo autenticado" });
+
+        const validated = insertSimplesNacionalAliquotSchema.parse({
+          ...req.body,
+          companyId,
+        });
+        const aliquot = await storage.createSimplesNacionalAliquot(validated);
+        res.status(201).json(aliquot);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to create Simples Nacional aliquot:", error);
+        res.status(500).json({ error: "Failed to create Simples aliquot" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/simples-aliquots/:id",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÇœo autenticado" });
+
+        const id = parseInt(req.params.id, 10);
+        if (isNaN(id)) {
+          return res.status(400).json({ error: "ID invÇ­lido" });
+        }
+
+        const deleted = await storage.deleteSimplesNacionalAliquot(
+          id,
+          companyId
+        );
+        if (!deleted) {
+          return res.status(404).json({ error: "AlÇðquota nÇœo encontrada" });
+        }
+        res.json({ success: true });
+      } catch (error) {
+        console.error("Failed to delete Simples Nacional aliquot:", error);
+        res.status(500).json({ error: "Failed to delete Simples aliquot" });
+      }
+    }
+  );
+
   // ============================================
   // DIGITAL CERTIFICATE MANAGEMENT
   // ============================================
@@ -2548,6 +3163,46 @@ export async function registerRoutes(
     }
   );
 
+  app.get(
+    "/api/digital-certificate/debug",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÃ£o autenticado" });
+
+        const certBuffer = await certificateService.getCertificate(companyId);
+        const certPassword =
+          await certificateService.getCertificatePassword(companyId);
+        if (!certBuffer || !certPassword) {
+          return res.json({ installed: false });
+        }
+
+        const candidates =
+          XMLSignatureService.extractCertificateCnpjCandidates(
+            certBuffer.toString("base64"),
+            certPassword
+          );
+        const info = XMLSignatureService.extractCertificateInfo(
+          certBuffer.toString("base64"),
+          certPassword
+        );
+        res.json({
+          installed: true,
+          cnpj: info.cnpj,
+          subjectName: info.subjectName,
+          issuer: info.issuer,
+          candidates,
+        });
+      } catch (error) {
+        console.error("Failed to debug certificate:", error);
+        res.status(500).json({ error: "Failed to debug certificate" });
+      }
+    }
+  );
+
   app.post(
     "/api/digital-certificate/upload",
     requireAuth,
@@ -2566,22 +3221,39 @@ export async function registerRoutes(
           });
         }
 
-        const cert = await storage.createOrUpdateDigitalCertificate({
-          companyId,
+        const certInfo = XMLSignatureService.extractCertificateInfo(
           certificateData,
+          certificatePassword
+        );
+
+        const certBuffer = Buffer.from(certificateData, "base64");
+        const certCnpj = String(certInfo.cnpj || cnpj || "");
+        await certificateService.uploadCertificate(
+          companyId,
+          certBuffer,
           certificatePassword,
-          cnpj: cnpj || "",
-          certificateType: "e-CNPJ",
-          subjectName: "Digital Certificate",
-          issuer: "AC Raiz",
-          validFrom: new Date(),
-          validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-        });
+          certCnpj
+        );
+        await db
+          .update(digitalCertificates)
+          .set({
+            cnpj: certCnpj.replace(/\D/g, ""),
+            certificateType: "e-CNPJ",
+            subjectName: certInfo.subjectName,
+            issuer: certInfo.issuer,
+            validFrom: certInfo.validFrom,
+            validUntil: certInfo.validUntil,
+            isActive: true,
+            updatedAt: new Date(),
+          })
+          .where(eq(digitalCertificates.companyId, companyId));
+        certificateService.clearCache(companyId);
+        const cert = await storage.getDigitalCertificate(companyId);
 
         res.status(201).json({
           success: true,
           message: "Certificado digital salvo com sucesso",
-          cnpj: cert.cnpj,
+          cnpj: cert?.cnpj || certCnpj,
         });
       } catch (error) {
         console.error("Failed to upload certificate:", error);
@@ -2606,6 +3278,7 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         await storage.deleteDigitalCertificate(companyId);
+        certificateService.clearCache(companyId);
         res.json({ success: true, message: "Certificado removido" });
       } catch (error) {
         console.error("Failed to delete certificate:", error);
@@ -2646,6 +3319,12 @@ export async function registerRoutes(
         if (!companyId)
           return res.status(401).json({ error: "Não autenticado" });
 
+        const settings = await storage.getCompanySettings(companyId);
+        const defaultEnvironment =
+          settings?.fiscalEnvironment === "producao"
+            ? "producao"
+            : "homologacao";
+
         const data = req.body as any;
         const numbering = await storage.createSequentialNumbering({
           companyId,
@@ -2659,7 +3338,7 @@ export async function registerRoutes(
             ? new Date(data.authorizedAt)
             : undefined,
           expiresAt: data.expiresAt ? new Date(data.expiresAt) : undefined,
-          environment: data.environment || "homologacao",
+          environment: data.environment || defaultEnvironment,
           isActive: true,
         });
         res.status(201).json(numbering);
@@ -2707,3 +3386,5 @@ export async function registerRoutes(
 
   return httpServer;
 }
+
+

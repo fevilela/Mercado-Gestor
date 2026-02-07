@@ -125,6 +125,12 @@ export default function Inventory() {
     XmlPreviewProduct[]
   >([]);
   const [isConfirmingImport, setIsConfirmingImport] = useState(false);
+  const [selectedStockFilter, setSelectedStockFilter] = useState<
+    "all" | "in_stock" | "low" | "critical" | "out"
+  >("all");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -344,16 +350,43 @@ export default function Inventory() {
   };
 
   const filteredProducts = products.filter((product: any) => {
-    if (!searchTerm) return true;
+    const categoryValue = String(product.category || "").trim();
+    const categoryMatches =
+      selectedCategory === "all" || categoryValue === selectedCategory;
+    if (!categoryMatches) return false;
+
+    const stock = Number(product.stock || 0);
+    const minStock = Number(product.minStock || 10);
+    const lowThreshold = minStock * 0.5;
+    let stockMatches = true;
+    if (selectedStockFilter === "in_stock") {
+      stockMatches = stock > 0;
+    } else if (selectedStockFilter === "low") {
+      stockMatches = stock > lowThreshold && stock <= minStock;
+    } else if (selectedStockFilter === "critical") {
+      stockMatches = stock <= lowThreshold;
+    } else if (selectedStockFilter === "out") {
+      stockMatches = stock <= 0;
+    }
+    if (!stockMatches) return false;
+
     const search = searchTerm.toLowerCase().trim();
     if (!search) return true;
     return (
-      product.name.toLowerCase().includes(search) ||
+      String(product.name || "").toLowerCase().includes(search) ||
       (product.ean && product.ean.toLowerCase().includes(search)) ||
       (product.sku && product.sku.toLowerCase().includes(search)) ||
-      product.category.toLowerCase().includes(search)
+      categoryValue.toLowerCase().includes(search)
     );
   });
+
+  const categoryOptions: string[] = Array.from(
+    new Set<string>(
+      products
+        .map((product: any) => String(product.category || "").trim())
+        .filter((category: string | any[]) => category.length > 0)
+    )
+  );
 
   if (isLoading) {
     return (
@@ -418,10 +451,18 @@ export default function Inventory() {
             />
           </div>
           <div className="flex gap-2 w-full sm:w-auto">
-            <Button variant="outline" className="flex-1 sm:flex-none">
+            <Button
+              variant="outline"
+              className="flex-1 sm:flex-none"
+              onClick={() => setFiltersOpen(true)}
+            >
               <Filter className="mr-2 h-4 w-4" /> Filtros
             </Button>
-            <Button variant="outline" className="flex-1 sm:flex-none">
+            <Button
+              variant="outline"
+              className="flex-1 sm:flex-none"
+              onClick={() => setCategoriesOpen(true)}
+            >
               Categorias
             </Button>
           </div>
@@ -615,6 +656,111 @@ export default function Inventory() {
           </div>
         )}
       </div>
+
+      <Dialog open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Filtros</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p>Selecione o filtro de estoque.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={selectedStockFilter === "all" ? "default" : "outline"}
+                onClick={() => setSelectedStockFilter("all")}
+              >
+                Todos
+              </Button>
+              <Button
+                type="button"
+                variant={
+                  selectedStockFilter === "in_stock" ? "default" : "outline"
+                }
+                onClick={() => setSelectedStockFilter("in_stock")}
+              >
+                Em estoque
+              </Button>
+              <Button
+                type="button"
+                variant={selectedStockFilter === "low" ? "default" : "outline"}
+                onClick={() => setSelectedStockFilter("low")}
+              >
+                Baixo
+              </Button>
+              <Button
+                type="button"
+                variant={
+                  selectedStockFilter === "critical" ? "default" : "outline"
+                }
+                onClick={() => setSelectedStockFilter("critical")}
+              >
+                Critico
+              </Button>
+              <Button
+                type="button"
+                variant={selectedStockFilter === "out" ? "default" : "outline"}
+                onClick={() => setSelectedStockFilter("out")}
+              >
+                Sem estoque
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFiltersOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={categoriesOpen} onOpenChange={setCategoriesOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Categorias</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p>Selecione a categoria.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={selectedCategory === "all" ? "default" : "outline"}
+                onClick={() => {
+                  setSelectedCategory("all");
+                  setCategoriesOpen(false);
+                }}
+              >
+                Todas
+              </Button>
+              {categoryOptions.map((category) => (
+                <Button
+                  key={String(category)}
+                  type="button"
+                  variant={
+                    selectedCategory === category ? "default" : "outline"
+                  }
+                  onClick={() => {
+                    setSelectedCategory(category);
+                    setCategoriesOpen(false);
+                  }}
+                >
+                  {category}
+                </Button>
+              ))}
+            </div>
+            {categoryOptions.length === 0 && (
+              <span className="text-sm text-muted-foreground">
+                Sem categorias cadastradas.
+              </span>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCategoriesOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ProductForm
         open={formOpen}
