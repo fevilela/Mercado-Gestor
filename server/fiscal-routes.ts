@@ -14,6 +14,9 @@ import { CSOSNCalculator } from "./csosn-calculator";
 import { TaxCalculator } from "./tax-calculator";
 import { TaxMatrixService } from "./tax-matrix";
 import { SefazService } from "./sefaz-service";
+import { storage } from "./storage";
+import { requireAuth, getCompanyId } from "./middleware";
+import { CEST_REGEX, isCestRequired } from "@shared/schema";
 import { XMLSignatureService } from "./xml-signature";
 import { NFCeContingencyService } from "./nfce-contingency";
 import {
@@ -266,6 +269,7 @@ router.post("/nfe/validate", requireAuth, async (req, res) => {
         });
       }
 
+      const ncm = item.ncm || product.ncm;
       const ncm = item.ncm || product.ncm || undefined;
       const cest = product.cest;
 
@@ -2168,6 +2172,10 @@ router.post(
         environment,
       );
 
+// Submeter NF-e para SEFAZ
+router.post("/sefaz/submit", async (req, res) => {
+  try {
+    const { xmlContent, environment = "homologacao", uf, sefazUrl } = req.body;
       const company = await storage.getCompanyById(companyId);
       if (!company) {
         return res.status(400).json({ error: "Empresa nao configurada" });
@@ -2179,6 +2187,17 @@ router.post(
       const certificatePassword =
         await certService.getCertificatePassword(companyId);
 
+    if (!uf) {
+      return res.status(400).json({ error: "UF é obrigatória" });
+    }
+
+    const sefazService = new SefazService({
+      environment: environment as "homologacao" | "producao",
+      uf,
+      certificatePath: "",
+      certificatePassword: "",
+      sefazUrl,
+    });
       if (!certificateBuffer || !certificatePassword) {
         return res.status(400).json({
           error: "Certificado digital nao configurado para esta empresa",
@@ -2192,6 +2211,13 @@ router.post(
         });
       }
 
+// Consultar Recibo SEFAZ
+router.post("/sefaz/receipt", async (req, res) => {
+  try {
+    const { xmlContent, environment = "homologacao", uf, sefazUrl } = req.body;
+
+    if (!xmlContent) {
+      return res.status(400).json({ error: "XML content é obrigatório" });
       const correctionText = String(correctedContent || correctionReason).trim();
       const seqNumber =
         typeof sequence === "number" && sequence > 0 ? sequence : 1;
@@ -2243,6 +2269,27 @@ router.post(
     }
   },
 );
+
+    if (!uf) {
+      return res.status(400).json({ error: "UF é obrigatória" });
+    }
+
+    const sefazService = new SefazService({
+      environment: environment as "homologacao" | "producao",
+      uf,
+      certificatePath: "",
+      certificatePassword: "",
+      sefazUrl,
+    });
+
+    const result = await sefazService.queryReceipt(xmlContent);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Erro ao consultar recibo",
+    });
+  }
+});
 
 router.post(
   "/sefaz/inutilize",

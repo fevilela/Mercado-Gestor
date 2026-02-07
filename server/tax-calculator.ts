@@ -15,6 +15,30 @@ export interface TaxCalculation {
   totalTaxes: number;
 }
 
+export interface IbptQueryParams {
+  token: string;
+  cnpj: string;
+  uf: string;
+  codigo: string;
+  descricao: string;
+  unidade: string;
+  valor: number;
+  gtin?: string;
+  ex?: string;
+  baseUrl?: string;
+}
+
+export interface IbptTaxResult {
+  federal: number;
+  estadual: number;
+  municipal: number;
+  importado?: number;
+  total?: number;
+  chave?: string;
+  versao?: string;
+  fonte?: string;
+}
+
 export class TaxCalculator {
   // Calcula ICMS (Imposto sobre Circulação de Mercadorias e Serviços)
   static calculateICMS(
@@ -162,6 +186,49 @@ export class TaxCalculator {
     return aliquots[taxType]?.[cst] ?? 0;
   }
 
+  static async fetchIbptTaxes(
+    params: IbptQueryParams
+  ): Promise<IbptTaxResult> {
+    const endpoint = params.baseUrl ?? "https://api.ibpt.org.br/ibpt/consultar";
+    const url = new URL(endpoint);
+    url.searchParams.set("token", params.token);
+    url.searchParams.set("cnpj", params.cnpj);
+    url.searchParams.set("uf", params.uf);
+    url.searchParams.set("codigo", params.codigo);
+    url.searchParams.set("descricao", params.descricao);
+    url.searchParams.set("unidade", params.unidade);
+    url.searchParams.set("valor", params.valor.toString());
+    if (params.gtin) url.searchParams.set("gtin", params.gtin);
+    if (params.ex) url.searchParams.set("ex", params.ex);
+
+    const response = await fetch(url.toString());
+    const data = await response.json();
+
+    if (!response.ok) {
+      const message =
+        typeof data?.message === "string" ? data.message : "Erro na API IBPT";
+      throw new Error(message);
+    }
+
+    const toNumber = (value: unknown): number => {
+      if (typeof value === "number") return value;
+      if (typeof value === "string") {
+        const normalized = value.replace(",", ".");
+        const parsed = Number(normalized);
+        return Number.isNaN(parsed) ? 0 : parsed;
+      }
+      return 0;
+    };
+
+    return {
+      federal: toNumber(data?.federal),
+      estadual: toNumber(data?.estadual),
+      municipal: toNumber(data?.municipal),
+      importado: data?.importado !== undefined ? toNumber(data.importado) : undefined,
+      total: data?.total !== undefined ? toNumber(data.total) : undefined,
+      chave: typeof data?.chave === "string" ? data.chave : undefined,
+      versao: typeof data?.versao === "string" ? data.versao : undefined,
+      fonte: typeof data?.fonte === "string" ? data.fonte : undefined,
   static async fetchIbptTaxes(params: {
     token: string;
     cnpj: string;
