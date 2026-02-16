@@ -77,8 +77,12 @@ interface XmlPreviewProduct {
   ncm: string | null;
   unit: string;
   quantity: number;
+  unitsPerPackage: number;
+  stockQuantity: number;
+  totalPurchaseValue: string;
   price: string;
   purchasePrice: string;
+  marginPercent: number;
   existingProductId: number | null;
   existingProductName: string | null;
   existingStock: number;
@@ -134,6 +138,22 @@ export default function Inventory() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
+  const toMoney = (value: string | number | null | undefined) => {
+    const parsed = Number(String(value ?? "0").replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const round2 = (value: number) => Number(value.toFixed(2));
+
+  const calcSalePriceFromMargin = (purchasePrice: number, margin: number) =>
+    purchasePrice * (1 + margin / 100);
+
+  const calcMarginFromSalePrice = (purchasePrice: number, salePrice: number) =>
+    purchasePrice > 0 ? ((salePrice - purchasePrice) / purchasePrice) * 100 : 0;
+
+  const calcUnitCost = (totalPurchaseValue: number, stockQuantity: number) =>
+    stockQuantity > 0 ? totalPurchaseValue / stockQuantity : 0;
+
   const { data: products = [], isLoading } = useQuery({
     queryKey: ["/api/products"],
     queryFn: async () => {
@@ -169,7 +189,42 @@ export default function Inventory() {
       }
 
       const result = await res.json();
-      setXmlPreviewProducts(result.products);
+      const normalizedProducts: XmlPreviewProduct[] = (result.products || []).map(
+        (product: any) => {
+          const purchasePrice = toMoney(product.purchasePrice ?? product.price);
+          const salePrice = toMoney(product.price);
+          const unitsPerPackage = Math.max(
+            1,
+            Number(product.unitsPerPackage || 1)
+          );
+          const packageQty = Math.max(0, Number(product.quantity || 0));
+          const totalPurchaseValue = toMoney(product.purchasePrice) * packageQty;
+          const marginPercentRaw =
+            typeof product.marginPercent === "number"
+              ? product.marginPercent
+              : calcMarginFromSalePrice(purchasePrice, salePrice);
+          const marginPercent = Number.isFinite(marginPercentRaw)
+            ? round2(marginPercentRaw)
+            : 30;
+          const stockQuantity = Math.max(
+            0,
+            Math.floor(
+              Number(product.stockQuantity ?? packageQty * unitsPerPackage)
+            )
+          );
+          return {
+            ...product,
+            unitsPerPackage,
+            quantity: packageQty,
+            stockQuantity,
+            totalPurchaseValue: totalPurchaseValue.toFixed(2),
+            purchasePrice: purchasePrice.toFixed(2),
+            price: salePrice.toFixed(2),
+            marginPercent,
+          };
+        }
+      );
+      setXmlPreviewProducts(normalizedProducts);
       setXmlPreviewOpen(true);
     } catch (error) {
       toast.error(
@@ -225,8 +280,133 @@ export default function Inventory() {
   const updatePreviewQuantity = (tempId: number, newQuantity: number) => {
     setXmlPreviewProducts((prev) =>
       prev.map((p) =>
-        p.tempId === tempId ? { ...p, quantity: Math.max(0, newQuantity) } : p
+        p.tempId === tempId
+          ? (() => {
+              const quantity = Math.max(0, newQuantity);
+              const stockQuantity = Math.max(
+                0,
+                Math.floor(quantity * (p.unitsPerPackage || 1))
+              );
+              const purchasePrice = calcUnitCost(
+                toMoney(p.totalPurchaseValue),
+                stockQuantity
+              );
+              const salePrice = calcSalePriceFromMargin(
+                purchasePrice,
+                p.marginPercent
+              );
+              return {
+                ...p,
+                quantity,
+                stockQuantity,
+                purchasePrice: purchasePrice.toFixed(2),
+                price: salePrice.toFixed(2),
+              };
+            })()
+          : p
       )
+    );
+  };
+
+  const updatePreviewUnitsPerPackage = (tempId: number, newValue: number) => {
+    setXmlPreviewProducts((prev) =>
+      prev.map((p) =>
+        p.tempId === tempId
+          ? (() => {
+              const unitsPerPackage = Math.max(1, newValue);
+              const stockQuantity = Math.max(
+                0,
+                Math.floor(p.quantity * unitsPerPackage)
+              );
+              const purchasePrice = calcUnitCost(
+                toMoney(p.totalPurchaseValue),
+                stockQuantity
+              );
+              const salePrice = calcSalePriceFromMargin(
+                purchasePrice,
+                p.marginPercent
+              );
+              return {
+                ...p,
+                unitsPerPackage,
+                stockQuantity,
+                purchasePrice: purchasePrice.toFixed(2),
+                price: salePrice.toFixed(2),
+              };
+            })()
+          : p
+      )
+    );
+  };
+
+  const updatePreviewTotalPurchaseValue = (tempId: number, value: string) => {
+    setXmlPreviewProducts((prev) =>
+      prev.map((p) => {
+        if (p.tempId !== tempId) return p;
+        const totalPurchaseValue = toMoney(value);
+        const purchasePrice = calcUnitCost(totalPurchaseValue, p.stockQuantity);
+        const salePrice = calcSalePriceFromMargin(purchasePrice, p.marginPercent);
+        return {
+          ...p,
+          totalPurchaseValue: totalPurchaseValue.toFixed(2),
+          purchasePrice: purchasePrice.toFixed(2),
+          price: salePrice.toFixed(2),
+        };
+      })
+    );
+  };
+
+  const updatePreviewPackagePurchaseValue = (tempId: number, value: string) => {
+    setXmlPreviewProducts((prev) =>
+      prev.map((p) => {
+        if (p.tempId !== tempId) return p;
+        const packagePurchaseValue = toMoney(value);
+        const totalPurchaseValue = packagePurchaseValue * Math.max(0, p.quantity);
+        const purchasePrice = calcUnitCost(totalPurchaseValue, p.stockQuantity);
+        const salePrice = calcSalePriceFromMargin(purchasePrice, p.marginPercent);
+        return {
+          ...p,
+          totalPurchaseValue: totalPurchaseValue.toFixed(2),
+          purchasePrice: purchasePrice.toFixed(2),
+          price: salePrice.toFixed(2),
+        };
+      })
+    );
+  };
+
+  const updatePreviewMarginPercent = (tempId: number, value: string) => {
+    setXmlPreviewProducts((prev) =>
+      prev.map((p) => {
+        if (p.tempId !== tempId) return p;
+        const marginPercent = Math.max(0, Number(value || 0));
+        const salePrice = calcSalePriceFromMargin(
+          toMoney(p.purchasePrice),
+          marginPercent
+        );
+        return {
+          ...p,
+          marginPercent: round2(marginPercent),
+          price: salePrice.toFixed(2),
+        };
+      })
+    );
+  };
+
+  const updatePreviewSalePrice = (tempId: number, value: string) => {
+    setXmlPreviewProducts((prev) =>
+      prev.map((p) => {
+        if (p.tempId !== tempId) return p;
+        const salePrice = toMoney(value);
+        const marginPercent = calcMarginFromSalePrice(
+          toMoney(p.purchasePrice),
+          salePrice
+        );
+        return {
+          ...p,
+          price: salePrice.toFixed(2),
+          marginPercent: round2(Math.max(0, marginPercent)),
+        };
+      })
     );
   };
 
@@ -972,8 +1152,14 @@ export default function Inventory() {
                       <TableHead className="min-w-[200px]">Produto</TableHead>
                       <TableHead>EAN</TableHead>
                       <TableHead>Unidade</TableHead>
-                      <TableHead>Quantidade</TableHead>
-                      <TableHead>Preço</TableHead>
+                      <TableHead>Unid/Embalagem</TableHead>
+                      <TableHead>Qtde Pacotes</TableHead>
+                      <TableHead>Valor Fardo Unit. (R$)</TableHead>
+                      <TableHead>Valor Total (R$)</TableHead>
+                      <TableHead>Estoque Final</TableHead>
+                      <TableHead>Custo Unit. (R$)</TableHead>
+                      <TableHead>Margem (%)</TableHead>
+                      <TableHead>Venda (R$)</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
@@ -1000,6 +1186,39 @@ export default function Inventory() {
                         <TableCell>
                           <Input
                             type="number"
+                            min="1"
+                            className="w-24"
+                            value={product.unitsPerPackage ?? 1}
+                            onChange={(e) =>
+                              updatePreviewUnitsPerPackage(
+                                product.tempId,
+                                parseInt(e.target.value) || 1
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="w-28"
+                            value={(
+                              product.quantity > 0
+                                ? toMoney(product.totalPurchaseValue) / product.quantity
+                                : 0
+                            ).toFixed(2)}
+                            onChange={(e) =>
+                              updatePreviewPackagePurchaseValue(
+                                product.tempId,
+                                e.target.value
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
                             min="0"
                             className="w-20"
                             value={product.quantity}
@@ -1012,7 +1231,59 @@ export default function Inventory() {
                           />
                         </TableCell>
                         <TableCell>
-                          R$ {parseFloat(product.price).toFixed(2)}
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="w-28"
+                            value={product.totalPurchaseValue}
+                            onChange={(e) =>
+                              updatePreviewTotalPurchaseValue(
+                                product.tempId,
+                                e.target.value
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <span className="font-medium">
+                            {product.stockQuantity}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="font-medium">
+                            {Number(product.purchasePrice).toFixed(2)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="w-24"
+                            value={product.marginPercent ?? 0}
+                            onChange={(e) =>
+                              updatePreviewMarginPercent(
+                                product.tempId,
+                                e.target.value
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="w-28"
+                            value={product.price}
+                            onChange={(e) =>
+                              updatePreviewSalePrice(
+                                product.tempId,
+                                e.target.value
+                              )
+                            }
+                          />
                         </TableCell>
                         <TableCell>
                           {product.isExisting ? (

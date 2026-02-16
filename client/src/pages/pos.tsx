@@ -61,6 +61,10 @@ type PaymentResult = {
   providerReference?: string | null;
 };
 type FiscalStatus = "idle" | "sending" | "success" | "pending_fiscal";
+type FiscalReadiness = {
+  ready: boolean;
+  messages: string[];
+};
 
 export default function POS() {
   const [, setLocation] = useLocation();
@@ -230,8 +234,15 @@ export default function POS() {
     },
   });
 
-  const isFiscalConfigured =
-    settings?.fiscalEnabled && settings?.cscToken && settings?.cscId;
+  const { data: fiscalReadiness } = useQuery<FiscalReadiness>({
+    queryKey: ["/api/fiscal/readiness"],
+    retry: false,
+  });
+
+  const isFiscalConfigured = Boolean(fiscalReadiness?.ready);
+  const fiscalMissingMessage =
+    fiscalReadiness?.messages?.[0] ||
+    "Configuracao fiscal incompleta para emissao da NFC-e.";
   const fiscalEnvironmentLabel =
     settings?.fiscalEnvironment === "producao" ? "Producao" : "Homologacao";
 
@@ -295,13 +306,20 @@ export default function POS() {
   const createSaleMutation = useMutation({
     mutationFn: async (
       saleData: any
-    ): Promise<{ sale: any; fiscalConfigured: boolean }> => {
+    ): Promise<{
+      sale: any;
+      fiscalConfigured: boolean;
+      fiscalReadiness?: FiscalReadiness;
+    }> => {
       const res = await fetch("/api/sales", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(saleData),
       });
-      if (!res.ok) throw new Error("Failed to create sale");
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Failed to create sale");
+      }
       return res.json();
     },
     onSuccess: () => {
@@ -570,7 +588,8 @@ export default function POS() {
         toast({
           title: "Venda Registrada",
           description:
-            "Venda salva como pendente fiscal. Configure o certificado para emitir NFC-e.",
+            result.fiscalReadiness?.messages?.[0] ||
+            "Venda salva como pendente fiscal.",
           variant: "default",
           className: "bg-amber-500 text-white border-none",
         });
@@ -1119,7 +1138,7 @@ export default function POS() {
                   ? "Comunicando com a SEFAZ para emissão da NFC-e..."
                   : "Registrando venda...")}
               {fiscalStatus === "pending_fiscal" &&
-                "Venda salva com sucesso. Emissão fiscal pendente."}
+                "Venda salva com sucesso. Emissao fiscal pendente."}
               {fiscalStatus === "success" && "Nota fiscal emitida com sucesso."}
             </DialogDescription>
           </DialogHeader>
@@ -1149,8 +1168,7 @@ export default function POS() {
                     Pendente emissão fiscal
                   </p>
                   <p className="text-xs text-muted-foreground mt-2">
-                    Configure o certificado digital nas configurações para
-                    emitir NFC-e
+                    {fiscalMissingMessage}
                   </p>
                 </div>
               </>
@@ -1166,7 +1184,7 @@ export default function POS() {
                     Venda Aprovada!
                   </h3>
                   <p className="text-sm text-muted-foreground">
-                    Protocolo: 135230004567890
+                    Protocolo: 135250004567890
                   </p>
                 </div>
               </>

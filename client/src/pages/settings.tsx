@@ -9,6 +9,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
@@ -142,6 +143,21 @@ interface SimplesAliquot {
   effectiveAliquot: string;
 }
 
+interface FiscalReadinessCheck {
+  key: string;
+  label: string;
+  ok: boolean;
+  details?: string;
+}
+
+interface FiscalReadiness {
+  ready: boolean;
+  environment: "homologacao" | "producao";
+  checks: FiscalReadinessCheck[];
+  missing: string[];
+  messages: string[];
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const { company } = useAuth();
@@ -231,11 +247,15 @@ export default function Settings() {
   });
   const [showNewTerminalForm, setShowNewTerminalForm] = useState(false);
   const [savingTerminal, setSavingTerminal] = useState(false);
+  const [fiscalReadiness, setFiscalReadiness] =
+    useState<FiscalReadiness | null>(null);
+  const [loadingFiscalReadiness, setLoadingFiscalReadiness] = useState(false);
 
   useEffect(() => {
     fetchSettings();
     fetchTerminals();
     fetchSimplesAliquots();
+    fetchFiscalReadiness();
   }, []);
 
   useEffect(() => {
@@ -299,6 +319,21 @@ export default function Settings() {
       }
     } catch (error) {
       console.error("Failed to fetch Simples Nacional aliquots:", error);
+    }
+  };
+
+  const fetchFiscalReadiness = async () => {
+    setLoadingFiscalReadiness(true);
+    try {
+      const response = await fetch("/api/fiscal/readiness");
+      if (response.ok) {
+        const data = await response.json();
+        setFiscalReadiness(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch fiscal readiness:", error);
+    } finally {
+      setLoadingFiscalReadiness(false);
     }
   };
 
@@ -476,6 +511,7 @@ export default function Settings() {
       if (response.ok) {
         const updatedSettings = await response.json();
         setSettings(updatedSettings);
+        fetchFiscalReadiness();
         toast({
           title: "Sucesso!",
           description: "Configurações salvas com sucesso.",
@@ -621,6 +657,38 @@ export default function Settings() {
     value: string | boolean
   ) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const getChecklistTargetId = (checkKey: string) => {
+    if (checkKey === "fiscalEnabled") return "fiscal-enabled-switch";
+    if (checkKey === "sefazUf") return "sefaz-uf-select";
+    if (checkKey === "sefazMunicipioCodigo") return "sefaz-municipio-codigo";
+    if (checkKey === "cscId") return "csc-id-input";
+    if (checkKey === "cscToken") return "csc-token-input";
+    if (checkKey === "sefazUrl") {
+      return settings.fiscalEnvironment === "producao"
+        ? "sefaz-url-producao"
+        : "sefaz-url-homologacao";
+    }
+    if (checkKey === "qrCodeUrl") {
+      return settings.fiscalEnvironment === "producao"
+        ? "sefaz-qr-url-producao"
+        : "sefaz-qr-url-homologacao";
+    }
+    return null;
+  };
+
+  const focusChecklistField = (checkKey: string) => {
+    const targetId = getChecklistTargetId(checkKey);
+    if (!targetId) return;
+    const element = document.getElementById(targetId);
+    if (!element) return;
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => {
+      if ("focus" in element) {
+        (element as HTMLElement).focus();
+      }
+    }, 180);
   };
 
   const fetchCnpjData = async () => {
@@ -1014,6 +1082,108 @@ export default function Settings() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                <div
+                  className={`rounded-lg border p-4 space-y-3 ${
+                    fiscalReadiness?.ready
+                      ? "border-green-200 bg-green-50"
+                      : "border-amber-200 bg-amber-50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="font-medium">Checklist Fiscal</p>
+                      <p className="text-sm text-muted-foreground">
+                        Prontidao para emissao NFC-e em{" "}
+                        {fiscalReadiness?.environment === "producao"
+                          ? "producao"
+                          : "homologacao"}
+                      </p>
+                    </div>
+                    <Badge
+                      variant={fiscalReadiness?.ready ? "default" : "secondary"}
+                    >
+                      {fiscalReadiness?.ready
+                        ? "Pronto para emitir"
+                        : "Pendencias fiscais"}
+                    </Badge>
+                  </div>
+
+                  {loadingFiscalReadiness ? (
+                    <div className="text-sm text-muted-foreground flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Carregando checklist fiscal...
+                    </div>
+                  ) : fiscalReadiness ? (
+                    <div className="space-y-2">
+                      {fiscalReadiness.checks.map((check) => (
+                        <div
+                          key={check.key}
+                          className="rounded-md border bg-background p-3 flex items-start justify-between gap-3"
+                        >
+                          <div>
+                            <p className="text-sm font-medium">{check.label}</p>
+                            {!check.ok && check.details ? (
+                              <p className="text-xs text-muted-foreground">
+                                {check.details}
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <Badge variant={check.ok ? "default" : "destructive"}>
+                              {check.ok ? "OK" : "Falta"}
+                            </Badge>
+                            {!check.ok && getChecklistTargetId(check.key) ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => focusChecklistField(check.key)}
+                                data-testid={`button-fix-${check.key}`}
+                              >
+                                Corrigir
+                              </Button>
+                            ) : null}
+                            {!check.ok && check.key === "certificate" ? (
+                              <Link href="/certificate-config">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  data-testid="button-fix-certificate"
+                                >
+                                  Abrir certificado
+                                </Button>
+                              </Link>
+                            ) : null}
+                            {!check.ok && check.key.startsWith("respTec") ? (
+                              <Link href="/fiscal-config">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  data-testid="button-fix-resp-tec"
+                                >
+                                  Abrir resp. tecnico
+                                </Button>
+                              </Link>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Nao foi possivel carregar o checklist fiscal.
+                    </p>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    onClick={fetchFiscalReadiness}
+                    disabled={loadingFiscalReadiness}
+                    data-testid="button-refresh-fiscal-readiness-settings"
+                  >
+                    Atualizar checklist
+                  </Button>
+                </div>
+
                 <div className="flex items-center justify-between space-x-2">
                   <div className="space-y-0.5">
                     <Label className="text-base">Ambiente de Produção</Label>
@@ -1022,6 +1192,7 @@ export default function Settings() {
                     </p>
                   </div>
                   <Switch
+                    id="fiscal-enabled-switch"
                     checked={settings.fiscalEnabled || false}
                     onCheckedChange={(checked) =>
                       updateSetting("fiscalEnabled", checked)
@@ -1038,7 +1209,7 @@ export default function Settings() {
                         updateSetting("fiscalEnvironment", value)
                       }
                     >
-                      <SelectTrigger>
+                      <SelectTrigger id="fiscal-environment-select">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1073,7 +1244,7 @@ export default function Settings() {
                       value={settings.sefazUf || "SP"}
                       onValueChange={handleSefazUfChange}
                     >
-                      <SelectTrigger>
+                      <SelectTrigger id="sefaz-uf-select">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1088,6 +1259,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>SEFAZ URL Homologacao</Label>
                     <Input
+                      id="sefaz-url-homologacao"
                       placeholder="https://..."
                       value={settings.sefazUrlHomologacao || ""}
                       onChange={(e) =>
@@ -1098,6 +1270,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>SEFAZ URL Producao</Label>
                     <Input
+                      id="sefaz-url-producao"
                       placeholder="https://..."
                       value={settings.sefazUrlProducao || ""}
                       onChange={(e) =>
@@ -1108,6 +1281,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>Codigo municipio (IBGE)</Label>
                     <Input
+                      id="sefaz-municipio-codigo"
                       placeholder="Ex: 3138203"
                       value={settings.sefazMunicipioCodigo || ""}
                       onChange={(e) =>
@@ -1118,6 +1292,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>URL QR Code Homologacao</Label>
                     <Input
+                      id="sefaz-qr-url-homologacao"
                       placeholder="https://.../qrcode.xhtml"
                       value={settings.sefazQrCodeUrlHomologacao || ""}
                       onChange={(e) =>
@@ -1128,6 +1303,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>URL QR Code Producao</Label>
                     <Input
+                      id="sefaz-qr-url-producao"
                       placeholder="https://.../qrcode.xhtml"
                       value={settings.sefazQrCodeUrlProducao || ""}
                       onChange={(e) =>
@@ -1142,6 +1318,7 @@ export default function Settings() {
                       Token CSC (Código de Segurança do Contribuinte)
                     </Label>
                     <Input
+                      id="csc-token-input"
                       value={settings.cscToken || ""}
                       onChange={(e) =>
                         updateSetting("cscToken", e.target.value)
@@ -1152,6 +1329,7 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>ID do Token</Label>
                     <Input
+                      id="csc-id-input"
                       value={settings.cscId || ""}
                       className="w-24"
                       onChange={(e) => updateSetting("cscId", e.target.value)}

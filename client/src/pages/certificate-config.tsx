@@ -10,6 +10,7 @@ import {
 import { toast } from "sonner";
 import Layout from "@/components/layout";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -36,6 +37,21 @@ interface CompanySettings {
   cscId?: string;
 }
 
+interface FiscalReadinessCheck {
+  key: string;
+  label: string;
+  ok: boolean;
+  details?: string;
+}
+
+interface FiscalReadiness {
+  ready: boolean;
+  environment: "homologacao" | "producao";
+  checks: FiscalReadinessCheck[];
+  missing: string[];
+  messages: string[];
+}
+
 export function CertificateConfig() {
   const [certificateFile, setCertificateFile] = useState<File | null>(null);
   const [certificatePassword, setCertificatePassword] = useState("");
@@ -53,6 +69,9 @@ export function CertificateConfig() {
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/api/settings"],
+  });
+  const { data: readiness, refetch: refetchReadiness } = useQuery<FiscalReadiness>({
+    queryKey: ["/api/fiscal/readiness"],
   });
 
   useEffect(() => {
@@ -101,6 +120,7 @@ export function CertificateConfig() {
       setCertificateFile(null);
       setCertificatePassword("");
       refetch();
+      refetchReadiness();
     },
     onError: (error) => {
       toast.error(
@@ -124,6 +144,7 @@ export function CertificateConfig() {
     onSuccess: () => {
       toast.success("Certificado removido com sucesso");
       refetch();
+      refetchReadiness();
     },
     onError: () => {
       toast.error("Erro ao remover certificado");
@@ -187,6 +208,67 @@ export function CertificateConfig() {
             Gerenciar certificado digital para assinatura de documentos fiscais
           </p>
         </div>
+
+        {readiness && (
+          <Card
+            className={
+              readiness.ready
+                ? "border-green-200 bg-green-50"
+                : "border-amber-200 bg-amber-50"
+            }
+          >
+            <CardHeader>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <CardTitle>Checklist Fiscal</CardTitle>
+                  <CardDescription>
+                    Prontidao para emissao NFC-e em{" "}
+                    {readiness.environment === "producao"
+                      ? "producao"
+                      : "homologacao"}
+                  </CardDescription>
+                </div>
+                <Badge variant={readiness.ready ? "default" : "secondary"}>
+                  {readiness.ready ? "Pronto para emitir" : "Pendencias fiscais"}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {readiness.checks.map((check) => (
+                <div
+                  key={check.key}
+                  className="rounded-md border bg-background p-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">{check.label}</p>
+                      {!check.ok && check.details ? (
+                        <p className="text-xs text-muted-foreground">
+                          {check.details}
+                        </p>
+                      ) : null}
+                    </div>
+                    <Badge variant={check.ok ? "default" : "destructive"}>
+                      {check.ok ? "OK" : "Falta"}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+              {!readiness.ready && readiness.environment === "producao" && (
+                <div className="rounded-md border border-amber-300 bg-amber-100 p-3 text-sm text-amber-900">
+                  Corrija as pendencias acima antes de operar em producao.
+                </div>
+              )}
+              <Button
+                variant="outline"
+                onClick={() => refetchReadiness()}
+                data-testid="button-refresh-fiscal-readiness"
+              >
+                Atualizar checklist
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         {certificate?.installed ? (
           <Card className="border-blue-200 bg-blue-50">

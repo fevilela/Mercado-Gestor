@@ -45,7 +45,7 @@ import {
   cancelStonePayment,
   getStonePaymentStatus,
 } from "./stone-connect";
-import { getFiscalCertificateStatus } from "./fiscal-certificate";
+import { getFiscalReadiness } from "./fiscal-readiness";
 import { certificateService } from "./certificate-service";
 import "./types";
 
@@ -930,18 +930,17 @@ export async function registerRoutes(
         }
 
         const settings = await storage.getCompanySettings(companyId);
-        if (settings?.fiscalEnabled) {
-          const fiscalStatus = await getFiscalCertificateStatus(companyId);
-          if (!fiscalStatus.isValid) {
-            return res.status(403).json({ error: fiscalStatus.message });
-          }
-        }
-        const isFiscalConfigured = !!(
-          settings &&
-          settings.fiscalEnabled &&
-          settings.cscToken &&
-          settings.cscId
+        const fiscalReadiness = await getFiscalReadiness(companyId);
+        const certificateCheck = fiscalReadiness.checks.find(
+          (check) => check.key === "certificate",
         );
+        if (settings?.fiscalEnabled && certificateCheck && !certificateCheck.ok) {
+          return res.status(403).json({
+            error: certificateCheck.details || "Certificado fiscal invalido.",
+            fiscalReadiness,
+          });
+        }
+        const isFiscalConfigured = fiscalReadiness.ready;
         const isNfceAuto =
           Boolean(settings?.nfceEnabled) && isFiscalConfigured;
 
@@ -971,6 +970,7 @@ export async function registerRoutes(
         res.status(201).json({
           sale: newSale,
           fiscalConfigured: isFiscalConfigured,
+          fiscalReadiness,
         });
       } catch (error) {
         if (error instanceof z.ZodError) {
@@ -979,6 +979,28 @@ export async function registerRoutes(
         res.status(500).json({ error: "Failed to create sale" });
       }
     }
+  );
+
+  app.get(
+    "/api/fiscal/readiness",
+    requireAuth,
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const readiness = await getFiscalReadiness(companyId);
+        res.json(readiness);
+      } catch (error) {
+        res.status(500).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Falha ao carregar diagnostico fiscal",
+        });
+      }
+    },
   );
 
   const updateNfceStatusSchema = z.object({
@@ -1506,6 +1528,17 @@ export async function registerRoutes(
         const existing = prod.ean
           ? existingProducts.find((p) => p.ean === prod.ean)
           : null;
+        const purchasePrice = Number(prod.purchasePrice || "0");
+        const salePrice = Number(prod.price || "0");
+        const marginPercent =
+          purchasePrice > 0 && Math.abs(salePrice - purchasePrice) > 0.0001
+            ? ((salePrice - purchasePrice) / purchasePrice) * 100
+            : 30;
+        const unitsPerPackage = 1;
+        const stockQuantity = Math.max(
+          0,
+          Math.floor(prod.quantity * unitsPerPackage)
+        );
         return {
           tempId: index,
           name: prod.name,
@@ -1513,8 +1546,13 @@ export async function registerRoutes(
           ncm: prod.ncm,
           unit: prod.unit,
           quantity: prod.quantity,
+          unitsPerPackage,
+          stockQuantity,
           price: prod.price,
           purchasePrice: prod.purchasePrice,
+          marginPercent: Number.isFinite(marginPercent)
+            ? Number(marginPercent.toFixed(2))
+            : 30,
           existingProductId: existing?.id || null,
           existingProductName: existing?.name || null,
           existingStock: existing?.stock || 0,
@@ -1546,10 +1584,13 @@ export async function registerRoutes(
         ncm: z.string().nullable(),
         unit: z.string(),
         quantity: z.number(),
+        unitsPerPackage: z.number().optional(),
+        stockQuantity: z.number().optional(),
         price: z.union([z.string(), z.number()]).transform((v) => String(v)),
         purchasePrice: z
           .union([z.string(), z.number()])
           .transform((v) => String(v)),
+        marginPercent: z.number().optional(),
         existingProductId: z.number().nullable(),
         isExisting: z.boolean(),
       })
@@ -1569,17 +1610,46 @@ export async function registerRoutes(
       const updatedProducts = [];
 
       for (const prodData of productsToImport) {
+        const unitsPerPackage = Number(prodData.unitsPerPackage || 1);
+        const resolvedStockQuantity =
+          typeof prodData.stockQuantity === "number"
+            ? prodData.stockQuantity
+            : prodData.quantity * unitsPerPackage;
+        const quantityToStock = Math.max(
+          0,
+          Math.floor(
+            Number.isFinite(resolvedStockQuantity) ? resolvedStockQuantity : 0
+          )
+        );
         if (prodData.isExisting && prodData.existingProductId) {
+          await db
+            .update(products)
+            .set({
+              purchasePrice: prodData.purchasePrice,
+              price: prodData.price,
+              margin: Number(
+                Number.isFinite(prodData.marginPercent)
+                  ? prodData.marginPercent
+                  : 0
+              ).toFixed(2),
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(products.id, prodData.existingProductId),
+                eq(products.companyId, companyId)
+              )
+            );
           await storage.updateProductStock(
             prodData.existingProductId,
             companyId,
-            prodData.quantity
+            quantityToStock
           );
           await storage.createInventoryMovement({
             productId: prodData.existingProductId,
             companyId,
             type: "entrada",
-            quantity: prodData.quantity,
+            quantity: quantityToStock,
             reason: "Importação XML NFe",
             notes: null,
             referenceId: null,
@@ -1589,7 +1659,7 @@ export async function registerRoutes(
           updatedProducts.push({
             id: prodData.existingProductId,
             name: prodData.name,
-            quantityAdded: prodData.quantity,
+            quantityAdded: quantityToStock,
           });
         } else {
           const [newProduct] = await db
@@ -1602,18 +1672,23 @@ export async function registerRoutes(
               category: "Importado",
               price: prodData.price,
               purchasePrice: prodData.purchasePrice,
-              stock: prodData.quantity,
+              margin: Number(
+                Number.isFinite(prodData.marginPercent)
+                  ? prodData.marginPercent
+                  : 0
+              ).toFixed(2),
+              stock: quantityToStock,
               isActive: true,
               companyId,
             })
             .returning();
 
-          if (prodData.quantity > 0) {
+          if (quantityToStock > 0) {
             await storage.createInventoryMovement({
               productId: newProduct.id,
               companyId,
               type: "entrada",
-              quantity: prodData.quantity,
+              quantity: quantityToStock,
               reason: "Importação XML NFe - Estoque inicial",
               notes: null,
               referenceId: null,
@@ -3386,5 +3461,3 @@ export async function registerRoutes(
 
   return httpServer;
 }
-
-

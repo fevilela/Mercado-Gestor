@@ -96,6 +96,29 @@ interface FormItem {
   origin: string;
   serviceCode: string;
   cest: string;
+  icmsAliquot: string;
+  icmsReduction: string;
+  ipiAliquot: string;
+  pisAliquot: string;
+  cofinsAliquot: string;
+  issAliquot: string;
+  irrfAliquot: string;
+  icmsValue: string;
+  ipiValue: string;
+  pisValue: string;
+  cofinsValue: string;
+  issValue: string;
+  irrfValue: string;
+  totalTaxes: string;
+}
+
+interface HeaderTaxTotals {
+  icmsTotal: string;
+  ipiTotal: string;
+  pisTotal: string;
+  cofinsTotal: string;
+  issTotal: string;
+  irrfTotal: string;
 }
 
 interface NfseItem {
@@ -134,6 +157,21 @@ export default function FiscalDocuments() {
   );
   const [productSearchOpen, setProductSearchOpen] = useState(false);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [editingTaxItemIndex, setEditingTaxItemIndex] = useState<number | null>(
+    null
+  );
+  const [isNoteClosed, setIsNoteClosed] = useState(false);
+  const [headerTaxes, setHeaderTaxes] = useState<HeaderTaxTotals>({
+    icmsTotal: "0.00",
+    ipiTotal: "0.00",
+    pisTotal: "0.00",
+    cofinsTotal: "0.00",
+    issTotal: "0.00",
+    irrfTotal: "0.00",
+  });
+  const [lastTaxCalculation, setLastTaxCalculation] = useState<any | null>(
+    null
+  );
   const [selectedNfceIds, setSelectedNfceIds] = useState<number[]>([]);
   const [inutilizeForm, setInutilizeForm] = useState({
     serie: "",
@@ -182,6 +220,20 @@ export default function FiscalDocuments() {
         origin: "nacional",
         serviceCode: "",
         cest: "",
+        icmsAliquot: "18",
+        icmsReduction: "0",
+        ipiAliquot: "0",
+        pisAliquot: "0",
+        cofinsAliquot: "0",
+        issAliquot: "0",
+        irrfAliquot: "0",
+        icmsValue: "0",
+        ipiValue: "0",
+        pisValue: "0",
+        cofinsValue: "0",
+        issValue: "0",
+        irrfValue: "0",
+        totalTaxes: "0",
       } as FormItem,
     ],
   });
@@ -215,6 +267,13 @@ export default function FiscalDocuments() {
       serviceCode: "",
     },
   ]);
+
+  const toAmount = (value: string | number | undefined | null) => {
+    const parsed = Number(String(value ?? "0").replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const round2 = (value: number) => Number(value.toFixed(2));
 
   // Fetch CFOP codes
   const { data: cfopCodes = [] } = useQuery<CfopCode[]>({
@@ -294,6 +353,46 @@ export default function FiscalDocuments() {
       return res.json();
     },
     onSuccess: (data) => {
+      const calculations = Array.isArray(data?.calculations)
+        ? data.calculations
+        : [];
+      const totals = data?.totals || {};
+      setLastTaxCalculation(data);
+      setFormData((prev) => ({
+        ...prev,
+        items: prev.items.map((item, index) => {
+          const calc = calculations[index] || {};
+          return {
+            ...item,
+            icmsValue: String(round2(toAmount(calc.icmsValue))),
+            ipiValue: String(round2(toAmount(calc.ipiValue))),
+            pisValue: String(round2(toAmount(calc.pisValue))),
+            cofinsValue: String(round2(toAmount(calc.cofinsValue))),
+            issValue: String(round2(toAmount(calc.issValue))),
+            irrfValue: String(round2(toAmount(calc.irrfValue))),
+            totalTaxes: String(round2(toAmount(calc.totalTaxes))),
+          };
+        }),
+      }));
+      setHeaderTaxes((prev) => {
+        const previousHeaderTotal =
+          toAmount(prev.icmsTotal) +
+          toAmount(prev.ipiTotal) +
+          toAmount(prev.pisTotal) +
+          toAmount(prev.cofinsTotal) +
+          toAmount(prev.issTotal) +
+          toAmount(prev.irrfTotal);
+        if (previousHeaderTotal > 0) return prev;
+        return {
+          icmsTotal: round2(toAmount(totals.icmsTotal)).toFixed(2),
+          ipiTotal: round2(toAmount(totals.ipiTotal)).toFixed(2),
+          pisTotal: round2(toAmount(totals.pisTotal)).toFixed(2),
+          cofinsTotal: round2(toAmount(totals.cofinsTotal)).toFixed(2),
+          issTotal: round2(toAmount(totals.issTotal)).toFixed(2),
+          irrfTotal: round2(toAmount(totals.irrfTotal)).toFixed(2),
+        };
+      });
+      setIsNoteClosed(false);
       toast.success("Impostos calculados!");
       console.log("Cálculo de impostos:", data);
     },
@@ -502,8 +601,23 @@ export default function FiscalDocuments() {
       origin: product.origin || "nacional",
       serviceCode: product.serviceCode || "",
       cest: product.cest || "",
+      icmsAliquot: newItems[itemIndex].icmsAliquot || "18",
+      icmsReduction: newItems[itemIndex].icmsReduction || "0",
+      ipiAliquot: newItems[itemIndex].ipiAliquot || "0",
+      pisAliquot: newItems[itemIndex].pisAliquot || "0",
+      cofinsAliquot: newItems[itemIndex].cofinsAliquot || "0",
+      issAliquot: newItems[itemIndex].issAliquot || "0",
+      irrfAliquot: newItems[itemIndex].irrfAliquot || "0",
+      icmsValue: "0",
+      ipiValue: "0",
+      pisValue: "0",
+      cofinsValue: "0",
+      issValue: "0",
+      irrfValue: "0",
+      totalTaxes: "0",
     };
     setFormData({ ...formData, items: newItems });
+    setIsNoteClosed(false);
     setProductSearch("");
     setProductSearchOpen(false);
     toast.success(`Produto ${product.name} selecionado! Tributação carregada.`);
@@ -540,9 +654,24 @@ export default function FiscalDocuments() {
           origin: "nacional",
           serviceCode: "",
           cest: "",
+          icmsAliquot: "18",
+          icmsReduction: "0",
+          ipiAliquot: "0",
+          pisAliquot: "0",
+          cofinsAliquot: "0",
+          issAliquot: "0",
+          irrfAliquot: "0",
+          icmsValue: "0",
+          ipiValue: "0",
+          pisValue: "0",
+          cofinsValue: "0",
+          issValue: "0",
+          irrfValue: "0",
+          totalTaxes: "0",
         },
       ],
     });
+    setIsNoteClosed(false);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -550,12 +679,14 @@ export default function FiscalDocuments() {
       ...formData,
       items: formData.items.filter((_, i) => i !== index),
     });
+    setIsNoteClosed(false);
   };
 
   const handleItemChange = (index: number, field: string, value: string) => {
     const newItems = [...formData.items];
     newItems[index] = { ...newItems[index], [field]: value };
     setFormData({ ...formData, items: newItems });
+    setIsNoteClosed(false);
   };
 
   const totalValue = useMemo(() => {
@@ -566,6 +697,146 @@ export default function FiscalDocuments() {
       0
     );
   }, [formData.items]);
+
+  const taxTotalsFromItems = useMemo(() => {
+    return {
+      icmsTotal: round2(
+        formData.items.reduce((acc, item) => acc + toAmount(item.icmsValue), 0)
+      ),
+      ipiTotal: round2(
+        formData.items.reduce((acc, item) => acc + toAmount(item.ipiValue), 0)
+      ),
+      pisTotal: round2(
+        formData.items.reduce((acc, item) => acc + toAmount(item.pisValue), 0)
+      ),
+      cofinsTotal: round2(
+        formData.items.reduce((acc, item) => acc + toAmount(item.cofinsValue), 0)
+      ),
+      issTotal: round2(
+        formData.items.reduce((acc, item) => acc + toAmount(item.issValue), 0)
+      ),
+      irrfTotal: round2(
+        formData.items.reduce((acc, item) => acc + toAmount(item.irrfValue), 0)
+      ),
+      totalTaxes: round2(
+        formData.items.reduce((acc, item) => acc + toAmount(item.totalTaxes), 0)
+      ),
+    };
+  }, [formData.items]);
+
+  const headerTaxGrandTotal = useMemo(
+    () =>
+      round2(
+        toAmount(headerTaxes.icmsTotal) +
+          toAmount(headerTaxes.ipiTotal) +
+          toAmount(headerTaxes.pisTotal) +
+          toAmount(headerTaxes.cofinsTotal) +
+          toAmount(headerTaxes.issTotal) +
+          toAmount(headerTaxes.irrfTotal)
+      ),
+    [headerTaxes]
+  );
+
+  const buildTaxPayload = () => ({
+    items: formData.items.map((item) => ({
+      productId: item.productId,
+      description: item.description,
+      quantity: Math.max(0, Number(item.quantity || 0)),
+      unitPrice: Math.max(0, toAmount(item.unitPrice)),
+      icmsAliquot: Math.max(0, toAmount(item.icmsAliquot)),
+      icmsReduction: Math.max(0, toAmount(item.icmsReduction)),
+      ipiAliquot: Math.max(0, toAmount(item.ipiAliquot)),
+      pisAliquot: Math.max(0, toAmount(item.pisAliquot)),
+      cofinsAliquot: Math.max(0, toAmount(item.cofinsAliquot)),
+      issAliquot: Math.max(0, toAmount(item.issAliquot)),
+      irrfAliquot: Math.max(0, toAmount(item.irrfAliquot)),
+    })),
+  });
+
+  const closeNFeNote = async () => {
+    if (!formData.customerId) {
+      toast.error("Selecione um cliente para fechar a nota");
+      return;
+    }
+    if (!formData.cfopCode) {
+      toast.error("Selecione um CFOP para fechar a nota");
+      return;
+    }
+    if (formData.items.length === 0 || formData.items.some((i) => i.productId <= 0)) {
+      toast.error("Todos os itens precisam ter produto selecionado");
+      return;
+    }
+
+    const invalidAliquots = formData.items.some((item) => {
+      const aliquots = [
+        item.icmsAliquot,
+        item.icmsReduction,
+        item.ipiAliquot,
+        item.pisAliquot,
+        item.cofinsAliquot,
+        item.issAliquot,
+        item.irrfAliquot,
+      ];
+      return aliquots.some((value) => toAmount(value) < 0);
+    });
+    if (invalidAliquots) {
+      toast.error("Existem alíquotas inválidas na tributação dos itens");
+      return;
+    }
+    if (headerTaxGrandTotal <= 0) {
+      toast.error(
+        "Preencha os tributos do cabeçalho antes de fechar a nota (duplo clique no item)."
+      );
+      return;
+    }
+
+    try {
+      const calculation = await calculateTaxesMutation.mutateAsync(buildTaxPayload());
+      const totals = calculation?.totals || {};
+      const expectedByHeader = {
+        icmsTotal: round2(toAmount(headerTaxes.icmsTotal)),
+        ipiTotal: round2(toAmount(headerTaxes.ipiTotal)),
+        pisTotal: round2(toAmount(headerTaxes.pisTotal)),
+        cofinsTotal: round2(toAmount(headerTaxes.cofinsTotal)),
+        issTotal: round2(toAmount(headerTaxes.issTotal)),
+        irrfTotal: round2(toAmount(headerTaxes.irrfTotal)),
+      };
+      const calculated = {
+        icmsTotal: round2(toAmount(totals.icmsTotal)),
+        ipiTotal: round2(toAmount(totals.ipiTotal)),
+        pisTotal: round2(toAmount(totals.pisTotal)),
+        cofinsTotal: round2(toAmount(totals.cofinsTotal)),
+        issTotal: round2(toAmount(totals.issTotal)),
+        irrfTotal: round2(toAmount(totals.irrfTotal)),
+      };
+      const mismatches = Object.keys(expectedByHeader).filter((key) => {
+        const typedKey = key as keyof typeof expectedByHeader;
+        return (
+          Math.abs(expectedByHeader[typedKey] - calculated[typedKey]) > 0.01
+        );
+      });
+      if (mismatches.length > 0) {
+        toast.error(
+          `Tributação divergente no cabeçalho: ${mismatches.join(", ")}`
+        );
+        setIsNoteClosed(false);
+        return;
+      }
+
+      setIsNoteClosed(true);
+      toast.success(
+        `Nota fechada com sucesso. Total de tributos: R$ ${round2(
+          toAmount(totals.totalTaxes)
+        ).toFixed(2)}`
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Falha ao fechar nota com validação tributária"
+      );
+    }
+  };
 
   const nfseSubtotal = useMemo(() => {
     return nfseItems.reduce((acc, item) => {
@@ -659,13 +930,7 @@ export default function FiscalDocuments() {
       return;
     }
 
-    calculateTaxesMutation.mutate({
-      items: formData.items.map((item) => ({
-        ...item,
-        csosn: item.csosn,
-        totalValue: parseFloat(item.unitPrice) * parseInt(item.quantity),
-      })),
-    });
+    calculateTaxesMutation.mutate(buildTaxPayload());
   };
 
   const nfceSales = useMemo(() => {
@@ -862,9 +1127,17 @@ export default function FiscalDocuments() {
                       <Plus className="h-4 w-4 mr-1" /> Adicionar
                     </Button>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Dê duplo clique no item para editar tributação de item e
+                    cabeçalho.
+                  </p>
 
                   {formData.items.map((item, index) => (
-                    <Card key={index} className="p-4 space-y-3">
+                    <Card
+                      key={index}
+                      className="p-4 space-y-3 cursor-pointer"
+                      onDoubleClick={() => setEditingTaxItemIndex(index)}
+                    >
                       <div>
                         <Label className="text-sm">Produto *</Label>
                         <Popover
@@ -1040,16 +1313,48 @@ export default function FiscalDocuments() {
                 </div>
 
                 {/* Total */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="text-right">
-                    <div className="text-sm text-muted-foreground">Total</div>
-                    <div
-                      className="text-2xl font-bold"
-                      data-testid="text-total"
-                    >
-                      R$ {totalValue.toFixed(2)}
+                <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="text-right md:text-left">
+                      <div className="text-sm text-muted-foreground">
+                        Total de produtos
+                      </div>
+                      <div
+                        className="text-2xl font-bold"
+                        data-testid="text-total"
+                      >
+                        R$ {totalValue.toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="text-right md:text-left">
+                      <div className="text-sm text-muted-foreground">
+                        Total de tributos (itens)
+                      </div>
+                      <div className="text-2xl font-bold">
+                        R$ {taxTotalsFromItems.totalTaxes.toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="text-right md:text-left">
+                      <div className="text-sm text-muted-foreground">
+                        Total de tributos (cabeçalho)
+                      </div>
+                      <div className="text-2xl font-bold">
+                        R$ {headerTaxGrandTotal.toFixed(2)}
+                      </div>
                     </div>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Situação da nota:{" "}
+                    <span className={isNoteClosed ? "text-emerald-600" : "text-amber-600"}>
+                      {isNoteClosed ? "Fechada" : "Aberta"}
+                    </span>
+                  </p>
+                  {lastTaxCalculation?.totals?.baseValue !== undefined && (
+                    <p className="text-xs text-muted-foreground">
+                      Base de cálculo atual: R${" "}
+                      {round2(toAmount(lastTaxCalculation.totals.baseValue)).toFixed(2)}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex gap-2 pt-4">
@@ -1074,9 +1379,326 @@ export default function FiscalDocuments() {
                     )}
                     Calcular Impostos
                   </Button>
+                  <Button
+                    onClick={closeNFeNote}
+                    variant="default"
+                    disabled={calculateTaxesMutation.isPending}
+                    data-testid="button-close-nfe"
+                  >
+                    Fechar nota
+                  </Button>
                 </div>
               </CardContent>
             </Card>
+
+            <Dialog
+              open={editingTaxItemIndex !== null}
+              onOpenChange={(open) => {
+                if (!open) setEditingTaxItemIndex(null);
+              }}
+            >
+              <DialogContent className="max-w-3xl">
+                <DialogHeader>
+                  <DialogTitle>Tributação do Item e Cabeçalho</DialogTitle>
+                  <DialogDescription>
+                    Ajuste por duplo clique. O fechamento da nota valida os
+                    tributos de todos os itens e do cabeçalho.
+                  </DialogDescription>
+                </DialogHeader>
+                {editingTaxItemIndex !== null &&
+                formData.items[editingTaxItemIndex] ? (
+                  <div className="space-y-4">
+                    <div className="rounded-md border p-3">
+                      <p className="font-medium">
+                        {formData.items[editingTaxItemIndex].productName ||
+                          "Item sem produto"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Qtd: {formData.items[editingTaxItemIndex].quantity} |
+                        Unit: R${" "}
+                        {toAmount(
+                          formData.items[editingTaxItemIndex].unitPrice
+                        ).toFixed(2)}
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <Label>ICMS (%)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={formData.items[editingTaxItemIndex].icmsAliquot}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "icmsAliquot",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>Redução ICMS (%)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={
+                            formData.items[editingTaxItemIndex].icmsReduction
+                          }
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "icmsReduction",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>IPI (%)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={formData.items[editingTaxItemIndex].ipiAliquot}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "ipiAliquot",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>PIS (%)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={formData.items[editingTaxItemIndex].pisAliquot}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "pisAliquot",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>COFINS (%)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={
+                            formData.items[editingTaxItemIndex].cofinsAliquot
+                          }
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "cofinsAliquot",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>ISS (%)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={formData.items[editingTaxItemIndex].issAliquot}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "issAliquot",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>IRRF (%)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={formData.items[editingTaxItemIndex].irrfAliquot}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "irrfAliquot",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border p-3">
+                      <p className="text-sm font-medium mb-2">Valores do item</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                        <span>
+                          ICMS: R${" "}
+                          {toAmount(
+                            formData.items[editingTaxItemIndex].icmsValue
+                          ).toFixed(2)}
+                        </span>
+                        <span>
+                          IPI: R${" "}
+                          {toAmount(
+                            formData.items[editingTaxItemIndex].ipiValue
+                          ).toFixed(2)}
+                        </span>
+                        <span>
+                          PIS: R${" "}
+                          {toAmount(
+                            formData.items[editingTaxItemIndex].pisValue
+                          ).toFixed(2)}
+                        </span>
+                        <span>
+                          COFINS: R${" "}
+                          {toAmount(
+                            formData.items[editingTaxItemIndex].cofinsValue
+                          ).toFixed(2)}
+                        </span>
+                        <span>
+                          ISS: R${" "}
+                          {toAmount(
+                            formData.items[editingTaxItemIndex].issValue
+                          ).toFixed(2)}
+                        </span>
+                        <span>
+                          IRRF: R${" "}
+                          {toAmount(
+                            formData.items[editingTaxItemIndex].irrfValue
+                          ).toFixed(2)}
+                        </span>
+                        <span className="font-semibold col-span-2">
+                          Total item: R${" "}
+                          {toAmount(
+                            formData.items[editingTaxItemIndex].totalTaxes
+                          ).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border p-3 space-y-3">
+                      <p className="text-sm font-medium">Tributação do cabeçalho</p>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        <div>
+                          <Label>ICMS total (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.icmsTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                icmsTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label>IPI total (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.ipiTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                ipiTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label>PIS total (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.pisTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                pisTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label>COFINS total (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.cofinsTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                cofinsTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label>ISS total (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.issTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                issTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label>IRRF total (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.irrfTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                irrfTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setEditingTaxItemIndex(null)}>
+                    Concluir
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             <Card>
               <CardHeader>

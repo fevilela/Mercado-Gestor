@@ -157,7 +157,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       if (!res.ok) return [];
       return res.json();
     },
-    refetchInterval: 30000,
+    refetchInterval: 50000,
   });
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
