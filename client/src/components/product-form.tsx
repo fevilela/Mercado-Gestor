@@ -35,7 +35,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 const productFormSchema = z.object({
-  ean: z.string().min(1, "Código EAN é obrigatório"),
+  ean: z.string().optional(),
   name: z.string().min(1, "Nome é obrigatório"),
   sku: z.string().optional(),
   category: z.string().min(1, "Categoria é obrigatória"),
@@ -302,7 +302,11 @@ export default function ProductForm({
       const margin = parseFloat(watchMargin);
       if (purchase > 0 && margin > 0) {
         const salePrice = purchase * (1 + margin / 100);
-        form.setValue("price", salePrice.toFixed(2));
+        const nextPrice = salePrice.toFixed(2);
+        const currentPrice = form.getValues("price") || "";
+        if (nextPrice !== currentPrice) {
+          form.setValue("price", nextPrice, { shouldValidate: false });
+        }
       }
     }
   }, [watchPurchasePrice, watchMargin, form]);
@@ -321,9 +325,10 @@ export default function ProductForm({
         }
       }
     }
-  }, [watchPrice]);
+  }, [watchPurchasePrice, watchPrice, watchMargin, form]);
 
   useEffect(() => {
+    if (!open) return;
     if (editProduct) {
       form.reset({
         ean: editProduct.ean || "",
@@ -391,10 +396,12 @@ export default function ProductForm({
   });
 
   const onSubmit = (data: ProductFormData) => {
+    const normalizedEan = String(data.ean || "").trim();
     const primaryMedia = mediaItems.find((m) => m.isPrimary);
     const productData = {
       product: {
         ...data,
+        ean: normalizedEan || null,
         mainImageUrl: primaryMedia?.url || data.mainImageUrl || null,
         purchasePrice: data.purchasePrice || null,
         margin: data.margin || null,
@@ -552,7 +559,7 @@ export default function ProductForm({
 
               <TabsContent value="basic" className="space-y-4 mt-4">
                 <div className="space-y-2">
-                  <Label htmlFor="ean">Código de Barras (EAN) *</Label>
+                  <Label htmlFor="ean">Código de Barras (EAN)</Label>
                   <div className="flex gap-2">
                     <Input
                       id="ean"

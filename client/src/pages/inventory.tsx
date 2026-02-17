@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import Layout from "@/components/layout";
 import {
   Table,
@@ -83,6 +83,26 @@ interface XmlPreviewProduct {
   price: string;
   purchasePrice: string;
   marginPercent: number;
+  cfop: string;
+  cstIcms: string;
+  cstIpi: string;
+  cstPisCofins: string;
+  csosnCode: string;
+  origin: string;
+  serviceCode: string;
+  cest: string;
+  discountValue: string;
+  bcIcmsValue: string;
+  icmsValue: string;
+  ipiValue: string;
+  icmsStValue: string;
+  icmsAliquot: number;
+  icmsReduction: number;
+  ipiAliquot: number;
+  pisAliquot: number;
+  cofinsAliquot: number;
+  issAliquot: number;
+  irrfAliquot: number;
   existingProductId: number | null;
   existingProductName: string | null;
   existingStock: number;
@@ -128,6 +148,9 @@ export default function Inventory() {
   const [xmlPreviewProducts, setXmlPreviewProducts] = useState<
     XmlPreviewProduct[]
   >([]);
+  const [xmlFiscalEditTempId, setXmlFiscalEditTempId] = useState<number | null>(
+    null
+  );
   const [isConfirmingImport, setIsConfirmingImport] = useState(false);
   const [selectedStockFilter, setSelectedStockFilter] = useState<
     "all" | "in_stock" | "low" | "critical" | "out"
@@ -221,6 +244,40 @@ export default function Inventory() {
             purchasePrice: purchasePrice.toFixed(2),
             price: salePrice.toFixed(2),
             marginPercent,
+            cfop: String((product as any).cfop || ""),
+            cstIcms: String((product as any).cstIcms || "00"),
+            cstIpi: String((product as any).cstIpi || "00"),
+            cstPisCofins: String((product as any).cstPisCofins || "00"),
+            csosnCode: String((product as any).csosnCode || "101"),
+            origin: String((product as any).origin || "nacional"),
+            serviceCode: String((product as any).serviceCode || ""),
+            cest: String((product as any).cest || ""),
+            discountValue: String((product as any).discountValue || "0"),
+            bcIcmsValue: String((product as any).bcIcmsValue || "0"),
+            icmsValue: String((product as any).icmsValue || "0"),
+            ipiValue: String((product as any).ipiValue || "0"),
+            icmsStValue: String((product as any).icmsStValue || "0"),
+            icmsAliquot: Number(
+              (product as any).icmsAliquot || 0
+            ),
+            icmsReduction: Number(
+              (product as any).icmsReduction || 0
+            ),
+            ipiAliquot: Number(
+              (product as any).ipiAliquot || 0
+            ),
+            pisAliquot: Number(
+              (product as any).pisAliquot || 0
+            ),
+            cofinsAliquot: Number(
+              (product as any).cofinsAliquot || 0
+            ),
+            issAliquot: Number(
+              (product as any).issAliquot || 0
+            ),
+            irrfAliquot: Number(
+              (product as any).irrfAliquot || 0
+            ),
           };
         }
       );
@@ -409,6 +466,67 @@ export default function Inventory() {
       })
     );
   };
+
+  const updatePreviewEan = (tempId: number, value: string) => {
+    const sanitized = value.replace(/\D/g, "").slice(0, 14);
+    setXmlPreviewProducts((prev) =>
+      prev.map((p) =>
+        p.tempId === tempId
+          ? {
+              ...p,
+              ean: sanitized.length > 0 ? sanitized : null,
+            }
+          : p
+      )
+    );
+  };
+
+  const updatePreviewFiscalField = (
+    tempId: number,
+    field: keyof XmlPreviewProduct,
+    value: string
+  ) => {
+    setXmlPreviewProducts((prev) =>
+      prev.map((p) => {
+        if (p.tempId !== tempId) return p;
+        const numericFields: Array<keyof XmlPreviewProduct> = [
+          "icmsAliquot",
+          "icmsReduction",
+          "ipiAliquot",
+          "pisAliquot",
+          "cofinsAliquot",
+          "issAliquot",
+          "irrfAliquot",
+        ];
+        if (numericFields.includes(field)) {
+          return { ...p, [field]: Number(value || 0) } as XmlPreviewProduct;
+        }
+        return { ...p, [field]: value } as XmlPreviewProduct;
+      })
+    );
+  };
+
+  const xmlImportTotals = useMemo(() => {
+    const productsTotal = round2(
+      xmlPreviewProducts.reduce((acc, p) => acc + toMoney(p.totalPurchaseValue), 0)
+    );
+    const discountTotal = round2(
+      xmlPreviewProducts.reduce((acc, p) => acc + toMoney(p.discountValue), 0)
+    );
+    const icmsStTotal = round2(
+      xmlPreviewProducts.reduce((acc, p) => acc + toMoney(p.icmsStValue), 0)
+    );
+    const totalIpi = round2(
+      xmlPreviewProducts.reduce((acc, p) => acc + toMoney(p.ipiValue), 0)
+    );
+    const noteTotal = round2(productsTotal - discountTotal + icmsStTotal + totalIpi);
+    return { productsTotal, discountTotal, icmsStTotal, totalIpi, noteTotal };
+  }, [xmlPreviewProducts]);
+
+  const editingXmlFiscalProduct =
+    xmlFiscalEditTempId === null
+      ? null
+      : xmlPreviewProducts.find((p) => p.tempId === xmlFiscalEditTempId) || null;
 
   const removeFromPreview = (tempId: number) => {
     setXmlPreviewProducts((prev) => prev.filter((p) => p.tempId !== tempId));
@@ -1117,6 +1235,7 @@ export default function Inventory() {
           if (!open) {
             setXmlPreviewOpen(false);
             setXmlPreviewProducts([]);
+            setXmlFiscalEditTempId(null);
           }
         }}
       >
@@ -1144,6 +1263,29 @@ export default function Inventory() {
                     Existentes:{" "}
                     {xmlPreviewProducts.filter((p) => p.isExisting).length}
                   </Badge>
+                </div>
+
+                <div className="rounded-md border p-3 grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">V. total produtos</span>
+                    <p className="font-semibold">R$ {xmlImportTotals.productsTotal.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">V. desconto</span>
+                    <p className="font-semibold">R$ {xmlImportTotals.discountTotal.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">ICMS ST total</span>
+                    <p className="font-semibold">R$ {xmlImportTotals.icmsStTotal.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">IPI total</span>
+                    <p className="font-semibold">R$ {xmlImportTotals.totalIpi.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">V. total nota</span>
+                    <p className="font-semibold">R$ {xmlImportTotals.noteTotal.toFixed(2)}</p>
+                  </div>
                 </div>
 
                 <Table>
@@ -1178,9 +1320,16 @@ export default function Inventory() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <span className="text-xs font-mono">
-                            {product.ean || "-"}
-                          </span>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            className="w-36 font-mono text-xs"
+                            value={product.ean || ""}
+                            placeholder="Sem EAN"
+                            onChange={(e) =>
+                              updatePreviewEan(product.tempId, e.target.value)
+                            }
+                          />
                         </TableCell>
                         <TableCell>{product.unit}</TableCell>
                         <TableCell>
@@ -1201,6 +1350,20 @@ export default function Inventory() {
                           <Input
                             type="number"
                             min="0"
+                            className="w-20"
+                            value={product.quantity}
+                            onChange={(e) =>
+                              updatePreviewQuantity(
+                                product.tempId,
+                                parseInt(e.target.value) || 0
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min="0"
                             step="0.01"
                             className="w-28"
                             value={(
@@ -1212,20 +1375,6 @@ export default function Inventory() {
                               updatePreviewPackagePurchaseValue(
                                 product.tempId,
                                 e.target.value
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            min="0"
-                            className="w-20"
-                            value={product.quantity}
-                            onChange={(e) =>
-                              updatePreviewQuantity(
-                                product.tempId,
-                                parseInt(e.target.value) || 0
                               )
                             }
                           />
@@ -1302,13 +1451,22 @@ export default function Inventory() {
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeFromPreview(product.tempId)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setXmlFiscalEditTempId(product.tempId)}
+                            >
+                              Tributação
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => removeFromPreview(product.tempId)}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1318,12 +1476,212 @@ export default function Inventory() {
             )}
           </div>
 
+          <Dialog
+            open={xmlFiscalEditTempId !== null}
+            onOpenChange={(open) => {
+              if (!open) setXmlFiscalEditTempId(null);
+            }}
+          >
+            <DialogContent className="max-w-4xl">
+              <DialogHeader>
+                <DialogTitle>Tributação do item (Importação XML)</DialogTitle>
+              </DialogHeader>
+              {editingXmlFiscalProduct && (
+                <div className="space-y-4">
+                  <div className="rounded-md border p-3 text-sm">
+                    <p className="font-semibold">{editingXmlFiscalProduct.name}</p>
+                    <p className="text-muted-foreground">EAN: {editingXmlFiscalProduct.ean || "-"}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <Label>CFOP</Label>
+                      <Input
+                        value={editingXmlFiscalProduct.cfop}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "cfop",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CST ICMS</Label>
+                      <Input
+                        value={editingXmlFiscalProduct.cstIcms}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "cstIcms",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CST IPI</Label>
+                      <Input
+                        value={editingXmlFiscalProduct.cstIpi}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "cstIpi",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CST PIS/COFINS</Label>
+                      <Input
+                        value={editingXmlFiscalProduct.cstPisCofins}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "cstPisCofins",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>V. desconto (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={editingXmlFiscalProduct.discountValue}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "discountValue",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>BC ICMS (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={editingXmlFiscalProduct.bcIcmsValue}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "bcIcmsValue",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>V. ICMS (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={editingXmlFiscalProduct.icmsValue}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "icmsValue",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>V. IPI (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={editingXmlFiscalProduct.ipiValue}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "ipiValue",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Aliq. ICMS (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={editingXmlFiscalProduct.icmsAliquot}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "icmsAliquot",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Aliq. IPI (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={editingXmlFiscalProduct.ipiAliquot}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "ipiAliquot",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>V. ICMS ST (R$)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={editingXmlFiscalProduct.icmsStValue}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "icmsStValue",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Origem</Label>
+                      <Input
+                        value={editingXmlFiscalProduct.origin}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "origin",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setXmlFiscalEditTempId(null)}>
+                  Concluir
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <DialogFooter className="border-t pt-4">
             <Button
               variant="outline"
               onClick={() => {
                 setXmlPreviewOpen(false);
                 setXmlPreviewProducts([]);
+                setXmlFiscalEditTempId(null);
               }}
             >
               Cancelar

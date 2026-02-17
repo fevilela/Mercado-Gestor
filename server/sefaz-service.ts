@@ -124,19 +124,22 @@ export class SefazService {
   }
 
   private buildTools(mod: "55" | "65") {
+    const toolsConfig: any = {
+      mod,
+      UF: this.config.uf,
+      tpAmb: this.config.environment === "producao" ? 1 : 2,
+      versao: "4.00",
+      timeout: this.config.timeout ?? 30,
+      xmllint: this.config.xmllintPath ?? process.env.XMLLINT_PATH ?? "xmllint",
+      CNPJ: this.config.cnpj ?? "",
+    };
+    if (this.config.opensslPath) {
+      toolsConfig.openssl = this.config.opensslPath;
+    }
     return new Tools(
+      toolsConfig,
       {
-        mod,
-        UF: this.config.uf,
-        tpAmb: this.config.environment === "producao" ? 1 : 2,
-        versao: "4.00",
-        timeout: this.config.timeout ?? 30,
-        xmllint: this.config.xmllintPath ?? process.env.XMLLINT_PATH ?? "xmllint",
-        openssl: this.config.opensslPath ?? undefined,
-        CNPJ: this.config.cnpj,
-      },
-      {
-        pfx: this.config.certificateBuffer,
+        pfx: this.config.certificateBuffer.toString("base64"),
         senha: this.config.certificatePassword,
       },
     );
@@ -150,11 +153,14 @@ export class SefazService {
         ? xmlBody
         : await tools.xmlSign(xmlBody, { tag: "infNFe" });
 
-      const response = await tools.sefazEnviaLote(signedXml, {
-        idLote: Date.now(),
-        indSinc: 1,
-        compactar: false,
-      });
+      const response = await tools.sefazEnviaLote(
+        signedXml,
+        {
+          idLote: String(Date.now()),
+          indSinc: 1,
+          compactar: false,
+        } as any,
+      );
 
       const parsed = resolveFinalStatus(String(response || ""));
       const status = parsed.status || "0";
@@ -191,11 +197,14 @@ export class SefazService {
         throw new Error("XML NFC-e sem assinatura. Assine antes do envio.");
       }
 
-      const response = await tools.sefazEnviaLote(xmlBody, {
-        idLote: Date.now(),
-        indSinc: 1,
-        compactar: false,
-      });
+      const response = await tools.sefazEnviaLote(
+        xmlBody,
+        {
+          idLote: String(Date.now()),
+          indSinc: 1,
+          compactar: false,
+        } as any,
+      );
 
       const parsed = resolveFinalStatus(String(response || ""));
       const status = parsed.status || "0";
@@ -351,7 +360,7 @@ export class SefazService {
     try {
       const tools = this.buildTools(mod);
       const response = await tools.sefazInutiliza({
-        nSerie: String(series),
+        nSerie: Number(series),
         nIni: Number(startNumber),
         nFin: Number(endNumber),
         xJust: reason,

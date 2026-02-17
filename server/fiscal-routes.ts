@@ -2439,9 +2439,8 @@ router.post("/sefaz/receipt", async (req, res) => {
     const sefazService = new SefazService({
       environment: resolvedEnvironment,
       uf,
-      certificatePath: "",
+      certificateBuffer: Buffer.alloc(0),
       certificatePassword: "",
-      sefazUrl,
     });
 
     const result = await sefazService.queryReceipt(xmlContent);

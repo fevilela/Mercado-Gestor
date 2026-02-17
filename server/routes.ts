@@ -1079,8 +1079,8 @@ export async function registerRoutes(
           city: company?.city || "",
           state: company?.state || "",
           zipCode: company?.zipCode || "",
-          cnae: company?.cnae || settings?.cnae || "",
-          im: company?.im || settings?.im || "",
+          cnae: (company as any)?.cnae || (settings as any)?.cnae || "",
+          im: (company as any)?.im || (settings as any)?.im || "",
         });
       } catch (error) {
         res.status(500).json({ error: "Failed to fetch settings" });
@@ -1118,8 +1118,8 @@ export async function registerRoutes(
         city: company?.city || "",
         state: company?.state || "",
         zipCode: company?.zipCode || "",
-        cnae: company?.cnae || settings?.cnae || "",
-        im: company?.im || settings?.im || "",
+        cnae: (company as any)?.cnae || (settings as any)?.cnae || "",
+        im: (company as any)?.im || (settings as any)?.im || "",
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1583,6 +1583,21 @@ export async function registerRoutes(
         ean: z.string().nullable(),
         ncm: z.string().nullable(),
         unit: z.string(),
+        cfop: z.string().optional(),
+        cstIcms: z.string().optional(),
+        cstIpi: z.string().optional(),
+        cstPisCofins: z.string().optional(),
+        csosnCode: z.string().optional(),
+        origin: z.string().optional(),
+        cest: z.string().optional(),
+        serviceCode: z.string().optional(),
+        icmsAliquot: z.number().optional(),
+        icmsReduction: z.number().optional(),
+        ipiAliquot: z.number().optional(),
+        pisAliquot: z.number().optional(),
+        cofinsAliquot: z.number().optional(),
+        issAliquot: z.number().optional(),
+        irrfAliquot: z.number().optional(),
         quantity: z.number(),
         unitsPerPackage: z.number().optional(),
         stockQuantity: z.number().optional(),
@@ -1627,6 +1642,20 @@ export async function registerRoutes(
             .set({
               purchasePrice: prodData.purchasePrice,
               price: prodData.price,
+              cstIcms: prodData.cstIcms ?? null,
+              cstIpi: prodData.cstIpi ?? null,
+              cstPisCofins: prodData.cstPisCofins ?? null,
+              csosnCode: prodData.csosnCode ?? null,
+              origin: prodData.origin ?? "nacional",
+              cest: prodData.cest ?? null,
+              serviceCode: prodData.serviceCode ?? null,
+              icmsAliquot: Number(prodData.icmsAliquot ?? 0).toFixed(2),
+              icmsReduction: Number(prodData.icmsReduction ?? 0).toFixed(2),
+              ipiAliquot: Number(prodData.ipiAliquot ?? 0).toFixed(2),
+              pisAliquot: Number(prodData.pisAliquot ?? 0).toFixed(2),
+              cofinsAliquot: Number(prodData.cofinsAliquot ?? 0).toFixed(2),
+              issAliquot: Number(prodData.issAliquot ?? 0).toFixed(2),
+              irrfAliquot: Number(prodData.irrfAliquot ?? 0).toFixed(2),
               margin: Number(
                 Number.isFinite(prodData.marginPercent)
                   ? prodData.marginPercent
@@ -1669,9 +1698,23 @@ export async function registerRoutes(
               ean: prodData.ean,
               ncm: prodData.ncm,
               unit: prodData.unit,
+              cstIcms: prodData.cstIcms ?? null,
+              cstIpi: prodData.cstIpi ?? null,
+              cstPisCofins: prodData.cstPisCofins ?? null,
+              csosnCode: prodData.csosnCode ?? null,
+              origin: prodData.origin ?? "nacional",
+              cest: prodData.cest ?? null,
+              serviceCode: prodData.serviceCode ?? null,
               category: "Importado",
               price: prodData.price,
               purchasePrice: prodData.purchasePrice,
+              icmsAliquot: Number(prodData.icmsAliquot ?? 0).toFixed(2),
+              icmsReduction: Number(prodData.icmsReduction ?? 0).toFixed(2),
+              ipiAliquot: Number(prodData.ipiAliquot ?? 0).toFixed(2),
+              pisAliquot: Number(prodData.pisAliquot ?? 0).toFixed(2),
+              cofinsAliquot: Number(prodData.cofinsAliquot ?? 0).toFixed(2),
+              issAliquot: Number(prodData.issAliquot ?? 0).toFixed(2),
+              irrfAliquot: Number(prodData.irrfAliquot ?? 0).toFixed(2),
               margin: Number(
                 Number.isFinite(prodData.marginPercent)
                   ? prodData.marginPercent

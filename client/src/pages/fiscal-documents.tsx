@@ -93,9 +93,12 @@ interface FormItem {
   cstIcms: string;
   cstIpi: string;
   cstPisCofins: string;
+  cfop: string;
   origin: string;
   serviceCode: string;
   cest: string;
+  discountValue: string;
+  bcIcmsValue: string;
   icmsAliquot: string;
   icmsReduction: string;
   ipiAliquot: string;
@@ -109,11 +112,17 @@ interface FormItem {
   cofinsValue: string;
   issValue: string;
   irrfValue: string;
+  icmsStValue: string;
   totalTaxes: string;
 }
 
 interface HeaderTaxTotals {
+  productsTotal: string;
+  discountTotal: string;
+  noteTotal: string;
+  bcIcmsTotal: string;
   icmsTotal: string;
+  icmsStTotal: string;
   ipiTotal: string;
   pisTotal: string;
   cofinsTotal: string;
@@ -162,7 +171,12 @@ export default function FiscalDocuments() {
   );
   const [isNoteClosed, setIsNoteClosed] = useState(false);
   const [headerTaxes, setHeaderTaxes] = useState<HeaderTaxTotals>({
+    productsTotal: "0.00",
+    discountTotal: "0.00",
+    noteTotal: "0.00",
+    bcIcmsTotal: "0.00",
     icmsTotal: "0.00",
+    icmsStTotal: "0.00",
     ipiTotal: "0.00",
     pisTotal: "0.00",
     cofinsTotal: "0.00",
@@ -217,9 +231,12 @@ export default function FiscalDocuments() {
         cstIcms: "00",
         cstIpi: "00",
         cstPisCofins: "00",
+        cfop: "",
         origin: "nacional",
         serviceCode: "",
         cest: "",
+        discountValue: "0",
+        bcIcmsValue: "0",
         icmsAliquot: "18",
         icmsReduction: "0",
         ipiAliquot: "0",
@@ -233,6 +250,7 @@ export default function FiscalDocuments() {
         cofinsValue: "0",
         issValue: "0",
         irrfValue: "0",
+        icmsStValue: "0",
         totalTaxes: "0",
       } as FormItem,
     ],
@@ -362,29 +380,72 @@ export default function FiscalDocuments() {
         ...prev,
         items: prev.items.map((item, index) => {
           const calc = calculations[index] || {};
+          const subtotal =
+            Math.max(0, toAmount(item.quantity)) * Math.max(0, toAmount(item.unitPrice));
+          const discount = Math.max(0, toAmount(item.discountValue));
+          const taxableBase = Math.max(0, subtotal - discount);
           return {
             ...item,
+            bcIcmsValue: String(
+              round2(
+                toAmount(
+                  calc.icmsBaseValue ?? item.bcIcmsValue ?? String(taxableBase)
+                )
+              )
+            ),
             icmsValue: String(round2(toAmount(calc.icmsValue))),
             ipiValue: String(round2(toAmount(calc.ipiValue))),
             pisValue: String(round2(toAmount(calc.pisValue))),
             cofinsValue: String(round2(toAmount(calc.cofinsValue))),
             issValue: String(round2(toAmount(calc.issValue))),
             irrfValue: String(round2(toAmount(calc.irrfValue))),
-            totalTaxes: String(round2(toAmount(calc.totalTaxes))),
+            totalTaxes: String(
+              round2(
+                toAmount(calc.totalTaxes) + toAmount(item.icmsStValue)
+              )
+            ),
           };
         }),
       }));
       setHeaderTaxes((prev) => {
         const previousHeaderTotal =
+          toAmount(prev.productsTotal) +
+          toAmount(prev.discountTotal) +
+          toAmount(prev.noteTotal) +
+          toAmount(prev.bcIcmsTotal) +
           toAmount(prev.icmsTotal) +
+          toAmount(prev.icmsStTotal) +
           toAmount(prev.ipiTotal) +
           toAmount(prev.pisTotal) +
           toAmount(prev.cofinsTotal) +
           toAmount(prev.issTotal) +
           toAmount(prev.irrfTotal);
         if (previousHeaderTotal > 0) return prev;
+        const productsTotal = round2(
+          formData.items.reduce(
+            (acc, item) => acc + toAmount(item.quantity) * toAmount(item.unitPrice),
+            0
+          )
+        );
+        const discountTotal = round2(
+          formData.items.reduce((acc, item) => acc + toAmount(item.discountValue), 0)
+        );
+        const icmsStTotal = round2(
+          formData.items.reduce((acc, item) => acc + toAmount(item.icmsStValue), 0)
+        );
+        const bcIcmsTotal = round2(
+          formData.items.reduce((acc, item) => acc + toAmount(item.bcIcmsValue), 0)
+        );
+        const taxGrand = round2(
+          toAmount(totals.totalTaxes) + icmsStTotal
+        );
         return {
+          productsTotal: productsTotal.toFixed(2),
+          discountTotal: discountTotal.toFixed(2),
+          noteTotal: round2(productsTotal - discountTotal + taxGrand).toFixed(2),
+          bcIcmsTotal: bcIcmsTotal.toFixed(2),
           icmsTotal: round2(toAmount(totals.icmsTotal)).toFixed(2),
+          icmsStTotal: icmsStTotal.toFixed(2),
           ipiTotal: round2(toAmount(totals.ipiTotal)).toFixed(2),
           pisTotal: round2(toAmount(totals.pisTotal)).toFixed(2),
           cofinsTotal: round2(toAmount(totals.cofinsTotal)).toFixed(2),
@@ -598,9 +659,12 @@ export default function FiscalDocuments() {
       cstIcms: product.cstIcms || "00",
       cstIpi: product.cstIpi || "00",
       cstPisCofins: product.cstPisCofins || "00",
+      cfop: newItems[itemIndex].cfop || formData.cfopCode || "",
       origin: product.origin || "nacional",
       serviceCode: product.serviceCode || "",
       cest: product.cest || "",
+      discountValue: newItems[itemIndex].discountValue || "0",
+      bcIcmsValue: newItems[itemIndex].bcIcmsValue || "0",
       icmsAliquot: newItems[itemIndex].icmsAliquot || "18",
       icmsReduction: newItems[itemIndex].icmsReduction || "0",
       ipiAliquot: newItems[itemIndex].ipiAliquot || "0",
@@ -614,6 +678,7 @@ export default function FiscalDocuments() {
       cofinsValue: "0",
       issValue: "0",
       irrfValue: "0",
+      icmsStValue: "0",
       totalTaxes: "0",
     };
     setFormData({ ...formData, items: newItems });
@@ -651,9 +716,12 @@ export default function FiscalDocuments() {
           cstIcms: "00",
           cstIpi: "00",
           cstPisCofins: "00",
+          cfop: formData.cfopCode || "",
           origin: "nacional",
           serviceCode: "",
           cest: "",
+          discountValue: "0",
+          bcIcmsValue: "0",
           icmsAliquot: "18",
           icmsReduction: "0",
           ipiAliquot: "0",
@@ -667,6 +735,7 @@ export default function FiscalDocuments() {
           cofinsValue: "0",
           issValue: "0",
           irrfValue: "0",
+          icmsStValue: "0",
           totalTaxes: "0",
         },
       ],
@@ -698,6 +767,26 @@ export default function FiscalDocuments() {
     );
   }, [formData.items]);
 
+  const totalsFromItems = useMemo(() => {
+    const productsTotal = round2(
+      formData.items.reduce(
+        (acc, item) =>
+          acc + Math.max(0, toAmount(item.quantity)) * Math.max(0, toAmount(item.unitPrice)),
+        0
+      )
+    );
+    const discountTotal = round2(
+      formData.items.reduce((acc, item) => acc + Math.max(0, toAmount(item.discountValue)), 0)
+    );
+    const bcIcmsTotal = round2(
+      formData.items.reduce((acc, item) => acc + Math.max(0, toAmount(item.bcIcmsValue)), 0)
+    );
+    const icmsStTotal = round2(
+      formData.items.reduce((acc, item) => acc + Math.max(0, toAmount(item.icmsStValue)), 0)
+    );
+    return { productsTotal, discountTotal, bcIcmsTotal, icmsStTotal };
+  }, [formData.items]);
+
   const taxTotalsFromItems = useMemo(() => {
     return {
       icmsTotal: round2(
@@ -724,10 +813,36 @@ export default function FiscalDocuments() {
     };
   }, [formData.items]);
 
+  const syncHeaderWithItems = () => {
+    const productsTotal = totalsFromItems.productsTotal;
+    const discountTotal = totalsFromItems.discountTotal;
+    const bcIcmsTotal = totalsFromItems.bcIcmsTotal;
+    const icmsStTotal = totalsFromItems.icmsStTotal;
+    const totalTaxes = round2(
+      taxTotalsFromItems.icmsTotal +
+        taxTotalsFromItems.ipiTotal +
+        taxTotalsFromItems.pisTotal +
+        taxTotalsFromItems.cofinsTotal +
+        taxTotalsFromItems.issTotal +
+        taxTotalsFromItems.irrfTotal +
+        icmsStTotal
+    );
+    const noteTotal = round2(productsTotal - discountTotal + totalTaxes);
+    setHeaderTaxes((prev) => ({
+      ...prev,
+      productsTotal: productsTotal.toFixed(2),
+      discountTotal: discountTotal.toFixed(2),
+      bcIcmsTotal: bcIcmsTotal.toFixed(2),
+      icmsStTotal: icmsStTotal.toFixed(2),
+      noteTotal: noteTotal.toFixed(2),
+    }));
+  };
+
   const headerTaxGrandTotal = useMemo(
     () =>
       round2(
-        toAmount(headerTaxes.icmsTotal) +
+          toAmount(headerTaxes.icmsTotal) +
+          toAmount(headerTaxes.icmsStTotal) +
           toAmount(headerTaxes.ipiTotal) +
           toAmount(headerTaxes.pisTotal) +
           toAmount(headerTaxes.cofinsTotal) +
@@ -741,8 +856,14 @@ export default function FiscalDocuments() {
     items: formData.items.map((item) => ({
       productId: item.productId,
       description: item.description,
+      cfop: item.cfop || formData.cfopCode,
+      cstIcms: item.cstIcms,
+      cstIpi: item.cstIpi,
       quantity: Math.max(0, Number(item.quantity || 0)),
       unitPrice: Math.max(0, toAmount(item.unitPrice)),
+      discountValue: Math.max(0, toAmount(item.discountValue)),
+      bcIcmsValue: Math.max(0, toAmount(item.bcIcmsValue)),
+      icmsStValue: Math.max(0, toAmount(item.icmsStValue)),
       icmsAliquot: Math.max(0, toAmount(item.icmsAliquot)),
       icmsReduction: Math.max(0, toAmount(item.icmsReduction)),
       ipiAliquot: Math.max(0, toAmount(item.ipiAliquot)),
@@ -783,10 +904,8 @@ export default function FiscalDocuments() {
       toast.error("Existem alíquotas inválidas na tributação dos itens");
       return;
     }
-    if (headerTaxGrandTotal <= 0) {
-      toast.error(
-        "Preencha os tributos do cabeçalho antes de fechar a nota (duplo clique no item)."
-      );
+    if (toAmount(headerTaxes.productsTotal) < 0 || toAmount(headerTaxes.noteTotal) < 0) {
+      toast.error("Valores de total do cabeçalho inválidos");
       return;
     }
 
@@ -794,7 +913,12 @@ export default function FiscalDocuments() {
       const calculation = await calculateTaxesMutation.mutateAsync(buildTaxPayload());
       const totals = calculation?.totals || {};
       const expectedByHeader = {
+        productsTotal: round2(toAmount(headerTaxes.productsTotal)),
+        discountTotal: round2(toAmount(headerTaxes.discountTotal)),
+        noteTotal: round2(toAmount(headerTaxes.noteTotal)),
+        bcIcmsTotal: round2(toAmount(headerTaxes.bcIcmsTotal)),
         icmsTotal: round2(toAmount(headerTaxes.icmsTotal)),
+        icmsStTotal: round2(toAmount(headerTaxes.icmsStTotal)),
         ipiTotal: round2(toAmount(headerTaxes.ipiTotal)),
         pisTotal: round2(toAmount(headerTaxes.pisTotal)),
         cofinsTotal: round2(toAmount(headerTaxes.cofinsTotal)),
@@ -802,7 +926,17 @@ export default function FiscalDocuments() {
         irrfTotal: round2(toAmount(headerTaxes.irrfTotal)),
       };
       const calculated = {
+        productsTotal: round2(totalsFromItems.productsTotal),
+        discountTotal: round2(totalsFromItems.discountTotal),
+        noteTotal: round2(
+          totalsFromItems.productsTotal -
+            totalsFromItems.discountTotal +
+            toAmount(totals.totalTaxes) +
+            totalsFromItems.icmsStTotal
+        ),
+        bcIcmsTotal: round2(totalsFromItems.bcIcmsTotal),
         icmsTotal: round2(toAmount(totals.icmsTotal)),
+        icmsStTotal: round2(totalsFromItems.icmsStTotal),
         ipiTotal: round2(toAmount(totals.ipiTotal)),
         pisTotal: round2(toAmount(totals.pisTotal)),
         cofinsTotal: round2(toAmount(totals.cofinsTotal)),
@@ -826,7 +960,7 @@ export default function FiscalDocuments() {
       setIsNoteClosed(true);
       toast.success(
         `Nota fechada com sucesso. Total de tributos: R$ ${round2(
-          toAmount(totals.totalTaxes)
+          toAmount(totals.totalTaxes) + totalsFromItems.icmsStTotal
         ).toFixed(2)}`
       );
     } catch (error) {
@@ -906,7 +1040,7 @@ export default function FiscalDocuments() {
         productId: item.productId,
         description: item.description,
         ncm: item.ncm,
-        cfop: formData.cfopCode,
+        cfop: item.cfop || formData.cfopCode,
         csosn: item.csosn,
         cstIcms: item.cstIcms,
         cstIpi: item.cstIpi,
@@ -1069,7 +1203,14 @@ export default function FiscalDocuments() {
                     <Select
                       value={formData.cfopCode}
                       onValueChange={(val) =>
-                        setFormData({ ...formData, cfopCode: val })
+                        setFormData((prev) => ({
+                          ...prev,
+                          cfopCode: val,
+                          items: prev.items.map((item) => ({
+                            ...item,
+                            cfop: val,
+                          })),
+                        }))
                       }
                     >
                       <SelectTrigger data-testid="select-cfop">
@@ -1349,6 +1490,11 @@ export default function FiscalDocuments() {
                       {isNoteClosed ? "Fechada" : "Aberta"}
                     </span>
                   </p>
+                  <p className="text-xs text-muted-foreground">
+                    Cabeçalho: Produtos R$ {toAmount(headerTaxes.productsTotal).toFixed(2)} |
+                    Desconto R$ {toAmount(headerTaxes.discountTotal).toFixed(2)} |
+                    Total Nota R$ {toAmount(headerTaxes.noteTotal).toFixed(2)}
+                  </p>
                   {lastTaxCalculation?.totals?.baseValue !== undefined && (
                     <p className="text-xs text-muted-foreground">
                       Base de cálculo atual: R${" "}
@@ -1422,9 +1568,95 @@ export default function FiscalDocuments() {
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-md border p-3 space-y-3">
+                      <p className="text-sm font-medium">Quadro DANFE - Classificação e Alíquotas</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div>
-                        <Label>ICMS (%)</Label>
+                        <Label>CFOP item</Label>
+                        <Input
+                          value={formData.items[editingTaxItemIndex].cfop}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "cfop",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>CST ICMS</Label>
+                        <Input
+                          value={formData.items[editingTaxItemIndex].cstIcms}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "cstIcms",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>CST IPI</Label>
+                        <Input
+                          value={formData.items[editingTaxItemIndex].cstIpi}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "cstIpi",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>CST PIS/COFINS</Label>
+                        <Input
+                          value={formData.items[editingTaxItemIndex].cstPisCofins}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "cstPisCofins",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>V. desconto (R$)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={formData.items[editingTaxItemIndex].discountValue}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "discountValue",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>BC ICMS (R$)</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={formData.items[editingTaxItemIndex].bcIcmsValue}
+                          onChange={(e) =>
+                            handleItemChange(
+                              editingTaxItemIndex,
+                              "bcIcmsValue",
+                              e.target.value
+                            )
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>Aliq. ICMS (%)</Label>
                         <Input
                           type="number"
                           min="0"
@@ -1458,7 +1690,7 @@ export default function FiscalDocuments() {
                         />
                       </div>
                       <div>
-                        <Label>IPI (%)</Label>
+                        <Label>Aliq. IPI (%)</Label>
                         <Input
                           type="number"
                           min="0"
@@ -1474,7 +1706,7 @@ export default function FiscalDocuments() {
                         />
                       </div>
                       <div>
-                        <Label>PIS (%)</Label>
+                        <Label>Aliq. PIS (%)</Label>
                         <Input
                           type="number"
                           min="0"
@@ -1490,7 +1722,7 @@ export default function FiscalDocuments() {
                         />
                       </div>
                       <div>
-                        <Label>COFINS (%)</Label>
+                        <Label>Aliq. COFINS (%)</Label>
                         <Input
                           type="number"
                           min="0"
@@ -1508,7 +1740,7 @@ export default function FiscalDocuments() {
                         />
                       </div>
                       <div>
-                        <Label>ISS (%)</Label>
+                        <Label>Aliq. ISS (%)</Label>
                         <Input
                           type="number"
                           min="0"
@@ -1524,7 +1756,7 @@ export default function FiscalDocuments() {
                         />
                       </div>
                       <div>
-                        <Label>IRRF (%)</Label>
+                        <Label>Aliq. IRRF (%)</Label>
                         <Input
                           type="number"
                           min="0"
@@ -1538,6 +1770,69 @@ export default function FiscalDocuments() {
                             )
                           }
                         />
+                      </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border p-3 space-y-2">
+                      <p className="text-sm font-medium">Valores editáveis do item</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div>
+                          <Label>V. ICMS (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={formData.items[editingTaxItemIndex].icmsValue}
+                            onChange={(e) =>
+                              handleItemChange(editingTaxItemIndex, "icmsValue", e.target.value)
+                            }
+                          />
+                        </div>
+                        <div>
+                          <Label>V. IPI (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={formData.items[editingTaxItemIndex].ipiValue}
+                            onChange={(e) =>
+                              handleItemChange(editingTaxItemIndex, "ipiValue", e.target.value)
+                            }
+                          />
+                        </div>
+                        <div>
+                          <Label>V. ICMS ST (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={formData.items[editingTaxItemIndex].icmsStValue}
+                            onChange={(e) =>
+                              handleItemChange(
+                                editingTaxItemIndex,
+                                "icmsStValue",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </div>
+                        <div>
+                          <Label>Total tributos item (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={formData.items[editingTaxItemIndex].totalTaxes}
+                            onChange={(e) =>
+                              handleItemChange(
+                                editingTaxItemIndex,
+                                "totalTaxes",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </div>
                       </div>
                     </div>
 
@@ -1580,6 +1875,12 @@ export default function FiscalDocuments() {
                             formData.items[editingTaxItemIndex].irrfValue
                           ).toFixed(2)}
                         </span>
+                        <span>
+                          ICMS ST: R${" "}
+                          {toAmount(
+                            formData.items[editingTaxItemIndex].icmsStValue
+                          ).toFixed(2)}
+                        </span>
                         <span className="font-semibold col-span-2">
                           Total item: R${" "}
                           {toAmount(
@@ -1593,6 +1894,70 @@ export default function FiscalDocuments() {
                       <p className="text-sm font-medium">Tributação do cabeçalho</p>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                         <div>
+                          <Label>V. total produtos (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.productsTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                productsTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label>V. desconto total (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.discountTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                discountTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label>V. total nota (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.noteTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                noteTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label>BC ICMS total (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.bcIcmsTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                bcIcmsTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
                           <Label>ICMS total (R$)</Label>
                           <Input
                             type="number"
@@ -1603,6 +1968,22 @@ export default function FiscalDocuments() {
                               setHeaderTaxes((prev) => ({
                                 ...prev,
                                 icmsTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <Label>ICMS ST total (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.icmsStTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                icmsStTotal: e.target.value,
                               }));
                               setIsNoteClosed(false);
                             }}
@@ -1689,6 +2070,13 @@ export default function FiscalDocuments() {
                           />
                         </div>
                       </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={syncHeaderWithItems}
+                      >
+                        Recalcular totais pelos itens
+                      </Button>
                     </div>
                   </div>
                 ) : null}
@@ -2547,3 +2935,4 @@ export default function FiscalDocuments() {
     </Layout>
   );
 }
+
