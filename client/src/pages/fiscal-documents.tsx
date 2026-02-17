@@ -119,6 +119,7 @@ interface FormItem {
 interface HeaderTaxTotals {
   productsTotal: string;
   discountTotal: string;
+  otherExpensesTotal: string;
   noteTotal: string;
   bcIcmsTotal: string;
   icmsTotal: string;
@@ -173,6 +174,7 @@ export default function FiscalDocuments() {
   const [headerTaxes, setHeaderTaxes] = useState<HeaderTaxTotals>({
     productsTotal: "0.00",
     discountTotal: "0.00",
+    otherExpensesTotal: "0.00",
     noteTotal: "0.00",
     bcIcmsTotal: "0.00",
     icmsTotal: "0.00",
@@ -411,6 +413,7 @@ export default function FiscalDocuments() {
         const previousHeaderTotal =
           toAmount(prev.productsTotal) +
           toAmount(prev.discountTotal) +
+          toAmount(prev.otherExpensesTotal) +
           toAmount(prev.noteTotal) +
           toAmount(prev.bcIcmsTotal) +
           toAmount(prev.icmsTotal) +
@@ -442,7 +445,13 @@ export default function FiscalDocuments() {
         return {
           productsTotal: productsTotal.toFixed(2),
           discountTotal: discountTotal.toFixed(2),
-          noteTotal: round2(productsTotal - discountTotal + taxGrand).toFixed(2),
+          otherExpensesTotal: prev.otherExpensesTotal,
+          noteTotal: round2(
+            productsTotal -
+              discountTotal +
+              toAmount(prev.otherExpensesTotal) +
+              taxGrand
+          ).toFixed(2),
           bcIcmsTotal: bcIcmsTotal.toFixed(2),
           icmsTotal: round2(toAmount(totals.icmsTotal)).toFixed(2),
           icmsStTotal: icmsStTotal.toFixed(2),
@@ -787,6 +796,23 @@ export default function FiscalDocuments() {
     return { productsTotal, discountTotal, bcIcmsTotal, icmsStTotal };
   }, [formData.items]);
 
+  const noteExpectedFromHeader = useMemo(
+    () =>
+      round2(
+        toAmount(headerTaxes.productsTotal) -
+          toAmount(headerTaxes.discountTotal) +
+          toAmount(headerTaxes.otherExpensesTotal) +
+          toAmount(headerTaxes.icmsTotal) +
+          toAmount(headerTaxes.icmsStTotal) +
+          toAmount(headerTaxes.ipiTotal) +
+          toAmount(headerTaxes.pisTotal) +
+          toAmount(headerTaxes.cofinsTotal) +
+          toAmount(headerTaxes.issTotal) +
+          toAmount(headerTaxes.irrfTotal)
+      ),
+    [headerTaxes]
+  );
+
   const taxTotalsFromItems = useMemo(() => {
     return {
       icmsTotal: round2(
@@ -827,7 +853,12 @@ export default function FiscalDocuments() {
         taxTotalsFromItems.irrfTotal +
         icmsStTotal
     );
-    const noteTotal = round2(productsTotal - discountTotal + totalTaxes);
+    const noteTotal = round2(
+      productsTotal -
+        discountTotal +
+        totalTaxes +
+        toAmount(headerTaxes.otherExpensesTotal)
+    );
     setHeaderTaxes((prev) => ({
       ...prev,
       productsTotal: productsTotal.toFixed(2),
@@ -837,6 +868,61 @@ export default function FiscalDocuments() {
       noteTotal: noteTotal.toFixed(2),
     }));
   };
+
+  const headerValidation = useMemo(() => {
+    const tolerance = 0.01;
+    const mismatch = (a: number, b: number) => Math.abs(a - b) > tolerance;
+    const expected = {
+      productsTotal: round2(totalsFromItems.productsTotal),
+      discountTotal: round2(totalsFromItems.discountTotal),
+      bcIcmsTotal: round2(totalsFromItems.bcIcmsTotal),
+      icmsTotal: round2(taxTotalsFromItems.icmsTotal),
+      icmsStTotal: round2(totalsFromItems.icmsStTotal),
+      ipiTotal: round2(taxTotalsFromItems.ipiTotal),
+      pisTotal: round2(taxTotalsFromItems.pisTotal),
+      cofinsTotal: round2(taxTotalsFromItems.cofinsTotal),
+      issTotal: round2(taxTotalsFromItems.issTotal),
+      irrfTotal: round2(taxTotalsFromItems.irrfTotal),
+    };
+    const header = {
+      productsTotal: round2(toAmount(headerTaxes.productsTotal)),
+      discountTotal: round2(toAmount(headerTaxes.discountTotal)),
+      bcIcmsTotal: round2(toAmount(headerTaxes.bcIcmsTotal)),
+      icmsTotal: round2(toAmount(headerTaxes.icmsTotal)),
+      icmsStTotal: round2(toAmount(headerTaxes.icmsStTotal)),
+      ipiTotal: round2(toAmount(headerTaxes.ipiTotal)),
+      pisTotal: round2(toAmount(headerTaxes.pisTotal)),
+      cofinsTotal: round2(toAmount(headerTaxes.cofinsTotal)),
+      issTotal: round2(toAmount(headerTaxes.issTotal)),
+      irrfTotal: round2(toAmount(headerTaxes.irrfTotal)),
+      noteTotal: round2(toAmount(headerTaxes.noteTotal)),
+    };
+    const fieldMismatch = {
+      productsTotal: mismatch(header.productsTotal, expected.productsTotal),
+      discountTotal: mismatch(header.discountTotal, expected.discountTotal),
+      bcIcmsTotal: mismatch(header.bcIcmsTotal, expected.bcIcmsTotal),
+      icmsTotal: mismatch(header.icmsTotal, expected.icmsTotal),
+      icmsStTotal: mismatch(header.icmsStTotal, expected.icmsStTotal),
+      ipiTotal: mismatch(header.ipiTotal, expected.ipiTotal),
+      pisTotal: mismatch(header.pisTotal, expected.pisTotal),
+      cofinsTotal: mismatch(header.cofinsTotal, expected.cofinsTotal),
+      issTotal: mismatch(header.issTotal, expected.issTotal),
+      irrfTotal: mismatch(header.irrfTotal, expected.irrfTotal),
+      noteTotal: mismatch(header.noteTotal, noteExpectedFromHeader),
+    };
+    const blockingMismatches = Object.entries(fieldMismatch)
+      .filter(([, value]) => value)
+      .map(([key]) => key);
+    return {
+      fieldMismatch,
+      blockingMismatches,
+      canClose: blockingMismatches.length === 0,
+    };
+  }, [headerTaxes, totalsFromItems, taxTotalsFromItems, noteExpectedFromHeader]);
+
+  const headerFieldClass = (
+    field: keyof typeof headerValidation.fieldMismatch
+  ) => (headerValidation.fieldMismatch[field] ? "border-red-500 text-red-600" : "");
 
   const headerTaxGrandTotal = useMemo(
     () =>
@@ -908,6 +994,10 @@ export default function FiscalDocuments() {
       toast.error("Valores de total do cabeçalho inválidos");
       return;
     }
+    if (!headerValidation.canClose) {
+      toast.error("A capa da nota possui divergências acima de 0,01");
+      return;
+    }
 
     try {
       const calculation = await calculateTaxesMutation.mutateAsync(buildTaxPayload());
@@ -915,6 +1005,7 @@ export default function FiscalDocuments() {
       const expectedByHeader = {
         productsTotal: round2(toAmount(headerTaxes.productsTotal)),
         discountTotal: round2(toAmount(headerTaxes.discountTotal)),
+        otherExpensesTotal: round2(toAmount(headerTaxes.otherExpensesTotal)),
         noteTotal: round2(toAmount(headerTaxes.noteTotal)),
         bcIcmsTotal: round2(toAmount(headerTaxes.bcIcmsTotal)),
         icmsTotal: round2(toAmount(headerTaxes.icmsTotal)),
@@ -928,9 +1019,11 @@ export default function FiscalDocuments() {
       const calculated = {
         productsTotal: round2(totalsFromItems.productsTotal),
         discountTotal: round2(totalsFromItems.discountTotal),
+        otherExpensesTotal: round2(toAmount(headerTaxes.otherExpensesTotal)),
         noteTotal: round2(
           totalsFromItems.productsTotal -
             totalsFromItems.discountTotal +
+            toAmount(headerTaxes.otherExpensesTotal) +
             toAmount(totals.totalTaxes) +
             totalsFromItems.icmsStTotal
         ),
@@ -950,8 +1043,24 @@ export default function FiscalDocuments() {
         );
       });
       if (mismatches.length > 0) {
+        const labels: Record<string, string> = {
+          productsTotal: "valor total dos produtos",
+          discountTotal: "valor total de descontos",
+          otherExpensesTotal: "outras despesas",
+          noteTotal: "valor total da nota",
+          bcIcmsTotal: "base de cálculo do ICMS",
+          icmsTotal: "valor do ICMS",
+          icmsStTotal: "valor do ICMS substituição",
+          ipiTotal: "valor total do IPI",
+          pisTotal: "valor do PIS",
+          cofinsTotal: "valor do COFINS",
+          issTotal: "valor do ISS",
+          irrfTotal: "valor do IRRF",
+        };
         toast.error(
-          `Tributação divergente no cabeçalho: ${mismatches.join(", ")}`
+          `Divergência na capa da nota: ${mismatches
+            .map((k) => labels[k] || k)
+            .join(", ")}`
         );
         setIsNoteClosed(false);
         return;
@@ -1493,8 +1602,14 @@ export default function FiscalDocuments() {
                   <p className="text-xs text-muted-foreground">
                     Cabeçalho: Produtos R$ {toAmount(headerTaxes.productsTotal).toFixed(2)} |
                     Desconto R$ {toAmount(headerTaxes.discountTotal).toFixed(2)} |
+                    Outras despesas R$ {toAmount(headerTaxes.otherExpensesTotal).toFixed(2)} |
                     Total Nota R$ {toAmount(headerTaxes.noteTotal).toFixed(2)}
                   </p>
+                  {!headerValidation.canClose && (
+                    <p className="text-xs text-red-600">
+                      Existem divergências nos totais da capa da nota. Corrija os campos em vermelho.
+                    </p>
+                  )}
                   {lastTaxCalculation?.totals?.baseValue !== undefined && (
                     <p className="text-xs text-muted-foreground">
                       Base de cálculo atual: R${" "}
@@ -1528,7 +1643,7 @@ export default function FiscalDocuments() {
                   <Button
                     onClick={closeNFeNote}
                     variant="default"
-                    disabled={calculateTaxesMutation.isPending}
+                    disabled={calculateTaxesMutation.isPending || !headerValidation.canClose}
                     data-testid="button-close-nfe"
                   >
                     Fechar nota
@@ -1899,6 +2014,7 @@ export default function FiscalDocuments() {
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("productsTotal")}
                             value={headerTaxes.productsTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({
@@ -1915,6 +2031,7 @@ export default function FiscalDocuments() {
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("discountTotal")}
                             value={headerTaxes.discountTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({
@@ -1926,11 +2043,28 @@ export default function FiscalDocuments() {
                           />
                         </div>
                         <div>
+                          <Label>Outras despesas (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={headerTaxes.otherExpensesTotal}
+                            onChange={(e) => {
+                              setHeaderTaxes((prev) => ({
+                                ...prev,
+                                otherExpensesTotal: e.target.value,
+                              }));
+                              setIsNoteClosed(false);
+                            }}
+                          />
+                        </div>
+                        <div>
                           <Label>V. total nota (R$)</Label>
                           <Input
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("noteTotal")}
                             value={headerTaxes.noteTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({
@@ -1947,6 +2081,7 @@ export default function FiscalDocuments() {
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("bcIcmsTotal")}
                             value={headerTaxes.bcIcmsTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({
@@ -1963,6 +2098,7 @@ export default function FiscalDocuments() {
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("icmsTotal")}
                             value={headerTaxes.icmsTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({
@@ -1979,6 +2115,7 @@ export default function FiscalDocuments() {
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("icmsStTotal")}
                             value={headerTaxes.icmsStTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({
@@ -1995,6 +2132,7 @@ export default function FiscalDocuments() {
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("ipiTotal")}
                             value={headerTaxes.ipiTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({
@@ -2011,6 +2149,7 @@ export default function FiscalDocuments() {
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("pisTotal")}
                             value={headerTaxes.pisTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({
@@ -2027,6 +2166,7 @@ export default function FiscalDocuments() {
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("cofinsTotal")}
                             value={headerTaxes.cofinsTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({
@@ -2043,6 +2183,7 @@ export default function FiscalDocuments() {
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("issTotal")}
                             value={headerTaxes.issTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({
@@ -2059,6 +2200,7 @@ export default function FiscalDocuments() {
                             type="number"
                             min="0"
                             step="0.01"
+                            className={headerFieldClass("irrfTotal")}
                             value={headerTaxes.irrfTotal}
                             onChange={(e) => {
                               setHeaderTaxes((prev) => ({

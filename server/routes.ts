@@ -38,7 +38,13 @@ import { CFOPValidator } from "./cfop-validator";
 import { CSOSNCalculator } from "./csosn-calculator";
 import fiscalRouter from "./fiscal-routes";
 import { XMLSignatureService } from "./xml-signature";
-import { authorizePayment, validateMercadoPagoSettings } from "./payment-service";
+import {
+  authorizePayment,
+  createMercadoPagoPixQr,
+  clearMercadoPagoTerminalQueue,
+  getMercadoPagoOrderStatus,
+  validateMercadoPagoSettings,
+} from "./payment-service";
 import {
   validateStoneSettings,
   captureStonePayment,
@@ -111,6 +117,34 @@ function parseNFeXML(xmlContent: string): Array<{
   }
 
   return produtos;
+}
+
+function parseNFeHeaderTotals(xmlContent: string): {
+  productsTotal: number;
+  discountTotal: number;
+  otherExpensesTotal: number;
+  icmsStTotal: number;
+  ipiTotal: number;
+  noteTotal: number;
+} {
+  const getTagValue = (tag: string, content: string): number => {
+    const regex = new RegExp(`<${tag}>([^<]*)</${tag}>`, "i");
+    const match = regex.exec(content);
+    const parsed = Number(String(match?.[1] ?? "0").replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const icmsTotMatch = /<ICMSTot>([\s\S]*?)<\/ICMSTot>/i.exec(xmlContent);
+  const totalsSource = icmsTotMatch?.[1] || xmlContent;
+
+  return {
+    productsTotal: getTagValue("vProd", totalsSource),
+    discountTotal: getTagValue("vDesc", totalsSource),
+    otherExpensesTotal: getTagValue("vOutro", totalsSource),
+    icmsStTotal: getTagValue("vST", totalsSource),
+    ipiTotal: getTagValue("vIPI", totalsSource),
+    noteTotal: getTagValue("vNF", totalsSource),
+  };
 }
 
 export async function registerRoutes(
@@ -703,10 +737,16 @@ export async function registerRoutes(
     amount: z.number().positive(),
     method: z.enum(["pix", "credito", "debito"]),
   });
+  const pixQrSchema = z.object({
+    amount: z.number().positive(),
+  });
 
   const mpValidationSchema = z.object({
     accessToken: z.string().min(1),
     terminalId: z.string().min(1),
+  });
+  const mpClearQueueSchema = z.object({
+    terminalId: z.string().optional(),
   });
   const stoneValidationSchema = z.object({
     clientId: z.string().min(1),
@@ -718,6 +758,40 @@ export async function registerRoutes(
     paymentId: z.string().min(1),
     environment: z.enum(["homologacao", "producao"]).optional(),
   });
+
+  app.post(
+    "/api/payments/pix/qr",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { amount } = pixQrSchema.parse(req.body);
+        const settings = await storage.getCompanySettings(companyId);
+        if (!settings?.mpAccessToken) {
+          return res.status(400).json({ error: "Mercado Pago nao configurado" });
+        }
+        const result = await createMercadoPagoPixQr({
+          amount,
+          accessToken: settings.mpAccessToken,
+          description: `PIX PDV ${companyId}`,
+          payerEmail: settings.email,
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Erro ao gerar QR PIX",
+        });
+      }
+    }
+  );
 
   app.post(
     "/api/payments/mercadopago/validate",
@@ -881,6 +955,79 @@ export async function registerRoutes(
     }
   );
 
+  app.get(
+    "/api/payments/mercadopago/status/:id",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const orderId = String(req.params.id || "").trim();
+        if (!orderId) {
+          return res.status(400).json({ error: "orderId obrigatorio" });
+        }
+
+        const settings = await storage.getCompanySettings(companyId);
+        if (!settings?.mpAccessToken) {
+          return res.status(400).json({ error: "Mercado Pago nao configurado" });
+        }
+
+        const result = await getMercadoPagoOrderStatus(
+          settings.mpAccessToken,
+          orderId
+        );
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({
+          error:
+            error instanceof Error ? error.message : "Erro ao consultar pagamento",
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payments/mercadopago/clear-queue",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { terminalId } = mpClearQueueSchema.parse(req.body || {});
+        const settings = await storage.getCompanySettings(companyId);
+        if (!settings?.mpAccessToken) {
+          return res.status(400).json({ error: "Mercado Pago nao configurado" });
+        }
+        const terminalRef = String(terminalId || settings.mpTerminalId || "").trim();
+        if (!terminalRef) {
+          return res.status(400).json({ error: "Terminal nao configurado" });
+        }
+
+        const result = await clearMercadoPagoTerminalQueue(
+          settings.mpAccessToken,
+          terminalRef
+        );
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Falha ao liberar fila do terminal",
+        });
+      }
+    }
+  );
+
   app.post(
     "/api/payments/authorize",
     requireAuth,
@@ -903,6 +1050,21 @@ export async function registerRoutes(
       } catch (error) {
         if (error instanceof z.ZodError) {
           return res.status(400).json({ error: error.errors });
+        }
+        if (error instanceof Error) {
+          const msg = error.message.toLowerCase();
+          if (msg.includes("nao configurado") || msg.includes("faltam credenciais") || msg.includes("habilitado")) {
+            return res.status(400).json({ error: error.message });
+          }
+          if (msg.includes("already_queued_order_on_terminal") || msg.includes("queued order on the terminal")) {
+            return res.status(409).json({
+              error:
+                "Ja existe uma cobranca pendente nesta maquininha. Finalize ou cancele no terminal antes de tentar novamente.",
+            });
+          }
+          if (msg.includes("nao autorizado") || msg.includes("declined") || msg.includes("rejected")) {
+            return res.status(402).json({ error: error.message });
+          }
         }
         res.status(500).json({
           error: error instanceof Error ? error.message : "Erro no pagamento",
@@ -1514,6 +1676,7 @@ export async function registerRoutes(
       const { xmlContent } = importXmlSchema.parse(req.body);
 
       const parsedProducts = parseNFeXML(xmlContent);
+      const noteTotals = parseNFeHeaderTotals(xmlContent);
 
       if (parsedProducts.length === 0) {
         return res.status(400).json({
@@ -1565,6 +1728,7 @@ export async function registerRoutes(
         totalProducts: previewProducts.length,
         existingProducts: previewProducts.filter((p) => p.isExisting).length,
         newProducts: previewProducts.filter((p) => !p.isExisting).length,
+        noteTotals,
         products: previewProducts,
       });
     } catch (error) {

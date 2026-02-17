@@ -83,6 +83,7 @@ interface XmlPreviewProduct {
   price: string;
   purchasePrice: string;
   marginPercent: number;
+  manualSalePrice?: boolean;
   cfop: string;
   cstIcms: string;
   cstIpi: string;
@@ -107,6 +108,15 @@ interface XmlPreviewProduct {
   existingProductName: string | null;
   existingStock: number;
   isExisting: boolean;
+}
+
+interface XmlReferenceTotals {
+  productsTotal: number;
+  discountTotal: number;
+  otherExpensesTotal: number;
+  icmsStTotal: number;
+  ipiTotal: number;
+  noteTotal: number;
 }
 
 const adjustmentTypes = [
@@ -148,6 +158,8 @@ export default function Inventory() {
   const [xmlPreviewProducts, setXmlPreviewProducts] = useState<
     XmlPreviewProduct[]
   >([]);
+  const [xmlReferenceTotals, setXmlReferenceTotals] =
+    useState<XmlReferenceTotals | null>(null);
   const [xmlFiscalEditTempId, setXmlFiscalEditTempId] = useState<number | null>(
     null
   );
@@ -244,6 +256,7 @@ export default function Inventory() {
             purchasePrice: purchasePrice.toFixed(2),
             price: salePrice.toFixed(2),
             marginPercent,
+            manualSalePrice: false,
             cfop: String((product as any).cfop || ""),
             cstIcms: String((product as any).cstIcms || "00"),
             cstIpi: String((product as any).cstIpi || "00"),
@@ -282,6 +295,18 @@ export default function Inventory() {
         }
       );
       setXmlPreviewProducts(normalizedProducts);
+      if (result.noteTotals) {
+        setXmlReferenceTotals({
+          productsTotal: toMoney(result.noteTotals.productsTotal),
+          discountTotal: toMoney(result.noteTotals.discountTotal),
+          otherExpensesTotal: toMoney(result.noteTotals.otherExpensesTotal),
+          icmsStTotal: toMoney(result.noteTotals.icmsStTotal),
+          ipiTotal: toMoney(result.noteTotals.ipiTotal),
+          noteTotal: toMoney(result.noteTotals.noteTotal),
+        });
+      } else {
+        setXmlReferenceTotals(null);
+      }
       setXmlPreviewOpen(true);
     } catch (error) {
       toast.error(
@@ -296,6 +321,14 @@ export default function Inventory() {
   };
 
   const handleConfirmImport = async () => {
+    if (xmlTotalsComparison && !xmlTotalsComparison.canImport) {
+      toast.error(
+        `Totais da nota divergentes do XML: ${xmlTotalsComparison.mismatches.join(
+          ", "
+        )}`
+      );
+      return;
+    }
     setIsConfirmingImport(true);
     try {
       const res = await fetch("/api/products/import-confirmed", {
@@ -313,6 +346,7 @@ export default function Inventory() {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       setXmlPreviewOpen(false);
       setXmlPreviewProducts([]);
+      setXmlReferenceTotals(null);
 
       if (result.imported > 0 && result.updated > 0) {
         toast.success(
@@ -352,12 +386,15 @@ export default function Inventory() {
                 purchasePrice,
                 p.marginPercent
               );
+              const nextSalePrice = p.manualSalePrice
+                ? toMoney(p.price)
+                : salePrice;
               return {
                 ...p,
                 quantity,
                 stockQuantity,
                 purchasePrice: purchasePrice.toFixed(2),
-                price: salePrice.toFixed(2),
+                price: nextSalePrice.toFixed(2),
               };
             })()
           : p
@@ -383,12 +420,15 @@ export default function Inventory() {
                 purchasePrice,
                 p.marginPercent
               );
+              const nextSalePrice = p.manualSalePrice
+                ? toMoney(p.price)
+                : salePrice;
               return {
                 ...p,
                 unitsPerPackage,
                 stockQuantity,
                 purchasePrice: purchasePrice.toFixed(2),
-                price: salePrice.toFixed(2),
+                price: nextSalePrice.toFixed(2),
               };
             })()
           : p
@@ -403,11 +443,12 @@ export default function Inventory() {
         const totalPurchaseValue = toMoney(value);
         const purchasePrice = calcUnitCost(totalPurchaseValue, p.stockQuantity);
         const salePrice = calcSalePriceFromMargin(purchasePrice, p.marginPercent);
+        const nextSalePrice = p.manualSalePrice ? toMoney(p.price) : salePrice;
         return {
           ...p,
           totalPurchaseValue: totalPurchaseValue.toFixed(2),
           purchasePrice: purchasePrice.toFixed(2),
-          price: salePrice.toFixed(2),
+          price: nextSalePrice.toFixed(2),
         };
       })
     );
@@ -421,11 +462,12 @@ export default function Inventory() {
         const totalPurchaseValue = packagePurchaseValue * Math.max(0, p.quantity);
         const purchasePrice = calcUnitCost(totalPurchaseValue, p.stockQuantity);
         const salePrice = calcSalePriceFromMargin(purchasePrice, p.marginPercent);
+        const nextSalePrice = p.manualSalePrice ? toMoney(p.price) : salePrice;
         return {
           ...p,
           totalPurchaseValue: totalPurchaseValue.toFixed(2),
           purchasePrice: purchasePrice.toFixed(2),
-          price: salePrice.toFixed(2),
+          price: nextSalePrice.toFixed(2),
         };
       })
     );
@@ -444,6 +486,7 @@ export default function Inventory() {
           ...p,
           marginPercent: round2(marginPercent),
           price: salePrice.toFixed(2),
+          manualSalePrice: false,
         };
       })
     );
@@ -462,6 +505,7 @@ export default function Inventory() {
           ...p,
           price: salePrice.toFixed(2),
           marginPercent: round2(Math.max(0, marginPercent)),
+          manualSalePrice: true,
         };
       })
     );
@@ -519,9 +563,76 @@ export default function Inventory() {
     const totalIpi = round2(
       xmlPreviewProducts.reduce((acc, p) => acc + toMoney(p.ipiValue), 0)
     );
-    const noteTotal = round2(productsTotal - discountTotal + icmsStTotal + totalIpi);
-    return { productsTotal, discountTotal, icmsStTotal, totalIpi, noteTotal };
-  }, [xmlPreviewProducts]);
+    const otherExpensesTotal = round2(xmlReferenceTotals?.otherExpensesTotal ?? 0);
+    const noteTotal = round2(
+      productsTotal - discountTotal + otherExpensesTotal + icmsStTotal + totalIpi
+    );
+    return {
+      productsTotal,
+      discountTotal,
+      otherExpensesTotal,
+      icmsStTotal,
+      totalIpi,
+      noteTotal,
+    };
+  }, [xmlPreviewProducts, xmlReferenceTotals]);
+
+  const formatSignedMoney = (value: number) =>
+    `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+
+  const xmlTotalsComparison = useMemo(() => {
+    if (!xmlReferenceTotals) return null;
+    const tolerance = 0.01;
+    const details = [
+      {
+        key: "productsTotal" as const,
+        label: "Valor total dos produtos",
+        current: xmlImportTotals.productsTotal,
+        expected: round2(xmlReferenceTotals.productsTotal),
+      },
+      {
+        key: "discountTotal" as const,
+        label: "Valor total dos descontos",
+        current: xmlImportTotals.discountTotal,
+        expected: round2(xmlReferenceTotals.discountTotal),
+      },
+      {
+        key: "icmsStTotal" as const,
+        label: "Valor do ICMS ST",
+        current: xmlImportTotals.icmsStTotal,
+        expected: round2(xmlReferenceTotals.icmsStTotal),
+      },
+      {
+        key: "totalIpi" as const,
+        label: "Valor total do IPI",
+        current: xmlImportTotals.totalIpi,
+        expected: round2(xmlReferenceTotals.ipiTotal),
+      },
+      {
+        key: "noteTotal" as const,
+        label: "Valor total da nota",
+        current: xmlImportTotals.noteTotal,
+        expected: round2(xmlReferenceTotals.noteTotal),
+      },
+    ].map((field) => {
+      const diff = round2(field.current - field.expected);
+      return {
+        ...field,
+        diff,
+        mismatch: Math.abs(diff) > tolerance,
+      };
+    });
+    const byKey = Object.fromEntries(
+      details.map((detail) => [detail.key, detail])
+    ) as Record<
+      "productsTotal" | "discountTotal" | "icmsStTotal" | "totalIpi" | "noteTotal",
+      (typeof details)[number]
+    >;
+    const mismatches = details
+      .filter((detail) => detail.mismatch)
+      .map((detail) => detail.label);
+    return { details, byKey, mismatches, canImport: mismatches.length === 0 };
+  }, [xmlImportTotals, xmlReferenceTotals]);
 
   const editingXmlFiscalProduct =
     xmlFiscalEditTempId === null
@@ -1236,6 +1347,7 @@ export default function Inventory() {
             setXmlPreviewOpen(false);
             setXmlPreviewProducts([]);
             setXmlFiscalEditTempId(null);
+            setXmlReferenceTotals(null);
           }
         }}
       >
@@ -1268,29 +1380,101 @@ export default function Inventory() {
                 <div className="rounded-md border p-3 grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
                   <div>
                     <span className="text-muted-foreground">V. total produtos</span>
-                    <p className="font-semibold">R$ {xmlImportTotals.productsTotal.toFixed(2)}</p>
+                    <p
+                      className={`font-semibold ${
+                        xmlTotalsComparison?.byKey.productsTotal?.mismatch
+                          ? "text-red-600"
+                          : ""
+                      }`}
+                    >
+                      R$ {xmlImportTotals.productsTotal.toFixed(2)}
+                    </p>
+                    {xmlTotalsComparison?.byKey.productsTotal?.mismatch && (
+                      <p className="text-xs text-red-600">
+                        XML: R$ {xmlTotalsComparison.byKey.productsTotal.expected.toFixed(2)} | Dif: R$ {formatSignedMoney(xmlTotalsComparison.byKey.productsTotal.diff)}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <span className="text-muted-foreground">V. desconto</span>
-                    <p className="font-semibold">R$ {xmlImportTotals.discountTotal.toFixed(2)}</p>
+                    <p
+                      className={`font-semibold ${
+                        xmlTotalsComparison?.byKey.discountTotal?.mismatch
+                          ? "text-red-600"
+                          : ""
+                      }`}
+                    >
+                      R$ {xmlImportTotals.discountTotal.toFixed(2)}
+                    </p>
+                    {xmlTotalsComparison?.byKey.discountTotal?.mismatch && (
+                      <p className="text-xs text-red-600">
+                        XML: R$ {xmlTotalsComparison.byKey.discountTotal.expected.toFixed(2)} | Dif: R$ {formatSignedMoney(xmlTotalsComparison.byKey.discountTotal.diff)}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <span className="text-muted-foreground">ICMS ST total</span>
-                    <p className="font-semibold">R$ {xmlImportTotals.icmsStTotal.toFixed(2)}</p>
+                    <p
+                      className={`font-semibold ${
+                        xmlTotalsComparison?.byKey.icmsStTotal?.mismatch
+                          ? "text-red-600"
+                          : ""
+                      }`}
+                    >
+                      R$ {xmlImportTotals.icmsStTotal.toFixed(2)}
+                    </p>
+                    {xmlTotalsComparison?.byKey.icmsStTotal?.mismatch && (
+                      <p className="text-xs text-red-600">
+                        XML: R$ {xmlTotalsComparison.byKey.icmsStTotal.expected.toFixed(2)} | Dif: R$ {formatSignedMoney(xmlTotalsComparison.byKey.icmsStTotal.diff)}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <span className="text-muted-foreground">IPI total</span>
-                    <p className="font-semibold">R$ {xmlImportTotals.totalIpi.toFixed(2)}</p>
+                    <p
+                      className={`font-semibold ${
+                        xmlTotalsComparison?.byKey.totalIpi?.mismatch
+                          ? "text-red-600"
+                          : ""
+                      }`}
+                    >
+                      R$ {xmlImportTotals.totalIpi.toFixed(2)}
+                    </p>
+                    {xmlTotalsComparison?.byKey.totalIpi?.mismatch && (
+                      <p className="text-xs text-red-600">
+                        XML: R$ {xmlTotalsComparison.byKey.totalIpi.expected.toFixed(2)} | Dif: R$ {formatSignedMoney(xmlTotalsComparison.byKey.totalIpi.diff)}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <span className="text-muted-foreground">V. total nota</span>
-                    <p className="font-semibold">R$ {xmlImportTotals.noteTotal.toFixed(2)}</p>
+                    <p
+                      className={`font-semibold ${
+                        xmlTotalsComparison?.byKey.noteTotal?.mismatch
+                          ? "text-red-600"
+                          : ""
+                      }`}
+                    >
+                      R$ {xmlImportTotals.noteTotal.toFixed(2)}
+                    </p>
+                    {xmlTotalsComparison?.byKey.noteTotal?.mismatch && (
+                      <p className="text-xs text-red-600">
+                        XML: R$ {xmlTotalsComparison.byKey.noteTotal.expected.toFixed(2)} | Dif: R$ {formatSignedMoney(xmlTotalsComparison.byKey.noteTotal.diff)}
+                      </p>
+                    )}
                   </div>
                 </div>
+                {xmlTotalsComparison && !xmlTotalsComparison.canImport && (
+                  <p className="text-sm text-red-600">
+                    Divergência com a capa da nota XML:{" "}
+                    {xmlTotalsComparison.mismatches.join(", ")}. A importação
+                    será bloqueada.
+                  </p>
+                )}
 
                 <Table>
-                  <TableHeader>
-                    <TableRow>
+                  <TableHeader className="sticky top-0 z-10 bg-background">
+                    <TableRow className="bg-background">
                       <TableHead className="min-w-[200px]">Produto</TableHead>
                       <TableHead>EAN</TableHead>
                       <TableHead>Unidade</TableHead>
@@ -1308,7 +1492,11 @@ export default function Inventory() {
                   </TableHeader>
                   <TableBody>
                     {xmlPreviewProducts.map((product) => (
-                      <TableRow key={product.tempId}>
+                      <TableRow
+                        key={product.tempId}
+                        onDoubleClick={() => setXmlFiscalEditTempId(product.tempId)}
+                        className="cursor-pointer"
+                      >
                         <TableCell>
                           <div className="flex flex-col">
                             <span className="font-medium">{product.name}</span>
@@ -1682,13 +1870,18 @@ export default function Inventory() {
                 setXmlPreviewOpen(false);
                 setXmlPreviewProducts([]);
                 setXmlFiscalEditTempId(null);
+                setXmlReferenceTotals(null);
               }}
             >
               Cancelar
             </Button>
             <Button
               onClick={handleConfirmImport}
-              disabled={isConfirmingImport || xmlPreviewProducts.length === 0}
+              disabled={
+                isConfirmingImport ||
+                xmlPreviewProducts.length === 0 ||
+                (xmlTotalsComparison ? !xmlTotalsComparison.canImport : false)
+              }
             >
               {isConfirmingImport ? (
                 <>

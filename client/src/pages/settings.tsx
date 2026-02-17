@@ -1,4 +1,4 @@
-import Layout from "@/components/layout";
+﻿import Layout from "@/components/layout";
 import {
   Card,
   CardContent,
@@ -369,7 +369,7 @@ export default function Settings() {
     } catch (error: any) {
       toast({
         title: "Erro",
-        description: error.message || "Não foi possível criar o terminal.",
+        description: error.message || "NÃ£o foi possÃ­vel criar o terminal.",
         variant: "destructive",
       });
     } finally {
@@ -401,7 +401,7 @@ export default function Settings() {
     } catch (error) {
       toast({
         title: "Erro",
-        description: "Não foi possível atualizar o terminal.",
+        description: "NÃ£o foi possÃ­vel atualizar o terminal.",
         variant: "destructive",
       });
     } finally {
@@ -420,7 +420,7 @@ export default function Settings() {
         setTerminals(terminals.filter((t) => t.id !== id));
         toast({
           title: "Sucesso!",
-          description: "Terminal excluído com sucesso.",
+          description: "Terminal excluÃ­do com sucesso.",
         });
       } else {
         throw new Error("Erro ao excluir terminal");
@@ -428,7 +428,7 @@ export default function Settings() {
     } catch (error) {
       toast({
         title: "Erro",
-        description: "Não foi possível excluir o terminal.",
+        description: "NÃ£o foi possÃ­vel excluir o terminal.",
         variant: "destructive",
       });
     }
@@ -455,16 +455,16 @@ export default function Settings() {
         });
         toast({
           title: "Sucesso!",
-          description: "AlÇðquota de Simples Nacional cadastrada.",
+          description: "AlÃ‡Ã°quota de Simples Nacional cadastrada.",
         });
       } else {
         const error = await response.json();
-        throw new Error(error.error || "Erro ao cadastrar alÇðquota");
+        throw new Error(error.error || "Erro ao cadastrar alÃ‡Ã°quota");
       }
     } catch (error: any) {
       toast({
         title: "Erro",
-        description: error.message || "NÇœo foi possÇðvel salvar a alÇðquota.",
+        description: error.message || "NÃ‡Å“o foi possÃ‡Ã°vel salvar a alÃ‡Ã°quota.",
         variant: "destructive",
       });
     } finally {
@@ -474,7 +474,7 @@ export default function Settings() {
 
   const handleDeleteSimplesAliquot = async (id?: number) => {
     if (!id) return;
-    if (!confirm("Deseja realmente excluir esta alÇðquota?")) return;
+    if (!confirm("Deseja realmente excluir esta alÃ‡Ã°quota?")) return;
     try {
       const response = await fetch(`/api/simples-aliquots/${id}`, {
         method: "DELETE",
@@ -483,21 +483,40 @@ export default function Settings() {
         setSimplesAliquots(simplesAliquots.filter((item) => item.id !== id));
         toast({
           title: "Sucesso!",
-          description: "AlÇðquota removida com sucesso.",
+          description: "AlÃ‡Ã°quota removida com sucesso.",
         });
       } else {
-        throw new Error("Erro ao excluir alÇðquota");
+        throw new Error("Erro ao excluir alÃ‡Ã°quota");
       }
     } catch (error) {
       toast({
         title: "Erro",
-        description: "NÇœo foi possÇðvel excluir a alÇðquota.",
+        description: "NÃ‡Å“o foi possÃ‡Ã°vel excluir a alÃ‡Ã°quota.",
         variant: "destructive",
       });
     }
   };
 
   const handleSaveSettings = async () => {
+    const mpTerminalRaw = String(settings.mpTerminalId || "").trim();
+    const mpTerminalRef = splitMpTerminalRef(mpTerminalRaw);
+    const mpStorePosValid = !!mpTerminalRef.storeId && !!mpTerminalRef.posId;
+    const mpHasDirectTerminalId = !!mpTerminalRaw && !mpStorePosValid;
+    const mpTerminalValid = mpStorePosValid || mpHasDirectTerminalId;
+
+    if (
+      settings.mpEnabled &&
+      (!settings.mpAccessToken || !mpTerminalValid)
+    ) {
+      toast({
+        title: "Credenciais incompletas",
+        description:
+          "Para Mercado Pago ativo, informe access token e (Store ID + POS ID) ou Terminal ID.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       const response = await fetch("/api/settings", {
@@ -514,7 +533,7 @@ export default function Settings() {
         fetchFiscalReadiness();
         toast({
           title: "Sucesso!",
-          description: "Configurações salvas com sucesso.",
+          description: "ConfiguraÃ§Ãµes salvas com sucesso.",
         });
       } else {
         throw new Error("Failed to save settings");
@@ -523,7 +542,7 @@ export default function Settings() {
       console.error("Failed to save settings:", error);
       toast({
         title: "Erro",
-        description: "Não foi possível salvar as configurações.",
+        description: "NÃ£o foi possÃ­vel salvar as configuraÃ§Ãµes.",
         variant: "destructive",
       });
     } finally {
@@ -599,10 +618,11 @@ export default function Settings() {
       return;
     }
 
-    if (!settings.mpAccessToken || !settings.mpTerminalId) {
+    if (!settings.mpAccessToken || !mpTerminalValid) {
       toast({
         title: "Credenciais incompletas",
-        description: "Informe o access token e o ID do terminal.",
+        description:
+          "Informe access token e (Store ID + POS ID) ou Terminal ID.",
         variant: "destructive",
       });
       return;
@@ -647,7 +667,7 @@ export default function Settings() {
       setPrinterStatus("connected");
       toast({
         title: "Impressora Conectada",
-        description: "Teste de impressão enviado com sucesso.",
+        description: "Teste de impressÃ£o enviado com sucesso.",
       });
     }, 2000);
   };
@@ -657,6 +677,38 @@ export default function Settings() {
     value: string | boolean
   ) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const splitMpTerminalRef = (ref?: string) => {
+    const raw = String(ref || "").trim();
+    const separators = ["|", ":", "/", ";", ","];
+    const separator = separators.find((item) => raw.includes(item));
+    if (!separator) {
+      return { storeId: "", posId: "" };
+    }
+    const [storeId, posId] = raw.split(separator);
+    return {
+      storeId: String(storeId || "").trim(),
+      posId: String(posId || "").trim(),
+    };
+  };
+
+  const updateMpTerminalRef = (partial: { storeId?: string; posId?: string }) => {
+    const current = splitMpTerminalRef(settings.mpTerminalId);
+    const storeId = String(partial.storeId ?? current.storeId).trim();
+    const posId = String(partial.posId ?? current.posId).trim();
+    const next = storeId && posId ? `${storeId}|${posId}` : `${storeId}${posId ? `|${posId}` : ""}`;
+    updateSetting("mpTerminalId", next);
+  };
+
+  const mpTerminalRaw = String(settings.mpTerminalId || "").trim();
+  const mpTerminalRef = splitMpTerminalRef(mpTerminalRaw);
+  const mpStorePosValid = !!mpTerminalRef.storeId && !!mpTerminalRef.posId;
+  const mpDirectTerminalId = !mpStorePosValid ? mpTerminalRaw : "";
+  const mpTerminalValid = mpStorePosValid || !!mpDirectTerminalId;
+
+  const updateMpTerminalDirect = (value: string) => {
+    updateSetting("mpTerminalId", String(value || "").trim());
   };
 
   const getChecklistTargetId = (checkKey: string) => {
@@ -722,7 +774,7 @@ export default function Settings() {
       console.error("Erro ao buscar CNPJ:", error);
       toast({
         title: "Aviso",
-        description: "Não foi possível buscar os dados do CNPJ.",
+        description: "NÃ£o foi possÃ­vel buscar os dados do CNPJ.",
         variant: "destructive",
       });
     }
@@ -804,29 +856,29 @@ export default function Settings() {
       <div className="flex flex-col gap-6">
         <div>
           <h1 className="text-3xl font-heading font-bold tracking-tight text-foreground">
-            Configurações
+            ConfiguraÃ§Ãµes
           </h1>
           <p className="text-muted-foreground">
-            Gerencie dados da empresa, fiscal e usuários.
+            Gerencie dados da empresa, fiscal e usuÃ¡rios.
           </p>
         </div>
 
         <Tabs defaultValue="payments" className="space-y-4">
           <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="company">Dados da Empresa</TabsTrigger>
-            <TabsTrigger value="fiscal">Fiscal & Tributário</TabsTrigger>
+            <TabsTrigger value="fiscal">Fiscal & TributÃ¡rio</TabsTrigger>
             <TabsTrigger value="payments">Pagamentos & TEF</TabsTrigger>
             <TabsTrigger value="equipment">Equipamentos</TabsTrigger>
             <TabsTrigger value="terminals">Terminais PDV</TabsTrigger>
-            <TabsTrigger value="users">Usuários</TabsTrigger>
+            <TabsTrigger value="users">UsuÃ¡rios</TabsTrigger>
           </TabsList>
 
           <TabsContent value="company">
             <Card>
               <CardHeader>
-                <CardTitle>Informações do Estabelecimento</CardTitle>
+                <CardTitle>InformaÃ§Ãµes do Estabelecimento</CardTitle>
                 <CardDescription>
-                  Dados que aparecerão nos relatórios e cupons.
+                  Dados que aparecerÃ£o nos relatÃ³rios e cupons.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -848,7 +900,7 @@ export default function Settings() {
                     )}
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="ie">Inscrição Estadual</Label>
+                    <Label htmlFor="ie">InscriÃ§Ã£o Estadual</Label>
                     <Input
                       id="ie"
                       placeholder="000.000.000.000"
@@ -860,7 +912,7 @@ export default function Settings() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="im">Inscrição Municipal</Label>
+                    <Label htmlFor="im">InscriÃ§Ã£o Municipal</Label>
                     <Input
                       id="im"
                       placeholder="Ex: 123456789"
@@ -880,7 +932,7 @@ export default function Settings() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="name">Razão Social</Label>
+                  <Label htmlFor="name">RazÃ£o Social</Label>
                   <Input
                     id="name"
                     placeholder="Minha Empresa LTDA"
@@ -923,10 +975,10 @@ export default function Settings() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="address">Endereço</Label>
+                    <Label htmlFor="address">EndereÃ§o</Label>
                     <Input
                       id="address"
-                      placeholder="Rua, número, bairro"
+                      placeholder="Rua, nÃºmero, bairro"
                       value={settings.address || ""}
                       onChange={(e) => updateSetting("address", e.target.value)}
                     />
@@ -962,7 +1014,7 @@ export default function Settings() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="regime">Regime Tributário</Label>
+                  <Label htmlFor="regime">Regime TributÃ¡rio</Label>
                   <Select
                     value={settings.regimeTributario || "Simples Nacional"}
                     onValueChange={(value) =>
@@ -984,8 +1036,8 @@ export default function Settings() {
                   </Select>
                   <p className="text-xs text-muted-foreground mt-1">
                     {settings.regimeTributario === "Simples Nacional"
-                      ? "Será usado CSOSN para ICMS e PIS/COFINS integrados"
-                      : "Será usado CST para ICMS com PIS/COFINS separados"}
+                      ? "SerÃ¡ usado CSOSN para ICMS e PIS/COFINS integrados"
+                      : "SerÃ¡ usado CST para ICMS com PIS/COFINS separados"}
                   </p>
                 </div>
                 <Button onClick={handleSaveSettings} disabled={saving}>
@@ -995,19 +1047,19 @@ export default function Settings() {
                       Salvando...
                     </>
                   ) : (
-                    "Salvar Alterações"
+                    "Salvar AlteraÃ§Ãµes"
                   )}
                 </Button>
                 <div className="space-y-4 pt-4 border-t">
                   <h3 className="text-lg font-medium">
-                    Documentos Fiscais Eletrônicos
+                    Documentos Fiscais EletrÃ´nicos
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="space-y-0.5">
                         <Label>NF-e (Modelo 55)</Label>
                         <p className="text-xs text-muted-foreground">
-                          Vendas e Operações Interestaduais
+                          Vendas e OperaÃ§Ãµes Interestaduais
                         </p>
                       </div>
                       <Switch
@@ -1035,7 +1087,7 @@ export default function Settings() {
                       <div className="space-y-0.5">
                         <Label>NFS-e</Label>
                         <p className="text-xs text-muted-foreground">
-                          Prestação de Serviços
+                          PrestaÃ§Ã£o de ServiÃ§os
                         </p>
                       </div>
                       <Switch
@@ -1076,9 +1128,9 @@ export default function Settings() {
           <TabsContent value="fiscal">
             <Card>
               <CardHeader>
-                <CardTitle>Configuração Fiscal (NFC-e / SAT)</CardTitle>
+                <CardTitle>ConfiguraÃ§Ã£o Fiscal (NFC-e / SAT)</CardTitle>
                 <CardDescription>
-                  Parâmetros para emissão de documentos fiscais.
+                  ParÃ¢metros para emissÃ£o de documentos fiscais.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -1186,9 +1238,9 @@ export default function Settings() {
 
                 <div className="flex items-center justify-between space-x-2">
                   <div className="space-y-0.5">
-                    <Label className="text-base">Ambiente de Produção</Label>
+                    <Label className="text-base">Ambiente de ProduÃ§Ã£o</Label>
                     <p className="text-sm text-muted-foreground">
-                      Ativar emissão real de notas (com valor fiscal).
+                      Ativar emissÃ£o real de notas (com valor fiscal).
                     </p>
                   </div>
                   <Switch
@@ -1315,7 +1367,7 @@ export default function Settings() {
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label>
-                      Token CSC (Código de Segurança do Contribuinte)
+                      Token CSC (CÃ³digo de SeguranÃ§a do Contribuinte)
                     </Label>
                     <Input
                       id="csc-token-input"
@@ -1498,7 +1550,7 @@ export default function Settings() {
                   )}
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline">Testar Comunicação SEFAZ</Button>
+                  <Button variant="outline">Testar ComunicaÃ§Ã£o SEFAZ</Button>
                   <Button onClick={handleSaveSettings} disabled={saving}>
                     {saving ? (
                       <>
@@ -1506,20 +1558,20 @@ export default function Settings() {
                         Salvando...
                       </>
                     ) : (
-                      "Salvar Alterações"
+                      "Salvar AlteraÃ§Ãµes"
                     )}
                   </Button>
                 </div>
                 <div className="space-y-4 pt-4 border-t">
                   <h3 className="text-lg font-medium">
-                    Documentos Fiscais Eletrônicos
+                    Documentos Fiscais EletrÃ´nicos
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="space-y-0.5">
                         <Label>NF-e (Modelo 55)</Label>
                         <p className="text-xs text-muted-foreground">
-                          Vendas e Operações Interestaduais
+                          Vendas e OperaÃ§Ãµes Interestaduais
                         </p>
                       </div>
                       <Switch
@@ -1547,7 +1599,7 @@ export default function Settings() {
                       <div className="space-y-0.5">
                         <Label>NFS-e</Label>
                         <p className="text-xs text-muted-foreground">
-                          Prestação de Serviços
+                          PrestaÃ§Ã£o de ServiÃ§os
                         </p>
                       </div>
                       <Switch
@@ -1593,15 +1645,15 @@ export default function Settings() {
                     <CreditCard className="h-5 w-5" />
                   </div>
                   <div>
-                    <CardTitle>Integração Stone</CardTitle>
+                    <CardTitle>IntegraÃ§Ã£o Stone</CardTitle>
                     <CardDescription>
-                      Configuração de Maquininha (TEF/POS)
+                      ConfiguraÃ§Ã£o de Maquininha (TEF/POS)
                     </CardDescription>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between space-x-2">
-                    <Label>Ativar Integração</Label>
+                    <Label>Ativar IntegraÃ§Ã£o</Label>
                     <Switch
                       checked={settings.stoneEnabled || false}
                       onCheckedChange={(checked) =>
@@ -1679,7 +1731,7 @@ export default function Settings() {
                           Conectando...
                         </>
                       ) : (
-                        "Testar Conexão Stone"
+                        "Testar ConexÃ£o Stone"
                       )}
                     </Button>
                   )}
@@ -1694,19 +1746,19 @@ export default function Settings() {
                         Salvando...
                       </>
                     ) : (
-                      "Salvar Alterações"
+                      "Salvar AlteraÃ§Ãµes"
                     )}
                   </Button>
                   <div className="space-y-4 pt-4 border-t">
                     <h3 className="text-lg font-medium">
-                      Documentos Fiscais Eletrônicos
+                      Documentos Fiscais EletrÃ´nicos
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="flex items-center justify-between p-3 border rounded-lg">
                         <div className="space-y-0.5">
                           <Label>NF-e (Modelo 55)</Label>
                           <p className="text-xs text-muted-foreground">
-                            Vendas e Operações Interestaduais
+                            Vendas e OperaÃ§Ãµes Interestaduais
                           </p>
                         </div>
                         <Switch
@@ -1734,7 +1786,7 @@ export default function Settings() {
                         <div className="space-y-0.5">
                           <Label>NFS-e</Label>
                           <p className="text-xs text-muted-foreground">
-                            Prestação de Serviços
+                            PrestaÃ§Ã£o de ServiÃ§os
                           </p>
                         </div>
                         <Switch
@@ -1783,7 +1835,7 @@ export default function Settings() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between space-x-2">
-                    <Label>Ativar Integração</Label>
+                    <Label>Ativar IntegraÃ§Ã£o</Label>
                     <Switch
                       checked={settings.mpEnabled || false}
                       onCheckedChange={(checked) =>
@@ -1792,7 +1844,7 @@ export default function Settings() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Access Token (Integração)</Label>
+                    <Label>Access Token (IntegraÃ§Ã£o)</Label>
                     <Input
                       type="password"
                       placeholder="APP_USR-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -1803,14 +1855,76 @@ export default function Settings() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>ID do Terminal (Point)</Label>
-                    <Input
-                      placeholder="POINT-123456"
-                      value={settings.mpTerminalId || ""}
-                      onChange={(e) =>
-                        updateSetting("mpTerminalId", e.target.value)
-                      }
-                    />
+                    <Label>Identificador Point</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">
+                          Store ID
+                        </Label>
+                        <Input
+                          placeholder="STORE123"
+                          value={mpTerminalRef.storeId}
+                          className={
+                            settings.mpEnabled &&
+                            !mpDirectTerminalId &&
+                            !mpTerminalRef.storeId
+                              ? "border-red-500 focus-visible:ring-red-500"
+                              : ""
+                          }
+                          onChange={(e) =>
+                            updateMpTerminalRef({ storeId: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">
+                          POS ID
+                        </Label>
+                        <Input
+                          placeholder="POS456"
+                          value={mpTerminalRef.posId}
+                          className={
+                            settings.mpEnabled &&
+                            !mpDirectTerminalId &&
+                            !mpTerminalRef.posId
+                              ? "border-red-500 focus-visible:ring-red-500"
+                              : ""
+                          }
+                          onChange={(e) =>
+                            updateMpTerminalRef({ posId: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+                                        <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">
+                        Terminal ID (opcional)
+                      </Label>
+                      <Input
+                        placeholder="GERTEC_MP35P__8701012146360616"
+                        value={mpDirectTerminalId}
+                        className={
+                          settings.mpEnabled &&
+                          !mpStorePosValid &&
+                          !mpDirectTerminalId
+                            ? "border-red-500 focus-visible:ring-red-500"
+                            : ""
+                        }
+                        onChange={(e) =>
+                          updateMpTerminalDirect(e.target.value)
+                        }
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Preencha <span className="font-mono">store_id|pos_id</span>{" "}
+                      ou informe o <span className="font-mono">terminal_id</span>{" "}
+                      diretamente.
+                    </p>
+                    {settings.mpEnabled && !mpTerminalValid && (
+                      <p className="text-xs text-red-600">
+                        Informe Store ID + POS ID ou Terminal ID para salvar.
+                      </p>
+                    )}
                   </div>
 
                   {mpStatus === "connected" ? (
@@ -1838,7 +1952,7 @@ export default function Settings() {
                   )}
                   <Button
                     onClick={handleSaveSettings}
-                    disabled={saving}
+                    disabled={saving || (settings.mpEnabled && !mpTerminalValid)}
                     className="w-full"
                   >
                     {saving ? (
@@ -1847,19 +1961,19 @@ export default function Settings() {
                         Salvando...
                       </>
                     ) : (
-                      "Salvar Alterações"
+                      "Salvar AlteraÃ§Ãµes"
                     )}
                   </Button>
                   <div className="space-y-4 pt-4 border-t">
                     <h3 className="text-lg font-medium">
-                      Documentos Fiscais Eletrônicos
+                      Documentos Fiscais EletrÃ´nicos
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="flex items-center justify-between p-3 border rounded-lg">
                         <div className="space-y-0.5">
                           <Label>NF-e (Modelo 55)</Label>
                           <p className="text-xs text-muted-foreground">
-                            Vendas e Operações Interestaduais
+                            Vendas e OperaÃ§Ãµes Interestaduais
                           </p>
                         </div>
                         <Switch
@@ -1887,7 +2001,7 @@ export default function Settings() {
                         <div className="space-y-0.5">
                           <Label>NFS-e</Label>
                           <p className="text-xs text-muted-foreground">
-                            Prestação de Serviços
+                            PrestaÃ§Ã£o de ServiÃ§os
                           </p>
                         </div>
                         <Switch
@@ -1930,7 +2044,7 @@ export default function Settings() {
                     Agente Local (Bridge)
                   </CardTitle>
                   <CardDescription>
-                    Para comunicação USB/Serial com maquininhas via navegador.
+                    Para comunicaÃ§Ã£o USB/Serial com maquininhas via navegador.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex items-center justify-between">
@@ -1942,7 +2056,7 @@ export default function Settings() {
                       </span>
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Versão: v2.4.0 (Mock)
+                      VersÃ£o: v2.4.0 (Mock)
                     </p>
                   </div>
                   <Button variant="outline" size="sm">
@@ -1950,14 +2064,14 @@ export default function Settings() {
                   </Button>
                   <div className="space-y-4 pt-4 border-t">
                     <h3 className="text-lg font-medium">
-                      Documentos Fiscais Eletrônicos
+                      Documentos Fiscais EletrÃ´nicos
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="flex items-center justify-between p-3 border rounded-lg">
                         <div className="space-y-0.5">
                           <Label>NF-e (Modelo 55)</Label>
                           <p className="text-xs text-muted-foreground">
-                            Vendas e Operações Interestaduais
+                            Vendas e OperaÃ§Ãµes Interestaduais
                           </p>
                         </div>
                         <Switch
@@ -1985,7 +2099,7 @@ export default function Settings() {
                         <div className="space-y-0.5">
                           <Label>NFS-e</Label>
                           <p className="text-xs text-muted-foreground">
-                            Prestação de Serviços
+                            PrestaÃ§Ã£o de ServiÃ§os
                           </p>
                         </div>
                         <Switch
@@ -2032,9 +2146,9 @@ export default function Settings() {
                     <Printer className="h-5 w-5" />
                   </div>
                   <div>
-                    <CardTitle>Impressora Fiscal / Térmica</CardTitle>
+                    <CardTitle>Impressora Fiscal / TÃ©rmica</CardTitle>
                     <CardDescription>
-                      Configuração para impressão de cupons e NFC-e
+                      ConfiguraÃ§Ã£o para impressÃ£o de cupons e NFC-e
                     </CardDescription>
                   </div>
                 </CardHeader>
@@ -2078,13 +2192,13 @@ export default function Settings() {
                           Sweda SI-300
                         </SelectItem>
                         <SelectItem value="generic-escpos">
-                          Genérica ESC/POS
+                          GenÃ©rica ESC/POS
                         </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Porta de Comunicação</Label>
+                    <Label>Porta de ComunicaÃ§Ã£o</Label>
                     <Select
                       value={settings.printerPort || ""}
                       onValueChange={(value) =>
@@ -2149,9 +2263,9 @@ export default function Settings() {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
-                        <Label>Guilhotina Automática</Label>
+                        <Label>Guilhotina AutomÃ¡tica</Label>
                         <p className="text-xs text-muted-foreground">
-                          Cortar papel após impressão
+                          Cortar papel apÃ³s impressÃ£o
                         </p>
                       </div>
                       <Switch
@@ -2184,7 +2298,7 @@ export default function Settings() {
                       <CheckCircle2 className="h-5 w-5" />
                       <div className="text-sm font-medium">
                         Impressora Conectada:{" "}
-                        {settings.printerModel || "Genérica"}
+                        {settings.printerModel || "GenÃ©rica"}
                       </div>
                     </div>
                   ) : (
@@ -2218,19 +2332,19 @@ export default function Settings() {
                         Salvando...
                       </>
                     ) : (
-                      "Salvar Alterações"
+                      "Salvar AlteraÃ§Ãµes"
                     )}
                   </Button>
                   <div className="space-y-4 pt-4 border-t">
                     <h3 className="text-lg font-medium">
-                      Documentos Fiscais Eletrônicos
+                      Documentos Fiscais EletrÃ´nicos
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="flex items-center justify-between p-3 border rounded-lg">
                         <div className="space-y-0.5">
                           <Label>NF-e (Modelo 55)</Label>
                           <p className="text-xs text-muted-foreground">
-                            Vendas e Operações Interestaduais
+                            Vendas e OperaÃ§Ãµes Interestaduais
                           </p>
                         </div>
                         <Switch
@@ -2258,7 +2372,7 @@ export default function Settings() {
                         <div className="space-y-0.5">
                           <Label>NFS-e</Label>
                           <p className="text-xs text-muted-foreground">
-                            Prestação de Serviços
+                            PrestaÃ§Ã£o de ServiÃ§os
                           </p>
                         </div>
                         <Switch
@@ -2301,9 +2415,9 @@ export default function Settings() {
                     <ScanBarcode className="h-5 w-5" />
                   </div>
                   <div>
-                    <CardTitle>Leitor de Código de Barras</CardTitle>
+                    <CardTitle>Leitor de CÃ³digo de Barras</CardTitle>
                     <CardDescription>
-                      Configuração do scanner para PDV
+                      ConfiguraÃ§Ã£o do scanner para PDV
                     </CardDescription>
                   </div>
                 </CardHeader>
@@ -2337,7 +2451,7 @@ export default function Settings() {
                     </div>
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
-                        <Label>Som ao Ler Código</Label>
+                        <Label>Som ao Ler CÃ³digo</Label>
                         <p className="text-xs text-muted-foreground">
                           Feedback sonoro de leitura
                         </p>
@@ -2363,11 +2477,11 @@ export default function Settings() {
                         leitura
                       </li>
                       <li>
-                        O produto é encontrado pelo código EAN e adicionado ao
+                        O produto Ã© encontrado pelo cÃ³digo EAN e adicionado ao
                         carrinho
                       </li>
                       <li>
-                        Compatível com leitores: Honeywell, Elgin, Bematech,
+                        CompatÃ­vel com leitores: Honeywell, Elgin, Bematech,
                         etc.
                       </li>
                     </ul>
@@ -2390,19 +2504,19 @@ export default function Settings() {
                         Salvando...
                       </>
                     ) : (
-                      "Salvar Alterações"
+                      "Salvar AlteraÃ§Ãµes"
                     )}
                   </Button>
                   <div className="space-y-4 pt-4 border-t">
                     <h3 className="text-lg font-medium">
-                      Documentos Fiscais Eletrônicos
+                      Documentos Fiscais EletrÃ´nicos
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="flex items-center justify-between p-3 border rounded-lg">
                         <div className="space-y-0.5">
                           <Label>NF-e (Modelo 55)</Label>
                           <p className="text-xs text-muted-foreground">
-                            Vendas e Operações Interestaduais
+                            Vendas e OperaÃ§Ãµes Interestaduais
                           </p>
                         </div>
                         <Switch
@@ -2430,7 +2544,7 @@ export default function Settings() {
                         <div className="space-y-0.5">
                           <Label>NFS-e</Label>
                           <p className="text-xs text-muted-foreground">
-                            Prestação de Serviços
+                            PrestaÃ§Ã£o de ServiÃ§os
                           </p>
                         </div>
                         <Switch
@@ -2511,7 +2625,7 @@ export default function Settings() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="terminal-code">Código</Label>
+                        <Label htmlFor="terminal-code">CÃ³digo</Label>
                         <Input
                           id="terminal-code"
                           placeholder="Ex: CX01"
@@ -2530,9 +2644,9 @@ export default function Settings() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
-                          <Label>Caixa Autônomo</Label>
+                          <Label>Caixa AutÃ´nomo</Label>
                           <p className="text-xs text-muted-foreground">
-                            Não requer abertura/fechamento diário
+                            NÃ£o requer abertura/fechamento diÃ¡rio
                           </p>
                         </div>
                         <Switch
@@ -2550,7 +2664,7 @@ export default function Settings() {
                         <div className="space-y-0.5">
                           <Label>Exigir Sangria</Label>
                           <p className="text-xs text-muted-foreground">
-                            Requer permissão pos:sangria
+                            Requer permissÃ£o pos:sangria
                           </p>
                         </div>
                         <Switch
@@ -2568,7 +2682,7 @@ export default function Settings() {
                         <div className="space-y-0.5">
                           <Label>Exigir Suprimento</Label>
                           <p className="text-xs text-muted-foreground">
-                            Requer permissão pos:suprimento
+                            Requer permissÃ£o pos:suprimento
                           </p>
                         </div>
                         <Switch
@@ -2646,7 +2760,7 @@ export default function Settings() {
                                 />
                               </div>
                               <div className="space-y-2">
-                                <Label>Código</Label>
+                                <Label>CÃ³digo</Label>
                                 <Input
                                   value={editingTerminal.code || ""}
                                   onChange={(e) =>
@@ -2671,7 +2785,7 @@ export default function Settings() {
                                     })
                                   }
                                 />
-                                <Label className="text-sm">Autônomo</Label>
+                                <Label className="text-sm">AutÃ´nomo</Label>
                               </div>
                               <div className="flex items-center gap-2">
                                 <Switch
@@ -2755,10 +2869,10 @@ export default function Settings() {
                                   )}
                                 </div>
                                 <div className="text-sm text-muted-foreground flex items-center gap-2">
-                                  <span>Código: {terminal.code}</span>
+                                  <span>CÃ³digo: {terminal.code}</span>
                                   {terminal.isAutonomous && (
                                     <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
-                                      Autônomo
+                                      AutÃ´nomo
                                     </span>
                                   )}
                                 </div>
@@ -2799,30 +2913,30 @@ export default function Settings() {
                     Sobre Terminais
                   </h4>
                   <ul className="text-xs text-indigo-700 space-y-1 list-disc list-inside">
-                    <li>Cada terminal representa um ponto de venda físico</li>
+                    <li>Cada terminal representa um ponto de venda fÃ­sico</li>
                     <li>
-                      Terminais autônomos não requerem abertura/fechamento de
+                      Terminais autÃ´nomos nÃ£o requerem abertura/fechamento de
                       caixa
                     </li>
                     <li>
-                      Configure permissões de sangria e suprimento por terminal
+                      Configure permissÃµes de sangria e suprimento por terminal
                     </li>
                     <li>
-                      Acesse o histórico de movimentações em Caixa &gt;
-                      Histórico
+                      Acesse o histÃ³rico de movimentaÃ§Ãµes em Caixa &gt;
+                      HistÃ³rico
                     </li>
                   </ul>
                 </div>
                 <div className="space-y-4 pt-4 border-t">
                   <h3 className="text-lg font-medium">
-                    Documentos Fiscais Eletrônicos
+                    Documentos Fiscais EletrÃ´nicos
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="space-y-0.5">
                         <Label>NF-e (Modelo 55)</Label>
                         <p className="text-xs text-muted-foreground">
-                          Vendas e Operações Interestaduais
+                          Vendas e OperaÃ§Ãµes Interestaduais
                         </p>
                       </div>
                       <Switch
@@ -2850,7 +2964,7 @@ export default function Settings() {
                       <div className="space-y-0.5">
                         <Label>NFS-e</Label>
                         <p className="text-xs text-muted-foreground">
-                          Prestação de Serviços
+                          PrestaÃ§Ã£o de ServiÃ§os
                         </p>
                       </div>
                       <Switch
@@ -2895,37 +3009,37 @@ export default function Settings() {
                   <Users className="h-5 w-5" />
                 </div>
                 <div>
-                  <CardTitle>Gerenciamento de Usuários</CardTitle>
+                  <CardTitle>Gerenciamento de UsuÃ¡rios</CardTitle>
                   <CardDescription>
-                    Gerencie usuários, perfis e permissões do sistema
+                    Gerencie usuÃ¡rios, perfis e permissÃµes do sistema
                   </CardDescription>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-muted-foreground">
-                  Acesse a página de usuários para gerenciar todos os usuários
+                  Acesse a pÃ¡gina de usuÃ¡rios para gerenciar todos os usuÃ¡rios
                   da sua empresa, definir perfis de acesso e configurar
-                  permissões específicas para cada função.
+                  permissÃµes especÃ­ficas para cada funÃ§Ã£o.
                 </p>
                 <div className="flex flex-col gap-2">
                   <Link href="/users">
                     <Button className="w-full sm:w-auto">
                       <Users className="mr-2 h-4 w-4" />
-                      Gerenciar Usuários
+                      Gerenciar UsuÃ¡rios
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
                   </Link>
                 </div>
                 <div className="space-y-4 pt-4 border-t">
                   <h3 className="text-lg font-medium">
-                    Documentos Fiscais Eletrônicos
+                    Documentos Fiscais EletrÃ´nicos
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="flex items-center justify-between p-3 border rounded-lg">
                       <div className="space-y-0.5">
                         <Label>NF-e (Modelo 55)</Label>
                         <p className="text-xs text-muted-foreground">
-                          Vendas e Operações Interestaduais
+                          Vendas e OperaÃ§Ãµes Interestaduais
                         </p>
                       </div>
                       <Switch
@@ -2953,7 +3067,7 @@ export default function Settings() {
                       <div className="space-y-0.5">
                         <Label>NFS-e</Label>
                         <p className="text-xs text-muted-foreground">
-                          Prestação de Serviços
+                          PrestaÃ§Ã£o de ServiÃ§os
                         </p>
                       </div>
                       <Switch
@@ -2995,3 +3109,4 @@ export default function Settings() {
     </Layout>
   );
 }
+

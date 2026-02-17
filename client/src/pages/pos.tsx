@@ -59,6 +59,9 @@ type PaymentResult = {
   provider?: string | null;
   authorizationCode?: string | null;
   providerReference?: string | null;
+  qrCode?: string | null;
+  qrCodeBase64?: string | null;
+  expiresAt?: string | null;
 };
 type FiscalStatus = "idle" | "sending" | "success" | "pending_fiscal";
 type FiscalReadiness = {
@@ -80,6 +83,7 @@ export default function POS() {
   const [selectedCategory, setSelectedCategory] = useState<string>("Todos");
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showCancelReceipt, setShowCancelReceipt] = useState(false);
+  const [showPixQrDialog, setShowPixQrDialog] = useState(false);
   const [cancelledItems, setCancelledItems] = useState<
     { product: any; qty: number }[]
   >([]);
@@ -298,10 +302,36 @@ export default function POS() {
   ];
   const products = (pdvLoad?.products || []) as any[];
   const paymentMethods = (pdvLoad?.paymentMethods || []) as PdvPaymentMethod[];
+  const normalizeText = (value: string) =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  const inferTefMethod = (
+    method: PdvPaymentMethod
+  ): "pix" | "credito" | "debito" | null => {
+    if (method.tefMethod) return method.tefMethod;
+    const typeToken = normalizeText(method.type || "");
+    const nameToken = normalizeText(method.name || "");
+    const token = `${typeToken} ${nameToken}`;
+    if (token.includes("pix") || token.includes("qr")) return "pix";
+    if (token.includes("credito") || token.includes("credit")) return "credito";
+    if (token.includes("debito") || token.includes("debit")) return "debito";
+    return null;
+  };
+  const normalizePaymentMethod = (method: PdvPaymentMethod): PdvPaymentMethod => {
+    const tefMethod = inferTefMethod(method);
+    if (tefMethod) {
+      return { ...method, tefMethod };
+    }
+    return method;
+  };
+  const activePaymentMethods = paymentMethods
+    .filter((method) => method.isActive !== false)
+    .map(normalizePaymentMethod);
   const availablePaymentMethods =
-    paymentMethods.filter((method) => method.isActive !== false).length > 0
-      ? paymentMethods.filter((method) => method.isActive !== false)
-      : fallbackPaymentMethods;
+    activePaymentMethods.length > 0 ? activePaymentMethods : fallbackPaymentMethods;
 
   const createSaleMutation = useMutation({
     mutationFn: async (
@@ -447,6 +477,9 @@ export default function POS() {
     return method?.name || "Nao informado";
   };
 
+  const sleep = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
   const handleSelectPayment = async (method: PdvPaymentMethod) => {
     if (!method) return;
     if (cart.length === 0) {
@@ -460,8 +493,11 @@ export default function POS() {
 
     setSelectedPayment(method);
     setPaymentResult(null);
+    setShowPixQrDialog(false);
 
-    if (!method.tefMethod) {
+    const tefMethod = inferTefMethod(method);
+
+    if (!tefMethod) {
       setPaymentStatus("approved");
       setPaymentResult({
         status: "approved",
@@ -475,59 +511,184 @@ export default function POS() {
       return;
     }
 
+    if (isAuthorizingRef.current || paymentStatus === "processing") {
+      toast({
+        title: "Pagamento em andamento",
+        description:
+          "Ja existe uma autorizacao em andamento para esta venda. Aguarde o retorno da maquininha.",
+      });
+      return;
+    }
+
     setPaymentStatus("processing");
+    isAuthorizingRef.current = true;
 
     try {
-      const res = await fetch("/api/payments/authorize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: parseFloat(total.toFixed(2)),
-          method: method.tefMethod,
-        }),
-      });
-
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(error.error || "Falha no pagamento");
-      }
-
-      const result: PaymentResult = await res.json();
-      setPaymentResult(result);
-      if (result.status === "approved") {
-        setPaymentStatus("approved");
-        toast({
-          title: "Pagamento aprovado",
-          description: result.brand
-            ? `Bandeira: ${result.brand}`
-            : "Pagamento autorizado.",
-          className: "bg-emerald-500 text-white border-none",
+      let result: PaymentResult | null = null;
+      if (tefMethod === "pix") {
+        const pixRes = await fetch("/api/payments/pix/qr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount: parseFloat(total.toFixed(2)) }),
         });
-        return;
-      }
+        if (!pixRes.ok) {
+          const error = await pixRes.json().catch(() => ({}));
+          throw new Error(error.error || "Falha ao gerar QR PIX");
+        }
+        const pixResult: PaymentResult = await pixRes.json();
+        result = pixResult;
+        setPaymentResult(pixResult);
+        setPaymentStatus(
+          pixResult.status === "approved"
+            ? "approved"
+            : pixResult.status === "declined"
+              ? "declined"
+              : "processing"
+        );
+        setShowPixQrDialog(true);
+      } else {
+        let res: Response | null = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          res = await fetch("/api/payments/authorize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              amount: parseFloat(total.toFixed(2)),
+              method: tefMethod,
+            }),
+          });
+          if (res.status !== 409 || attempt === 3) {
+            break;
+          }
+          await fetch("/api/payments/mercadopago/clear-queue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          }).catch(() => null);
+          toast({
+            title: "Terminal ocupado",
+            description:
+              "Liberando fila automaticamente e reenviando para a maquininha...",
+          });
+          await sleep(5000);
+        }
 
-      if (result.status === "declined") {
-        setPaymentStatus("declined");
-        toast({
-          title: "Pagamento negado",
-          description: "Tente outra forma de pagamento.",
-          variant: "destructive",
-        });
-        return;
+        if (!res) {
+          throw new Error("Falha no pagamento");
+        }
+
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({}));
+          if (res.status === 409) {
+            throw new Error(
+              error.error ||
+                "Ja existe uma cobranca pendente na maquininha. Finalize ou cancele no terminal."
+            );
+          }
+          throw new Error(error.error || "Falha no pagamento");
+        }
+
+        const authResult: PaymentResult = await res.json();
+        result = authResult;
+        setPaymentResult(authResult);
+        if (authResult.status === "approved") {
+          setPaymentStatus("approved");
+          toast({
+            title: "Pagamento aprovado",
+            description: authResult.brand
+              ? `Bandeira: ${authResult.brand}`
+              : "Pagamento autorizado.",
+            className: "bg-emerald-500 text-white border-none",
+          });
+          return;
+        }
+
+        if (authResult.status === "declined") {
+          setPaymentStatus("declined");
+          toast({
+            title: "Pagamento negado",
+            description: "Tente outra forma de pagamento.",
+            variant: "destructive",
+          });
+          return;
+        }
       }
 
       setPaymentStatus("processing");
       toast({
         title: "Pagamento em andamento",
-        description: "Aguardando confirmacao do terminal.",
+        description:
+          tefMethod === "pix"
+            ? "Aguardando pagamento via QR na tela do PDV."
+            : "Aguardando confirmacao do terminal.",
       });
+
+      if (
+        result &&
+        result.provider === "mercadopago" &&
+        result.providerReference &&
+        result.status === "processing"
+      ) {
+        const maxAttempts = 10;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          await sleep(3000);
+          const statusRes = await fetch(
+            `/api/payments/mercadopago/status/${encodeURIComponent(
+              result.providerReference
+            )}`
+          );
+          if (!statusRes.ok) {
+            continue;
+          }
+          const statusResult: PaymentResult = await statusRes.json();
+          setPaymentResult(statusResult);
+
+          if (statusResult.status === "approved") {
+            setPaymentStatus("approved");
+            setShowPixQrDialog(false);
+            toast({
+              title: "Pagamento aprovado",
+              description: statusResult.brand
+                ? `Bandeira: ${statusResult.brand}`
+                : "Pagamento autorizado.",
+              className: "bg-emerald-500 text-white border-none",
+            });
+            return;
+          }
+
+          if (statusResult.status === "declined") {
+            setPaymentStatus("declined");
+            setShowPixQrDialog(false);
+            toast({
+              title: "Pagamento negado",
+              description: "Tente outra forma de pagamento.",
+              variant: "destructive",
+            });
+            return;
+          }
+        }
+
+        setPaymentStatus("error");
+        setShowPixQrDialog(false);
+        toast({
+          title: tefMethod === "pix" ? "PIX pendente" : "Sem retorno da maquininha",
+          description:
+            tefMethod === "pix"
+              ? "QR gerado, mas ainda sem confirmacao de pagamento."
+              : "Pedido enviado, mas o terminal nao confirmou. Verifique internet da maquininha e tente novamente.",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       setPaymentStatus("error");
+      setShowPixQrDialog(false);
       toast({
         title: "Erro no pagamento",
         description: error instanceof Error ? error.message : "Falha no pagamento",
         variant: "destructive",
       });
+    } finally {
+      isAuthorizingRef.current = false;
     }
   };
 
@@ -643,6 +804,7 @@ export default function POS() {
     setSelectedPayment(null);
     setPaymentStatus("idle");
     setPaymentResult(null);
+    setShowPixQrDialog(false);
   };
 
   const handleCancelSale = () => {
@@ -675,6 +837,7 @@ export default function POS() {
   const total = subtotal;
 
   const lastTotalRef = useRef(total);
+  const isAuthorizingRef = useRef(false);
 
   useEffect(() => {
     if (lastTotalRef.current !== total) {
@@ -1117,6 +1280,55 @@ export default function POS() {
       </div>
 
       {/* Fiscal Dialog Simulation */}
+      <Dialog
+        open={showPixQrDialog}
+        onOpenChange={(open) => {
+          if (paymentStatus === "processing") return;
+          setShowPixQrDialog(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>PIX - QR Code</DialogTitle>
+            <DialogDescription>
+              Peça para o cliente escanear o QR Code abaixo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {paymentResult?.qrCodeBase64 ? (
+              <img
+                src={`data:image/png;base64,${paymentResult.qrCodeBase64}`}
+                alt="QR PIX"
+                className="mx-auto h-64 w-64 rounded border"
+              />
+            ) : (
+              <div className="text-sm text-muted-foreground text-center">
+                QR em processamento...
+              </div>
+            )}
+            <Input
+              readOnly
+              value={paymentResult?.qrCode || ""}
+              placeholder="Codigo PIX copia e cola"
+            />
+            <Button
+              variant="outline"
+              onClick={async () => {
+                const code = paymentResult?.qrCode || "";
+                if (!code) return;
+                await navigator.clipboard.writeText(code).catch(() => null);
+                toast({
+                  title: "Copiado",
+                  description: "Codigo PIX copiado para a area de transferencia.",
+                });
+              }}
+            >
+              Copiar codigo PIX
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={isFinishing}
         onOpenChange={(open) =>
