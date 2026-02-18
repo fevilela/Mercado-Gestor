@@ -169,7 +169,11 @@ export default function SefazIntegration() {
       });
       return;
     }
-    apiCall("/api/fiscal/sefaz/submit", { nfeId: selectedNFe, environment });
+    apiCall("/api/fiscal/sefaz/submit", {
+      nfeLogId: selectedNFe,
+      environment,
+      uf,
+    });
   };
 
   const cancelNFe = () => {

@@ -27,12 +27,15 @@ import {
 } from "./nfce-emitter";
 import { getIbgeMunicipioCode } from "./ibge-municipios";
 import { storage } from "./storage";
+import { db } from "./db";
+import { sefazTransmissionLogs } from "@shared/schema";
 import {
   requireAuth,
   getCompanyId,
   requirePermission,
   requireValidFiscalCertificate,
 } from "./middleware";
+import { and, desc, eq } from "drizzle-orm";
 import * as soap from "soap";
 import * as fs from "fs";
 import * as crypto from "crypto";
@@ -111,13 +114,261 @@ const router = Router();
 const extractAccessKey = (xmlContent: string): string => {
   const chMatch = xmlContent.match(/<chNFe>(\d{44})<\/chNFe>/);
   if (chMatch?.[1]) return chMatch[1];
-  const idMatch = xmlContent.match(/<infNFe[^>]*Id="NFe(\d{44})"/);
+  const idMatch = xmlContent.match(/<infNFe[^>]*Id="NFe(\d+)"/);
   return idMatch?.[1] ?? "";
 };
 
 const extractXmlTag = (xmlContent: string, tag: string): string => {
   const match = xmlContent.match(new RegExp(`<${tag}>([^<]+)</${tag}>`));
   return match?.[1] ?? "";
+};
+
+const stripXmlSignature = (xmlContent: string): string =>
+  String(xmlContent || "")
+    .replace(
+      /<([A-Za-z_][\w.-]*:)?Signature\b[\s\S]*?<\/([A-Za-z_][\w.-]*:)?Signature>/g,
+      "",
+    )
+    .trim();
+
+const forceXmlTpAmb = (xmlContent: string, tpAmb: "1" | "2"): string => {
+  if (/<tpAmb>\d<\/tpAmb>/.test(xmlContent)) {
+    return xmlContent.replace(/<tpAmb>\d<\/tpAmb>/, `<tpAmb>${tpAmb}</tpAmb>`);
+  }
+  return xmlContent;
+};
+
+const normalizeLegacyNfeXml = (xmlContent: string): string => {
+  const source = String(xmlContent || "");
+  const pick = (tag: string, fallback = "") =>
+    source.match(new RegExp(`<${tag}>([^<]+)</${tag}>`, "i"))?.[1]?.trim() ||
+    fallback;
+  const num = (value: string, size: number) =>
+    String(value || "")
+      .replace(/\D/g, "")
+      .padStart(size, "0")
+      .slice(-size);
+  const money = (value: string, fallback = "0.00") => {
+    const n = Number(String(value || "").replace(",", "."));
+    return Number.isFinite(n) ? n.toFixed(2) : fallback;
+  };
+  const qty = (value: string, fallback = "1.0000") => {
+    const n = Number(String(value || "").replace(",", "."));
+    return Number.isFinite(n) ? n.toFixed(4) : fallback;
+  };
+  const normDate = (value: string) => {
+    if (!value) return new Date().toISOString().replace("Z", "-03:00");
+    if (/[+-]\d{2}:\d{2}$/.test(value)) return value;
+    if (/Z$/.test(value)) return value.replace("Z", "-03:00");
+    return `${value}-03:00`;
+  };
+  const esc = (value: string) =>
+    String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+
+  const infId = source.match(/<infNFe[^>]*Id="([^"]+)"/i)?.[1] || "";
+  const cUF = num(pick("cUF", "31"), 2);
+  const cNF = num(pick("cNF", "00000000"), 8);
+  const mod = "55";
+  const serie = String(parseInt(num(pick("serie", "1"), 3), 10));
+  const nNF = String(parseInt(num(pick("nNF", "1"), 9), 10));
+  const dhEmi = normDate(pick("dhEmi"));
+  const tpNF = pick("tpNF", "1");
+  const idDest = pick("idDest", "1");
+  const cMunFG = num(pick("cMunFG", "3138203"), 7);
+  const tpImp = pick("tpImp", "1");
+  const tpEmis = pick("tpEmis", "1");
+  const cDV = pick("cDV", "0");
+  const tpAmb = pick("tpAmb", "2");
+  const finNFe = pick("finNFe", "1");
+  const indFinal = pick("indFinal", "1");
+  const indPres = pick("indPres", "1");
+  const procEmi = pick("procEmi", "0");
+  const verProc = pick("verProc", "4.0");
+
+  const emitCnpj = num(pick("CNPJ", "00000000000000"), 14);
+  const xNome = esc(pick("xNome", "EMPRESA"));
+  const emitIE = pick("IE", "ISENTO").replace(/\D/g, "") || "ISENTO";
+  const crt = pick("CRT", "1");
+  const emitUf = pick("UF", "MG").toUpperCase();
+  const emitCMun = num(pick("cMun", cMunFG), 7);
+  const emitXMun = esc(pick("xMun", "LAVRAS"));
+  const emitXlgr = esc(pick("xLgr", "RUA NAO INFORMADA"));
+  const emitNro = esc(pick("nro", "S/N"));
+  const emitXBairro = esc(pick("xBairro", "CENTRO"));
+  const emitCep = num(pick("CEP", "37200000"), 8);
+
+  const destCpf = num(pick("CPF", "00000000000"), 11);
+  const destNome = esc(pick("xNome", "CONSUMIDOR"));
+  const destUf = pick("UF", emitUf || "MG").toUpperCase();
+  const destCMun = num(pick("cMun", emitCMun || cMunFG), 7);
+  const destXMun = esc(pick("xMun", emitXMun || "LAVRAS"));
+  const destXlgr = esc(pick("xLgr", "RUA NAO INFORMADA"));
+  const destNro = esc(pick("nro", "S/N"));
+  const destXBairro = esc(pick("xBairro", "CENTRO"));
+  const destCep = num(pick("CEP", emitCep || "37200000"), 8);
+
+  const cProd = esc(pick("cProd", pick("code", "1")));
+  const cEAN = pick("cEAN", "SEM GTIN");
+  const xProd = esc(pick("xProd", "PRODUTO"));
+  const ncm = num(pick("NCM", "00000000"), 8);
+  const cfop = num(pick("CFOP", "5102"), 4);
+  const uCom = pick("uCom", "UN");
+  const qCom = qty(pick("qCom", "1.0000"));
+  const vUnCom = money(pick("vUnCom", "0.01"), "0.01");
+  const vProd = money(pick("vProd", pick("vItem", "0.01")), "0.01");
+
+  const vBC = money(pick("vBC", vProd), vProd);
+  const pICMS = money(pick("pICMS", "0"), "0.00");
+  const vICMS = money(pick("vICMS", "0"), "0.00");
+  const vNF = money(pick("vNF", vProd), vProd);
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+  <infNFe Id="${esc(infId)}" versao="4.00">
+    <ide>
+      <cUF>${cUF}</cUF>
+      <cNF>${cNF}</cNF>
+      <natOp>Venda</natOp>
+      <mod>${mod}</mod>
+      <serie>${serie}</serie>
+      <nNF>${nNF}</nNF>
+      <dhEmi>${dhEmi}</dhEmi>
+      <tpNF>${tpNF}</tpNF>
+      <idDest>${idDest}</idDest>
+      <cMunFG>${cMunFG}</cMunFG>
+      <tpImp>${tpImp}</tpImp>
+      <tpEmis>${tpEmis}</tpEmis>
+      <cDV>${cDV}</cDV>
+      <tpAmb>${tpAmb}</tpAmb>
+      <finNFe>${finNFe}</finNFe>
+      <indFinal>${indFinal}</indFinal>
+      <indPres>${indPres}</indPres>
+      <procEmi>${procEmi}</procEmi>
+      <verProc>${esc(verProc)}</verProc>
+    </ide>
+    <emit>
+      <CNPJ>${emitCnpj}</CNPJ>
+      <xNome>${xNome}</xNome>
+      <enderEmit>
+        <xLgr>${emitXlgr}</xLgr>
+        <nro>${emitNro}</nro>
+        <xBairro>${emitXBairro}</xBairro>
+        <cMun>${emitCMun}</cMun>
+        <xMun>${emitXMun}</xMun>
+        <UF>${emitUf}</UF>
+        <CEP>${emitCep}</CEP>
+        <cPais>1058</cPais>
+        <xPais>BRASIL</xPais>
+      </enderEmit>
+      <IE>${emitIE}</IE>
+      <CRT>${crt}</CRT>
+    </emit>
+    <dest>
+      <CPF>${destCpf}</CPF>
+      <xNome>${destNome}</xNome>
+      <enderDest>
+        <xLgr>${destXlgr}</xLgr>
+        <nro>${destNro}</nro>
+        <xBairro>${destXBairro}</xBairro>
+        <cMun>${destCMun}</cMun>
+        <xMun>${destXMun}</xMun>
+        <UF>${destUf}</UF>
+        <CEP>${destCep}</CEP>
+        <cPais>1058</cPais>
+        <xPais>BRASIL</xPais>
+      </enderDest>
+      <indIEDest>9</indIEDest>
+    </dest>
+    <det nItem="1">
+      <prod>
+        <cProd>${cProd}</cProd>
+        <cEAN>${esc(cEAN)}</cEAN>
+        <xProd>${xProd}</xProd>
+        <NCM>${ncm}</NCM>
+        <CFOP>${cfop}</CFOP>
+        <uCom>${esc(uCom)}</uCom>
+        <qCom>${qCom}</qCom>
+        <vUnCom>${vUnCom}</vUnCom>
+        <vProd>${vProd}</vProd>
+        <cEANTrib>${esc(cEAN)}</cEANTrib>
+        <uTrib>${esc(uCom)}</uTrib>
+        <qTrib>${qCom}</qTrib>
+        <vUnTrib>${vUnCom}</vUnTrib>
+        <indTot>1</indTot>
+      </prod>
+      <imposto>
+        <ICMS>
+          <ICMS00>
+            <orig>0</orig>
+            <CST>00</CST>
+            <modBC>3</modBC>
+            <vBC>${vBC}</vBC>
+            <pICMS>${pICMS}</pICMS>
+            <vICMS>${vICMS}</vICMS>
+          </ICMS00>
+        </ICMS>
+        <PIS><PISNT><CST>07</CST></PISNT></PIS>
+        <COFINS><COFINSNT><CST>07</CST></COFINSNT></COFINS>
+      </imposto>
+    </det>
+    <total>
+      <ICMSTot>
+        <vBC>${vBC}</vBC>
+        <vICMS>${vICMS}</vICMS>
+        <vICMSDeson>0.00</vICMSDeson>
+        <vFCP>0.00</vFCP>
+        <vBCST>0.00</vBCST>
+        <vST>0.00</vST>
+        <vFCPST>0.00</vFCPST>
+        <vFCPSTRet>0.00</vFCPSTRet>
+        <vProd>${vProd}</vProd>
+        <vFrete>0.00</vFrete>
+        <vSeg>0.00</vSeg>
+        <vDesc>0.00</vDesc>
+        <vII>0.00</vII>
+        <vIPI>0.00</vIPI>
+        <vIPIDevol>0.00</vIPIDevol>
+        <vPIS>0.00</vPIS>
+        <vCOFINS>0.00</vCOFINS>
+        <vOutro>0.00</vOutro>
+        <vNF>${vNF}</vNF>
+        <vTotTrib>0.00</vTotTrib>
+      </ICMSTot>
+    </total>
+    <transp><modFrete>9</modFrete></transp>
+    <pag><detPag><tPag>01</tPag><vPag>${vNF}</vPag></detPag></pag>
+  </infNFe>
+</NFe>`;
+};
+
+const resolveDocumentKeyFromLog = (log: any): string => {
+  const requestPayload = (log?.requestPayload || {}) as any;
+  const responsePayload = (log?.responsePayload || {}) as any;
+
+  const fromResponseKey = String(responsePayload?.key || "").trim();
+  if (fromResponseKey) return fromResponseKey.replace(/\D/g, "");
+
+  const fromRequestKey = String(requestPayload?.accessKey || "").trim();
+  if (fromRequestKey) return fromRequestKey.replace(/\D/g, "");
+
+  const fromResponseXml = String(responsePayload?.xml || "").trim();
+  if (fromResponseXml) {
+    const extracted = extractAccessKey(fromResponseXml);
+    if (extracted) return extracted;
+  }
+
+  const fromRequestXml = String(requestPayload?.xmlContent || "").trim();
+  if (fromRequestXml) {
+    const extracted = extractAccessKey(fromRequestXml);
+    if (extracted) return extracted;
+  }
+
+  return "";
 };
 
 const parseNfceAccessKey = (key: string) => {
@@ -1823,21 +2074,55 @@ router.post(
         });
       }
 
-      // Gerar XML com assinatura
+      const resolvedEnvironment = await resolveSefazEnvironment(
+        companyId,
+        environment,
+      );
+
+      const company = await storage.getCompanyById(companyId);
+      const settings = await storage.getCompanySettings(companyId);
+      const ufNormalized = String(
+        settings?.sefazUf || company?.state || "MG",
+      ).toUpperCase();
+
+      // Gerar XML base e assinar com a mesma stack de assinatura usada no envio.
       const { NFEGenerator } = await import("./nfe-generator");
-      const nfeResult = NFEGenerator.generateXML(
+      const generated = NFEGenerator.generateXML(
         config,
         series,
+        undefined,
+        undefined,
+        resolvedEnvironment,
+      );
+
+      const sefazService = new SefazService({
+        environment: resolvedEnvironment,
+        uf: ufNormalized,
         certificateBuffer,
         certificatePassword,
-      );
+        cnpj: String(config?.cnpj || "").replace(/\D/g, ""),
+      });
+      const signedXml = await sefazService.signNFe(generated.xml);
+      const documentKey = extractAccessKey(signedXml);
+      await logSefazTransmission({
+        companyId,
+        action: "generate",
+        environment: resolvedEnvironment,
+        requestPayload: { config, series },
+        responsePayload: {
+          xml: signedXml,
+          signed: true,
+          key: documentKey || undefined,
+        },
+        success: true,
+      });
 
       res.json({
         success: true,
-        xml: nfeResult.xml,
-        signed: nfeResult.signed,
-        message: `NF-e ${nfeResult.signed ? "assinada" : "gerada"}`,
-        readyForSubmission: nfeResult.signed,
+        xml: signedXml,
+        signed: true,
+        message: "NF-e assinada",
+        readyForSubmission: true,
       });
     } catch (error) {
       res.status(400).json({
@@ -1847,10 +2132,384 @@ router.post(
   },
 );
 
-// Listar notas fiscais pendentes de envio
-router.get("/nfe/pending", async (req, res) => {
+// Historico de NF-e geradas/submetidas/canceladas
+router.get("/nfe/history", requireAuth, async (req, res) => {
   try {
-    res.json([]);
+    const companyId = getCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ error: "Empresa nao identificada" });
+    }
+
+    const logs = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(
+        and(
+          eq(sefazTransmissionLogs.companyId, companyId),
+          eq(sefazTransmissionLogs.action, "generate"),
+        ),
+      )
+      .orderBy(desc(sefazTransmissionLogs.createdAt))
+      .limit(200);
+
+    const submitLogs = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(
+        and(
+          eq(sefazTransmissionLogs.companyId, companyId),
+          eq(sefazTransmissionLogs.action, "submit"),
+        ),
+      )
+      .orderBy(desc(sefazTransmissionLogs.createdAt))
+      .limit(500);
+
+    const cancelLogs = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(
+        and(
+          eq(sefazTransmissionLogs.companyId, companyId),
+          eq(sefazTransmissionLogs.action, "cancel"),
+        ),
+      )
+      .orderBy(desc(sefazTransmissionLogs.createdAt))
+      .limit(500);
+
+    const latestSubmitByKey = new Map<string, any>();
+    const latestCancelByKey = new Map<string, any>();
+
+    for (const log of submitLogs) {
+      const key = resolveDocumentKeyFromLog(log);
+      if (!key || latestSubmitByKey.has(key)) continue;
+      latestSubmitByKey.set(key, log);
+    }
+
+    for (const log of cancelLogs) {
+      const key = resolveDocumentKeyFromLog(log);
+      if (!key || latestCancelByKey.has(key)) continue;
+      latestCancelByKey.set(key, log);
+    }
+
+    const history = logs.map((log) => {
+      const responsePayload = (log.responsePayload || {}) as any;
+      const documentKey = resolveDocumentKeyFromLog(log);
+      const xmlContent = String(responsePayload?.xml || "");
+      const nfeNumber = extractXmlTag(xmlContent, "nNF");
+      const nfeSeries = extractXmlTag(xmlContent, "serie");
+
+      const submit = documentKey ? latestSubmitByKey.get(documentKey) : null;
+      const cancel = documentKey ? latestCancelByKey.get(documentKey) : null;
+      const submitPayload = (submit?.responsePayload || {}) as any;
+
+      let status = "gerada";
+      if (submit?.success) status = "autorizada";
+      if (cancel?.success) status = "cancelada";
+      const submitStatusCode = String(submitPayload?.status || "").trim();
+      if (!submit?.success && submitStatusCode === "103" && status === "gerada") {
+        status = "processando";
+      }
+
+      return {
+        id: log.id,
+        documentKey,
+        nfeNumber: nfeNumber || null,
+        nfeSeries: nfeSeries || null,
+        environment: log.environment,
+        xmlContent,
+        protocol: String(submitPayload?.protocol || ""),
+        status,
+        canSend: status === "gerada",
+        canCancel: status === "autorizada" && Boolean(submitPayload?.protocol),
+        createdAt: log.createdAt,
+        updatedAt:
+          cancel?.createdAt || submit?.createdAt || log.createdAt || new Date(),
+      };
+    });
+
+    res.json(history);
+  } catch (error) {
+    res.status(400).json({
+      error:
+        error instanceof Error ? error.message : "Erro ao buscar historico NF-e",
+    });
+  }
+});
+
+router.post(
+  "/nfe/re-sign",
+  requireAuth,
+  requireValidFiscalCertificate(),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Empresa nao identificada" });
+      }
+
+      const { nfeLogId, xmlContent: editedXmlContent, environment } = req.body || {};
+      const selectedLogId = Number(nfeLogId);
+      if (!Number.isFinite(selectedLogId) || selectedLogId <= 0) {
+        return res.status(400).json({ error: "nfeLogId invalido" });
+      }
+
+      const generateLogs = await db
+        .select()
+        .from(sefazTransmissionLogs)
+        .where(
+          and(
+            eq(sefazTransmissionLogs.id, selectedLogId),
+            eq(sefazTransmissionLogs.companyId, companyId),
+            eq(sefazTransmissionLogs.action, "generate"),
+          ),
+        )
+        .limit(1);
+
+      const generateLog = generateLogs[0];
+      if (!generateLog) {
+        return res.status(404).json({ error: "NF-e nao encontrada" });
+      }
+
+      const generatePayload = (generateLog.responsePayload || {}) as any;
+      const sourceXml = String(editedXmlContent || generatePayload?.xml || "").trim();
+      if (!sourceXml) {
+        return res.status(400).json({ error: "XML da NF-e nao encontrado" });
+      }
+
+      const documentKey = resolveDocumentKeyFromLog(generateLog) || extractAccessKey(sourceXml);
+      if (!documentKey) {
+        return res.status(400).json({ error: "Nao foi possivel identificar a chave da NF-e" });
+      }
+
+      const submitLogs = await db
+        .select()
+        .from(sefazTransmissionLogs)
+        .where(
+          and(
+            eq(sefazTransmissionLogs.companyId, companyId),
+            eq(sefazTransmissionLogs.action, "submit"),
+          ),
+        )
+        .orderBy(desc(sefazTransmissionLogs.createdAt))
+        .limit(500);
+
+      const cancelLogs = await db
+        .select()
+        .from(sefazTransmissionLogs)
+        .where(
+          and(
+            eq(sefazTransmissionLogs.companyId, companyId),
+            eq(sefazTransmissionLogs.action, "cancel"),
+          ),
+        )
+        .orderBy(desc(sefazTransmissionLogs.createdAt))
+        .limit(500);
+
+      const latestSubmit = submitLogs.find(
+        (log) => resolveDocumentKeyFromLog(log) === documentKey,
+      );
+      const latestCancel = cancelLogs.find(
+        (log) => resolveDocumentKeyFromLog(log) === documentKey,
+      );
+
+      if (latestSubmit?.success || latestCancel?.success) {
+        return res.status(409).json({
+          error:
+            "NF-e ja autorizada/cancelada. Nao e permitido editar e reassinar esse documento.",
+        });
+      }
+
+      const resolvedEnvironment = await resolveSefazEnvironment(
+        companyId,
+        environment,
+      );
+      const expectedTpAmb: "1" | "2" =
+        resolvedEnvironment === "producao" ? "1" : "2";
+
+      const infNFeId = sourceXml.match(/<infNFe[^>]*Id="([^"]+)"/)?.[1];
+      if (!infNFeId) {
+        return res.status(400).json({ error: "XML invalido: infNFe Id nao encontrado" });
+      }
+
+      const normalizedXml = normalizeLegacyNfeXml(sourceXml);
+      const unsignedXml = forceXmlTpAmb(
+        stripXmlSignature(normalizedXml),
+        expectedTpAmb,
+      );
+      if (!/<tpAmb>[12]<\/tpAmb>/.test(unsignedXml)) {
+        return res.status(400).json({
+          error: "XML invalido: tag tpAmb nao encontrada para ajuste de ambiente",
+        });
+      }
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado para esta empresa",
+        });
+      }
+
+      const certificateBase64 = certificateBuffer.toString("base64");
+      const signedXml = XMLSignatureService.signXML(
+        unsignedXml,
+        certificateBase64,
+        certificatePassword,
+        infNFeId,
+      );
+      const resignedKey = extractAccessKey(signedXml) || documentKey;
+
+      await db
+        .update(sefazTransmissionLogs)
+        .set({
+          environment: resolvedEnvironment,
+          requestPayload: {
+            ...((generateLog.requestPayload || {}) as any),
+            reSignedAt: new Date().toISOString(),
+            reSignedFromHistory: true,
+          },
+          responsePayload: {
+            ...generatePayload,
+            xml: signedXml,
+            signed: true,
+            key: resignedKey,
+          },
+          success: true,
+        })
+        .where(
+          and(
+            eq(sefazTransmissionLogs.id, selectedLogId),
+            eq(sefazTransmissionLogs.companyId, companyId),
+            eq(sefazTransmissionLogs.action, "generate"),
+          ),
+        );
+
+      await logSefazTransmission({
+        companyId,
+        action: "re-sign",
+        environment: resolvedEnvironment,
+        requestPayload: {
+          nfeLogId: selectedLogId,
+          key: resignedKey,
+        },
+        responsePayload: {
+          success: true,
+          key: resignedKey,
+        },
+        success: true,
+      });
+
+      res.json({
+        success: true,
+        message: "NF-e editada e reassinada com sucesso",
+        key: resignedKey,
+        signed: true,
+        environment: resolvedEnvironment,
+        readyForSubmission: true,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao editar e reassinar NF-e",
+      });
+    }
+  },
+);
+
+// Listar notas fiscais pendentes de envio (compatibilidade)
+router.get("/nfe/pending", requireAuth, async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ error: "Empresa nao identificada" });
+    }
+
+    const generateLogs = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(
+        and(
+          eq(sefazTransmissionLogs.companyId, companyId),
+          eq(sefazTransmissionLogs.action, "generate"),
+        ),
+      )
+      .orderBy(desc(sefazTransmissionLogs.createdAt))
+      .limit(200);
+
+    const submitLogs = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(
+        and(
+          eq(sefazTransmissionLogs.companyId, companyId),
+          eq(sefazTransmissionLogs.action, "submit"),
+        ),
+      )
+      .orderBy(desc(sefazTransmissionLogs.createdAt))
+      .limit(400);
+
+    const cancelLogs = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(
+        and(
+          eq(sefazTransmissionLogs.companyId, companyId),
+          eq(sefazTransmissionLogs.action, "cancel"),
+        ),
+      )
+      .orderBy(desc(sefazTransmissionLogs.createdAt))
+      .limit(400);
+
+    const latestSubmitByKey = new Map<string, (typeof submitLogs)[number]>();
+    for (const log of submitLogs) {
+      const key = resolveDocumentKeyFromLog(log);
+      if (!key || latestSubmitByKey.has(key)) continue;
+      latestSubmitByKey.set(key, log);
+    }
+
+    const latestCancelByKey = new Map<string, (typeof cancelLogs)[number]>();
+    for (const log of cancelLogs) {
+      const key = resolveDocumentKeyFromLog(log);
+      if (!key || latestCancelByKey.has(key)) continue;
+      latestCancelByKey.set(key, log);
+    }
+
+    const pending = generateLogs
+      .map((log) => {
+        const responsePayload = (log.responsePayload || {}) as any;
+        const xmlContent = String(responsePayload?.xml || "");
+        const documentKey = resolveDocumentKeyFromLog(log);
+        const submit = documentKey ? latestSubmitByKey.get(documentKey) : null;
+        const cancel = documentKey ? latestCancelByKey.get(documentKey) : null;
+
+        const submitStatusCode = String(
+          ((submit?.responsePayload || {}) as any)?.status || "",
+        ).trim();
+        if (submit?.success || cancel?.success || submitStatusCode === "103") {
+          return null;
+        }
+
+        const nfeNumber = extractXmlTag(xmlContent, "nNF");
+        const nfeSeries = extractXmlTag(xmlContent, "serie");
+        return {
+          id: log.id,
+          nfeNumber: nfeNumber || undefined,
+          nfeSeries: nfeSeries || undefined,
+          saleId: undefined,
+          status: "gerada",
+          environment: log.environment,
+          createdAt: log.createdAt,
+        };
+      })
+      .filter(Boolean);
+
+    res.json(pending);
   } catch (error) {
     res.status(400).json({
       error:
@@ -1869,19 +2528,58 @@ router.post(
   requireValidFiscalCertificate(),
   async (req, res) => {
     try {
-      const { xmlContent, environment, uf } = req.body;
+      const {
+        xmlContent: rawXmlContent,
+        environment,
+        uf,
+        nfeLogId,
+        nfeId,
+      } = req.body || {};
       const companyId = getCompanyId(req);
-
-      if (!xmlContent) {
-        return res.status(400).json({ error: "XML content e obrigatorio" });
-      }
-
-      if (!uf) {
-        return res.status(400).json({ error: "UF e obrigatoria" });
-      }
 
       if (!companyId) {
         return res.status(401).json({ error: "Empresa nao identificada" });
+      }
+
+      let xmlContent = String(rawXmlContent || "").trim();
+      const selectedLogId = Number(nfeLogId ?? nfeId);
+      if (!xmlContent && Number.isFinite(selectedLogId) && selectedLogId > 0) {
+        const generatedLog = await db
+          .select()
+          .from(sefazTransmissionLogs)
+          .where(
+            and(
+              eq(sefazTransmissionLogs.id, selectedLogId),
+              eq(sefazTransmissionLogs.companyId, companyId),
+              eq(sefazTransmissionLogs.action, "generate"),
+            ),
+          )
+          .limit(1);
+
+        const selected = generatedLog[0];
+        if (!selected) {
+          return res.status(404).json({ error: "NF-e selecionada nao encontrada" });
+        }
+
+        const responsePayload = (selected.responsePayload || {}) as any;
+        xmlContent = String(responsePayload?.xml || "").trim();
+      }
+
+      if (!xmlContent) {
+        return res.status(400).json({
+          error: "XML content e obrigatorio (ou informe nfeLogId)",
+        });
+      }
+
+      const appearsLegacyXml =
+        /<code>[\s\S]*<\/code>/i.test(xmlContent) ||
+        /<vItem>[\s\S]*<\/vItem>/i.test(xmlContent) ||
+        !/<natOp>[\s\S]*<\/natOp>/i.test(xmlContent);
+      const missingRequiredAddressBlocks =
+        !/<enderEmit>[\s\S]*<\/enderEmit>/i.test(xmlContent) ||
+        !/<enderDest>[\s\S]*<\/enderDest>/i.test(xmlContent);
+      if (appearsLegacyXml || missingRequiredAddressBlocks) {
+        xmlContent = normalizeLegacyNfeXml(stripXmlSignature(xmlContent));
       }
 
       const resolvedEnvironment = await resolveSefazEnvironment(
@@ -1893,6 +2591,11 @@ router.post(
       if (!company) {
         return res.status(400).json({ error: "Empresa nao configurada" });
       }
+
+      const settings = await storage.getCompanySettings(companyId);
+      const ufNormalized = String(
+        uf || settings?.sefazUf || company.state || "SP",
+      ).toUpperCase();
 
       const { CertificateService } = await import("./certificate-service");
       const certService = new CertificateService();
@@ -1906,7 +2609,6 @@ router.post(
         });
       }
 
-      const ufNormalized = String(uf).toUpperCase();
       const sefazService = new SefazService({
         environment: resolvedEnvironment,
         uf: ufNormalized,
@@ -1922,7 +2624,12 @@ router.post(
         companyId,
         action: "submit",
         environment: resolvedEnvironment,
-        requestPayload: { xmlContent: signedXml, uf: ufNormalized, signed },
+        requestPayload: {
+          xmlContent: signedXml,
+          uf: ufNormalized,
+          signed,
+          nfeLogId: Number.isFinite(selectedLogId) ? selectedLogId : null,
+        },
         responsePayload: result,
         success: result.success,
       });
@@ -1943,10 +2650,24 @@ router.post(
           });
         }
       }
+      if (!result.success) {
+        return res.status(400).json({
+          ...result,
+          signed,
+          error: result.message || "Falha ao enviar NF-e para a SEFAZ",
+        });
+      }
+
+      const statusCode = String(result.status || "").trim();
+      const successMessage =
+        statusCode === "100" || statusCode === "150"
+          ? "NF-e autorizada pela SEFAZ"
+          : "NF-e recebida pela SEFAZ e em processamento";
+
       res.json({
         ...result,
         signed,
-        message: `NF-e ${signed ? "assinada" : "gerada"} e enviada para SEFAZ`,
+        message: successMessage,
       });
     } catch (error) {
       const companyId = getCompanyId(req);

@@ -7,6 +7,7 @@ import {
   productVariations,
   productMedia,
   kitItems,
+  referenceTables,
   customers,
   suppliers,
   digitalCertificates,
@@ -40,6 +41,7 @@ import fiscalRouter from "./fiscal-routes";
 import { XMLSignatureService } from "./xml-signature";
 import {
   authorizePayment,
+  cancelMercadoPagoByReference,
   createMercadoPagoPixQr,
   clearMercadoPagoTerminalQueue,
   getMercadoPagoOrderStatus,
@@ -503,7 +505,7 @@ export async function registerRoutes(
   app.post(
     "/api/customers",
     requireAuth,
-    requirePermission("customers:manage"),
+    requirePermission("customers:create"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -528,7 +530,7 @@ export async function registerRoutes(
   app.patch(
     "/api/customers/:id",
     requireAuth,
-    requirePermission("customers:manage"),
+    requirePermission("customers:edit"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -554,7 +556,7 @@ export async function registerRoutes(
   app.delete(
     "/api/customers/:id",
     requireAuth,
-    requirePermission("customers:manage"),
+    requirePermission("customers:delete"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -592,7 +594,7 @@ export async function registerRoutes(
   app.post(
     "/api/suppliers",
     requireAuth,
-    requirePermission("suppliers:manage"),
+    requirePermission("suppliers:create"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -617,7 +619,7 @@ export async function registerRoutes(
   app.patch(
     "/api/suppliers/:id",
     requireAuth,
-    requirePermission("suppliers:manage"),
+    requirePermission("suppliers:edit"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -643,7 +645,7 @@ export async function registerRoutes(
   app.delete(
     "/api/suppliers/:id",
     requireAuth,
-    requirePermission("suppliers:manage"),
+    requirePermission("suppliers:delete"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -747,6 +749,10 @@ export async function registerRoutes(
   });
   const mpClearQueueSchema = z.object({
     terminalId: z.string().optional(),
+    providerReference: z.string().optional(),
+  });
+  const mpCancelSchema = z.object({
+    providerReference: z.string().min(1),
   });
   const stoneValidationSchema = z.object({
     clientId: z.string().min(1),
@@ -788,6 +794,47 @@ export async function registerRoutes(
         res.status(500).json({
           error:
             error instanceof Error ? error.message : "Erro ao gerar QR PIX",
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/payments/mercadopago/cancel",
+    requireAuth,
+    requirePermission("pos:sell"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { providerReference } = mpCancelSchema.parse(req.body || {});
+        const settings = await storage.getCompanySettings(companyId);
+        if (!settings?.mpAccessToken) {
+          return res.status(400).json({ error: "Mercado Pago nao configurado" });
+        }
+        const result = await cancelMercadoPagoByReference({
+          accessToken: settings.mpAccessToken,
+          providerReference,
+        });
+        if (!result?.ok) {
+          return res.status(409).json({
+            error:
+              "Nao foi possivel cancelar a cobranca na maquininha. Cancele diretamente no terminal.",
+            ...result,
+          });
+        }
+        res.json(result);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Falha ao cancelar cobranca no Mercado Pago",
         });
       }
     }
@@ -961,6 +1008,11 @@ export async function registerRoutes(
     requirePermission("pos:sell"),
     async (req, res) => {
       try {
+        res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+        res.set("Pragma", "no-cache");
+        res.set("Expires", "0");
+        res.set("Surrogate-Control", "no-store");
+
         const companyId = getCompanyId(req);
         if (!companyId)
           return res.status(401).json({ error: "Nao autenticado" });
@@ -999,7 +1051,9 @@ export async function registerRoutes(
         if (!companyId)
           return res.status(401).json({ error: "Nao autenticado" });
 
-        const { terminalId } = mpClearQueueSchema.parse(req.body || {});
+        const { terminalId, providerReference } = mpClearQueueSchema.parse(
+          req.body || {}
+        );
         const settings = await storage.getCompanySettings(companyId);
         if (!settings?.mpAccessToken) {
           return res.status(400).json({ error: "Mercado Pago nao configurado" });
@@ -1011,8 +1065,16 @@ export async function registerRoutes(
 
         const result = await clearMercadoPagoTerminalQueue(
           settings.mpAccessToken,
-          terminalRef
+          terminalRef,
+          providerReference
         );
+        if (!result?.ok) {
+          return res.status(409).json({
+            error:
+              "Nao foi possivel limpar a fila da maquininha automaticamente.",
+            ...result,
+          });
+        }
         res.json(result);
       } catch (error) {
         if (error instanceof z.ZodError) {
@@ -1302,6 +1364,19 @@ export async function registerRoutes(
     isActive: z.boolean().optional(),
     sortOrder: z.number().int().optional(),
   });
+  const referenceTableTypeSchema = z.enum([
+    "classificacao_mercadologica",
+    "infos_adicionais",
+    "infos_complementares",
+    "infos_nutricionais",
+    "etiquetas",
+  ]);
+  const referenceTableSchema = z.object({
+    code: z.string().optional(),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    isActive: z.boolean().optional(),
+  });
 
   app.get(
     "/api/payment-methods",
@@ -1402,6 +1477,157 @@ export async function registerRoutes(
         res.json({ success: true });
       } catch (error) {
         res.status(500).json({ error: "Failed to delete payment method" });
+      }
+    }
+  );
+
+  // ============================================
+  // REFERENCE TABLES
+  // ============================================
+  app.get(
+    "/api/reference-tables/:type",
+    requireAuth,
+    requirePermission("inventory:view", "settings:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const type = referenceTableTypeSchema.parse(req.params.type);
+        const rows = await db
+          .select()
+          .from(referenceTables)
+          .where(
+            and(
+              eq(referenceTables.companyId, companyId),
+              eq(referenceTables.type, type)
+            )
+          )
+          .orderBy(referenceTables.name);
+        res.json(rows);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Falha ao carregar tabela" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/reference-tables/:type",
+    requireAuth,
+    requirePermission("inventory:manage", "settings:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const type = referenceTableTypeSchema.parse(req.params.type);
+        const payload = referenceTableSchema.parse(req.body);
+        const [created] = await db
+          .insert(referenceTables)
+          .values({
+            companyId,
+            type,
+            code: payload.code?.trim() || null,
+            name: payload.name.trim(),
+            description: payload.description?.trim() || null,
+            isActive: payload.isActive ?? true,
+          })
+          .returning();
+        res.status(201).json(created);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Falha ao cadastrar item" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/reference-tables/:type/:id",
+    requireAuth,
+    requirePermission("inventory:manage", "settings:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const type = referenceTableTypeSchema.parse(req.params.type);
+        const id = parseInt(req.params.id, 10);
+        const payload = referenceTableSchema.partial().parse(req.body);
+        const [updated] = await db
+          .update(referenceTables)
+          .set({
+            ...(payload.code !== undefined
+              ? { code: payload.code?.trim() || null }
+              : {}),
+            ...(payload.name !== undefined ? { name: payload.name.trim() } : {}),
+            ...(payload.description !== undefined
+              ? { description: payload.description?.trim() || null }
+              : {}),
+            ...(payload.isActive !== undefined
+              ? { isActive: payload.isActive }
+              : {}),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(referenceTables.id, id),
+              eq(referenceTables.companyId, companyId),
+              eq(referenceTables.type, type)
+            )
+          )
+          .returning();
+        if (!updated) {
+          return res.status(404).json({ error: "Item nao encontrado" });
+        }
+        res.json(updated);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Falha ao atualizar item" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/reference-tables/:type/:id",
+    requireAuth,
+    requirePermission("inventory:manage", "settings:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+        const type = referenceTableTypeSchema.parse(req.params.type);
+        const id = parseInt(req.params.id, 10);
+        const [deleted] = await db
+          .delete(referenceTables)
+          .where(
+            and(
+              eq(referenceTables.id, id),
+              eq(referenceTables.companyId, companyId),
+              eq(referenceTables.type, type)
+            )
+          )
+          .returning();
+        if (!deleted) {
+          return res.status(404).json({ error: "Item nao encontrado" });
+        }
+        res.json({ success: true });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Falha ao excluir item" });
       }
     }
   );

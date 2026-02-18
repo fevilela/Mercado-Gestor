@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -33,25 +33,31 @@ import {
   Loader2,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Link } from "wouter";
 
 const productFormSchema = z.object({
   ean: z.string().optional(),
-  name: z.string().min(1, "Nome é obrigatório"),
+  name: z.string().min(1, "Nome Ã© obrigatÃ³rio"),
   sku: z.string().optional(),
-  category: z.string().min(1, "Categoria é obrigatória"),
+  category: z.string().min(1, "Categoria Ã© obrigatÃ³ria"),
+  marketClassification: z.string().optional(),
+  additionalInfo: z.string().optional(),
+  complementaryInfo: z.string().optional(),
+  nutritionalInfo: z.string().optional(),
+  labelInfo: z.string().optional(),
   unit: z.string().default("UN"),
   brand: z.string().optional(),
   type: z.string().optional(),
-  ncm: z.string().min(1, "NCM é obrigatório"),
+  ncm: z.string().min(1, "NCM Ã© obrigatÃ³rio"),
   serviceCode: z.string().optional(),
-  cest: z.string().min(1, "CEST é obrigatório"),
+  cest: z.string().min(1, "CEST Ã© obrigatÃ³rio"),
   csosnCode: z.string().optional(),
   origin: z.string().default("nacional"),
   description: z.string().optional(),
   mainImageUrl: z.string().optional(),
   purchasePrice: z.string().optional(),
   margin: z.string().optional(),
-  price: z.string().min(1, "Preço de venda é obrigatório"),
+  price: z.string().min(1, "PreÃ§o de venda Ã© obrigatÃ³rio"),
   promoPrice: z.string().optional(),
   stock: z.number().default(0),
   minStock: z.number().optional().nullable(),
@@ -88,13 +94,20 @@ interface ProductFormProps {
   editProduct?: any;
 }
 
+type ReferenceOption = {
+  id: number;
+  name: string;
+  code?: string | null;
+  isActive?: boolean | null;
+};
+
 const categories = [
   "Alimentos",
   "Bebidas",
   "Limpeza",
   "Higiene",
-  "Eletrônicos",
-  "Vestuário",
+  "EletrÃ´nicos",
+  "VestuÃ¡rio",
   "Outros",
 ];
 
@@ -105,7 +118,7 @@ const units = [
   { value: "M", label: "Metro (M)" },
   { value: "CX", label: "Caixa (CX)" },
   { value: "PCT", label: "Pacote (PCT)" },
-  { value: "DZ", label: "Dúzia (DZ)" },
+  { value: "DZ", label: "DÃºzia (DZ)" },
 ];
 
 const variationAttributes = [
@@ -156,6 +169,47 @@ export default function ProductForm({
     },
   });
 
+  const { data: marketClassifications = [] } = useQuery<ReferenceOption[]>({
+    queryKey: ["/api/reference-tables", "classificacao_mercadologica"],
+    queryFn: async () => {
+      const res = await fetch("/api/reference-tables/classificacao_mercadologica");
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+  const { data: additionalInfos = [] } = useQuery<ReferenceOption[]>({
+    queryKey: ["/api/reference-tables", "infos_adicionais"],
+    queryFn: async () => {
+      const res = await fetch("/api/reference-tables/infos_adicionais");
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+  const { data: complementaryInfos = [] } = useQuery<ReferenceOption[]>({
+    queryKey: ["/api/reference-tables", "infos_complementares"],
+    queryFn: async () => {
+      const res = await fetch("/api/reference-tables/infos_complementares");
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+  const { data: nutritionalInfos = [] } = useQuery<ReferenceOption[]>({
+    queryKey: ["/api/reference-tables", "infos_nutricionais"],
+    queryFn: async () => {
+      const res = await fetch("/api/reference-tables/infos_nutricionais");
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+  const { data: labelInfos = [] } = useQuery<ReferenceOption[]>({
+    queryKey: ["/api/reference-tables", "etiquetas"],
+    queryFn: async () => {
+      const res = await fetch("/api/reference-tables/etiquetas");
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
   const form = useForm<ProductFormData>({
     resolver: zodResolver(productFormSchema),
     defaultValues: {
@@ -163,6 +217,11 @@ export default function ProductForm({
       name: "",
       sku: "",
       category: "",
+      marketClassification: "",
+      additionalInfo: "",
+      complementaryInfo: "",
+      nutritionalInfo: "",
+      labelInfo: "",
       unit: "UN",
       brand: "",
       type: "",
@@ -243,13 +302,13 @@ export default function ProductForm({
           }
         } else if (res.status === 404) {
           setEanLookupError(
-            "EAN não encontrado em nossas bases (BrasilAPI, OpenFoodFacts, EANCode). Você pode preencher os dados manualmente. Dica: Digite o nome do produto para busca automática de NCM e origem"
+            "EAN nÃ£o encontrado em nossas bases (BrasilAPI, OpenFoodFacts, EANCode). VocÃª pode preencher os dados manualmente. Dica: Digite o nome do produto para busca automÃ¡tica de NCM e origem"
           );
         } else {
           setEanLookupError("Erro ao buscar produto. Tente novamente");
         }
       } catch (error) {
-        setEanLookupError("Erro de conexão. Verifique sua internet");
+        setEanLookupError("Erro de conexÃ£o. Verifique sua internet");
       } finally {
         setIsLookingUpEan(false);
       }
@@ -335,6 +394,11 @@ export default function ProductForm({
         name: editProduct.name || "",
         sku: editProduct.sku || "",
         category: editProduct.category || "",
+        marketClassification: editProduct.marketClassification || "",
+        additionalInfo: editProduct.additionalInfo || "",
+        complementaryInfo: editProduct.complementaryInfo || "",
+        nutritionalInfo: editProduct.nutritionalInfo || "",
+        labelInfo: editProduct.labelInfo || "",
         unit: editProduct.unit || "UN",
         brand: editProduct.brand || "",
         type: editProduct.type || "",
@@ -402,6 +466,11 @@ export default function ProductForm({
       product: {
         ...data,
         ean: normalizedEan || null,
+        marketClassification: data.marketClassification || null,
+        additionalInfo: data.additionalInfo || null,
+        complementaryInfo: data.complementaryInfo || null,
+        nutritionalInfo: data.nutritionalInfo || null,
+        labelInfo: data.labelInfo || null,
         mainImageUrl: primaryMedia?.url || data.mainImageUrl || null,
         purchasePrice: data.purchasePrice || null,
         margin: data.margin || null,
@@ -434,7 +503,7 @@ export default function ProductForm({
     const errorMessages = Object.entries(errors)
       .map(([field, error]: [string, any]) => `${field}: ${error?.message}`)
       .join(", ");
-    toast.error(`Erros de validação: ${errorMessages}`);
+    toast.error(`Erros de validaÃ§Ã£o: ${errorMessages}`);
   };
 
   const addVariation = () => {
@@ -548,9 +617,9 @@ export default function ProductForm({
           >
             <Tabs defaultValue="basic" className="w-full">
               <TabsList className="grid w-full grid-cols-5">
-                <TabsTrigger value="basic">Dados Básicos</TabsTrigger>
-                <TabsTrigger value="pricing">Preços</TabsTrigger>
-                <TabsTrigger value="variations">Variações</TabsTrigger>
+                <TabsTrigger value="basic">Dados BÃ¡sicos</TabsTrigger>
+                <TabsTrigger value="pricing">PreÃ§os</TabsTrigger>
+                <TabsTrigger value="variations">VariaÃ§Ãµes</TabsTrigger>
                 <TabsTrigger value="kit" disabled={!watchIsKit}>
                   Kit
                 </TabsTrigger>
@@ -559,7 +628,7 @@ export default function ProductForm({
 
               <TabsContent value="basic" className="space-y-4 mt-4">
                 <div className="space-y-2">
-                  <Label htmlFor="ean">Código de Barras (EAN)</Label>
+                  <Label htmlFor="ean">CÃ³digo de Barras (EAN)</Label>
                   <div className="flex gap-2">
                     <Input
                       id="ean"
@@ -673,7 +742,7 @@ export default function ProductForm({
                     <Input
                       id="brand"
                       {...form.register("brand")}
-                      placeholder="Ex: Tio João"
+                      placeholder="Ex: Tio JoÃ£o"
                     />
                   </div>
                 </div>
@@ -749,7 +818,7 @@ export default function ProductForm({
 
                 <div className="space-y-2">
                   <Label htmlFor="serviceCode">
-                    Código de Serviço (LC 116)
+                    CÃ³digo de ServiÃ§o (LC 116)
                   </Label>
                   <Input
                     id="serviceCode"
@@ -757,14 +826,164 @@ export default function ProductForm({
                     placeholder="01.01"
                     data-testid="input-service-code"
                   />
-                </div>
+                </div>                <Card className="border-dashed">
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-base flex items-center justify-between">
+                      Tabelas de Apoio
+                      <Link href="/tables">
+                        <Button type="button" variant="outline" size="sm">
+                          Gerenciar Tabelas
+                        </Button>
+                      </Link>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Classificacao Mercadologica</Label>
+                        <Select
+                          value={form.watch("marketClassification") || "__none__"}
+                          onValueChange={(value) =>
+                            form.setValue(
+                              "marketClassification",
+                              value === "__none__" ? "" : value
+                            )
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecionar" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Nenhuma</SelectItem>
+                            {marketClassifications
+                              .filter((item) => item.isActive !== false)
+                              .map((item) => (
+                                <SelectItem key={item.id} value={item.name}>
+                                  {item.code ? `${item.code} - ` : ""}
+                                  {item.name}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Infos. Adicionais</Label>
+                        <Select
+                          value={form.watch("additionalInfo") || "__none__"}
+                          onValueChange={(value) =>
+                            form.setValue(
+                              "additionalInfo",
+                              value === "__none__" ? "" : value
+                            )
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecionar" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Nenhuma</SelectItem>
+                            {additionalInfos
+                              .filter((item) => item.isActive !== false)
+                              .map((item) => (
+                                <SelectItem key={item.id} value={item.name}>
+                                  {item.code ? `${item.code} - ` : ""}
+                                  {item.name}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Infos. Complementares</Label>
+                        <Select
+                          value={form.watch("complementaryInfo") || "__none__"}
+                          onValueChange={(value) =>
+                            form.setValue(
+                              "complementaryInfo",
+                              value === "__none__" ? "" : value
+                            )
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecionar" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Nenhuma</SelectItem>
+                            {complementaryInfos
+                              .filter((item) => item.isActive !== false)
+                              .map((item) => (
+                                <SelectItem key={item.id} value={item.name}>
+                                  {item.code ? `${item.code} - ` : ""}
+                                  {item.name}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Infos. Nutricionais</Label>
+                        <Select
+                          value={form.watch("nutritionalInfo") || "__none__"}
+                          onValueChange={(value) =>
+                            form.setValue(
+                              "nutritionalInfo",
+                              value === "__none__" ? "" : value
+                            )
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecionar" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Nenhuma</SelectItem>
+                            {nutritionalInfos
+                              .filter((item) => item.isActive !== false)
+                              .map((item) => (
+                                <SelectItem key={item.id} value={item.name}>
+                                  {item.code ? `${item.code} - ` : ""}
+                                  {item.name}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Etiqueta</Label>
+                      <Select
+                        value={form.watch("labelInfo") || "__none__"}
+                        onValueChange={(value) =>
+                          form.setValue("labelInfo", value === "__none__" ? "" : value)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecionar" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Nenhuma</SelectItem>
+                          {labelInfos
+                            .filter((item) => item.isActive !== false)
+                            .map((item) => (
+                              <SelectItem key={item.id} value={item.name}>
+                                {item.code ? `${item.code} - ` : ""}
+                                {item.name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardContent>
+                </Card>
+
 
                 <div className="space-y-2">
-                  <Label htmlFor="description">Descrição</Label>
+                  <Label htmlFor="description">DescriÃ§Ã£o</Label>
                   <Textarea
                     id="description"
                     {...form.register("description")}
-                    placeholder="Descrição detalhada do produto..."
+                    placeholder="DescriÃ§Ã£o detalhada do produto..."
                     rows={3}
                   />
                 </div>
@@ -802,7 +1021,7 @@ export default function ProductForm({
                         form.setValue("isKit", checked)
                       }
                     />
-                    <Label htmlFor="isKit">É um Kit/Combo</Label>
+                    <Label htmlFor="isKit">Ã‰ um Kit/Combo</Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <Switch
@@ -820,13 +1039,13 @@ export default function ProductForm({
               <TabsContent value="pricing" className="space-y-4 mt-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-lg">Formação de Preço</CardTitle>
+                    <CardTitle className="text-lg">FormaÃ§Ã£o de PreÃ§o</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-3 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="purchasePrice">
-                          Preço de Compra (R$)
+                          PreÃ§o de Compra (R$)
                         </Label>
                         <Input
                           id="purchasePrice"
@@ -847,7 +1066,7 @@ export default function ProductForm({
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="price">Preço de Venda (R$) *</Label>
+                        <Label htmlFor="price">PreÃ§o de Venda (R$) *</Label>
                         <Input
                           id="price"
                           {...form.register("price")}
@@ -863,12 +1082,12 @@ export default function ProductForm({
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Preencha o preço de compra e margem para calcular
-                      automaticamente o preço de venda, ou edite o preço de
+                      Preencha o preÃ§o de compra e margem para calcular
+                      automaticamente o preÃ§o de venda, ou edite o preÃ§o de
                       venda diretamente.
                     </p>
                     <div className="space-y-2">
-                      <Label htmlFor="promoPrice">Preço Promocional (R$)</Label>
+                      <Label htmlFor="promoPrice">PreÃ§o Promocional (R$)</Label>
                       <Input
                         id="promoPrice"
                         {...form.register("promoPrice")}
@@ -903,7 +1122,7 @@ export default function ProductForm({
                         )}
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="minStock">Estoque Mínimo</Label>
+                        <Label htmlFor="minStock">Estoque MÃ­nimo</Label>
                         <Input
                           id="minStock"
                           type="number"
@@ -913,7 +1132,7 @@ export default function ProductForm({
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="maxStock">Estoque Máximo</Label>
+                        <Label htmlFor="maxStock">Estoque MÃ¡ximo</Label>
                         <Input
                           id="maxStock"
                           type="number"
@@ -926,8 +1145,8 @@ export default function ProductForm({
                     {editProduct && (
                       <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
                         <strong>Nota:</strong> Para alterar o estoque, use a
-                        função "Ajustar Estoque" no menu de ações do produto.
-                        Isso garante o registro correto das movimentações para
+                        funÃ§Ã£o "Ajustar Estoque" no menu de aÃ§Ãµes do produto.
+                        Isso garante o registro correto das movimentaÃ§Ãµes para
                         fins fiscais e de auditoria.
                       </div>
                     )}
@@ -939,7 +1158,7 @@ export default function ProductForm({
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between">
                     <CardTitle className="text-lg">
-                      Variações do Produto
+                      VariaÃ§Ãµes do Produto
                     </CardTitle>
                     <Button
                       type="button"
@@ -947,13 +1166,13 @@ export default function ProductForm({
                       size="sm"
                       onClick={addVariation}
                     >
-                      <Plus className="h-4 w-4 mr-2" /> Adicionar Variação
+                      <Plus className="h-4 w-4 mr-2" /> Adicionar VariaÃ§Ã£o
                     </Button>
                   </CardHeader>
                   <CardContent>
                     {variations.length === 0 ? (
                       <p className="text-muted-foreground text-center py-8">
-                        Nenhuma variação cadastrada. Adicione variações como
+                        Nenhuma variaÃ§Ã£o cadastrada. Adicione variaÃ§Ãµes como
                         peso, cor ou tamanho.
                       </p>
                     ) : (
@@ -965,7 +1184,7 @@ export default function ProductForm({
                           >
                             <div className="flex justify-between items-start">
                               <span className="font-medium">
-                                Variação {index + 1}
+                                VariaÃ§Ã£o {index + 1}
                               </span>
                               <Button
                                 type="button"
@@ -1006,7 +1225,7 @@ export default function ProductForm({
                                 />
                               </div>
                               <div className="space-y-1">
-                                <Label>Preço Extra (R$)</Label>
+                                <Label>PreÃ§o Extra (R$)</Label>
                                 <Input
                                   type="number"
                                   step="0.01"
@@ -1073,7 +1292,7 @@ export default function ProductForm({
               <TabsContent value="kit" className="space-y-4 mt-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-lg">Composição do Kit</CardTitle>
+                    <CardTitle className="text-lg">ComposiÃ§Ã£o do Kit</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex gap-2">
@@ -1230,7 +1449,7 @@ export default function ProductForm({
                                 onClick={() => setPrimaryMedia(index)}
                                 title="Definir como principal"
                               >
-                                {item.isPrimary ? "★" : "☆"}
+                                {item.isPrimary ? "â˜…" : "â˜†"}
                               </Button>
                               <Button
                                 type="button"
@@ -1263,7 +1482,7 @@ export default function ProductForm({
                 {createMutation.isPending
                   ? "Salvando..."
                   : editProduct
-                  ? "Salvar Alterações"
+                  ? "Salvar AlteraÃ§Ãµes"
                   : "Cadastrar Produto"}
               </Button>
             </div>
@@ -1273,3 +1492,5 @@ export default function ProductForm({
     </Dialog>
   );
 }
+
+

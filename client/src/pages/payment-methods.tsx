@@ -27,6 +27,15 @@ type PaymentMethod = {
   sortOrder?: number | null;
 };
 
+const inferTefByType = (
+  type: PaymentMethodType
+): TefMethod | undefined => {
+  if (type === "pix" || type === "credito" || type === "debito") {
+    return type;
+  }
+  return undefined;
+};
+
 const typeLabels: Record<PaymentMethodType, string> = {
   pix: "PIX",
   credito: "Cartao de Credito",
@@ -58,10 +67,13 @@ export default function PaymentMethodsPage() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const inferredTefMethod = inferTefByType(form.type);
       const payload = {
         name: form.name.trim(),
         type: form.type,
-        tefMethod: tefEnabled ? form.tefMethod || undefined : undefined,
+        tefMethod: tefEnabled
+          ? ((form.tefMethod as TefMethod) || inferredTefMethod)
+          : undefined,
         nfceCode: form.nfceCode.trim() || undefined,
         sortOrder: Number(form.sortOrder) || 0,
         isActive: form.isActive,
@@ -128,11 +140,12 @@ export default function PaymentMethodsPage() {
   });
 
   const startEdit = (method: PaymentMethod) => {
+    const inferredTefMethod = inferTefByType(method.type);
     setEditingId(method.id);
     setForm({
       name: method.name || "",
       type: method.type,
-      tefMethod: (method.tefMethod as TefMethod) || "",
+      tefMethod: (method.tefMethod as TefMethod) || inferredTefMethod || "",
       nfceCode: method.nfceCode || "",
       sortOrder: method.sortOrder || 0,
       isActive: method.isActive !== false,
@@ -182,7 +195,15 @@ export default function PaymentMethodsPage() {
                 <Select
                   value={form.type}
                   onValueChange={(value) =>
-                    setForm({ ...form, type: value as PaymentMethodType })
+                    setForm((prev) => {
+                      const nextType = value as PaymentMethodType;
+                      const inferredTefMethod = inferTefByType(nextType);
+                      return {
+                        ...prev,
+                        type: nextType,
+                        tefMethod: inferredTefMethod || "",
+                      };
+                    })
                   }
                 >
                   <SelectTrigger>

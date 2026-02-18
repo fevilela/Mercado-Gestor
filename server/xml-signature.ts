@@ -8,7 +8,7 @@ const forgeLib: any = (forge as any).asn1 ? forge : require("node-forge");
 
 /**
  * XML Signature Service for NF-e documents
- * Uses node-forge to handle PKCS#12 certificates and perform RSA-SHA1 signing
+ * Uses node-forge to handle PKCS#12 certificates and perform RSA-SHA256 signing
  */
 
 export interface CertificateInfo {
@@ -28,7 +28,7 @@ export interface CertificateCnpjCandidate {
 export class XMLSignatureService {
   /**
    * Sign XML using the actual private key from P12/PFX certificate
-   * Performs proper RSA-SHA1 signature with the certificate's private key
+   * Performs proper RSA-SHA256 signature with the certificate's private key
    */
   static signXML(
     xmlContent: string,
@@ -94,9 +94,9 @@ export class XMLSignatureService {
       const signedXmlAny = signedXml as any;
       signedXmlAny.idAttributes = ["Id"];
       signedXmlAny.signatureAlgorithm =
-        "http://www.w3.org/2000/09/xmldsig#rsa-sha1";
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
       signedXmlAny.canonicalizationAlgorithm =
-        "http://www.w3.org/TR/2001/REC-xml-c14n-20010315";
+        "http://www.w3.org/2001/10/xml-exc-c14n#";
       signedXmlAny.signingKey = privateKeyPem;
       signedXmlAny.privateKey = privateKeyPem;
       const keyInfoProvider = {
@@ -112,9 +112,9 @@ export class XMLSignatureService {
         xpath: `//*[@Id='${referenceId}']`,
         transforms: [
           "http://www.w3.org/2000/09/xmldsig#enveloped-signature",
-          "http://www.w3.org/TR/2001/REC-xml-c14n-20010315",
+          "http://www.w3.org/2001/10/xml-exc-c14n#",
         ],
-        digestAlgorithm: "http://www.w3.org/2000/09/xmldsig#sha1",
+        digestAlgorithm: "http://www.w3.org/2001/04/xmlenc#sha256",
         uri: `#${referenceId}`,
       });
       const signatureAnchor = "//*[local-name()='infNFe']";

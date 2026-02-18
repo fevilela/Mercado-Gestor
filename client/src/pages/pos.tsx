@@ -84,6 +84,12 @@ export default function POS() {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showCancelReceipt, setShowCancelReceipt] = useState(false);
   const [showPixQrDialog, setShowPixQrDialog] = useState(false);
+  const [showTerminalActionDialog, setShowTerminalActionDialog] = useState(false);
+  const [terminalLockActive, setTerminalLockActive] = useState(false);
+  const [terminalLockReference, setTerminalLockReference] = useState<
+    string | null
+  >(null);
+  const [isReleasingTerminal, setIsReleasingTerminal] = useState(false);
   const [cancelledItems, setCancelledItems] = useState<
     { product: any; qty: number }[]
   >([]);
@@ -318,10 +324,42 @@ export default function POS() {
     if (token.includes("pix") || token.includes("qr")) return "pix";
     if (token.includes("credito") || token.includes("credit")) return "credito";
     if (token.includes("debito") || token.includes("debit")) return "debito";
+    if (token.includes("cartao") || token.includes("card")) return "credito";
+    return null;
+  };
+  const resolveTefMethod = (
+    method: PdvPaymentMethod
+  ): "pix" | "credito" | "debito" | null => {
+    const inferred = inferTefMethod(method);
+    if (inferred) return inferred;
+
+    const normalizedType = normalizeText(method.type || "");
+    if (normalizedType.includes("credito") || normalizedType.includes("credit")) {
+      return "credito";
+    }
+    if (normalizedType.includes("debito") || normalizedType.includes("debit")) {
+      return "debito";
+    }
+    if (normalizedType.includes("pix")) {
+      return "pix";
+    }
     return null;
   };
   const normalizePaymentMethod = (method: PdvPaymentMethod): PdvPaymentMethod => {
-    const tefMethod = inferTefMethod(method);
+    let tefMethod = inferTefMethod(method);
+    if (!tefMethod) {
+      const normalizedType = normalizeText(method.type || "");
+      if (normalizedType.includes("credito") || normalizedType.includes("credit")) {
+        tefMethod = "credito";
+      } else if (
+        normalizedType.includes("debito") ||
+        normalizedType.includes("debit")
+      ) {
+        tefMethod = "debito";
+      } else if (normalizedType.includes("pix")) {
+        tefMethod = "pix";
+      }
+    }
     if (tefMethod) {
       return { ...method, tefMethod };
     }
@@ -479,8 +517,77 @@ export default function POS() {
 
   const sleep = (ms: number) =>
     new Promise((resolve) => setTimeout(resolve, ms));
+  const configuredTimeoutSeconds = Number(settings?.paymentTimeoutSeconds ?? 30);
+  const safeTimeoutSeconds = Number.isFinite(configuredTimeoutSeconds)
+    ? Math.min(300, Math.max(10, Math.round(configuredTimeoutSeconds)))
+    : 30;
+  const PAYMENT_TIMEOUT_MS = safeTimeoutSeconds * 1000;
+  const PAYMENT_POLL_INTERVAL_MS = 3_000;
+
+  const tryReleaseMercadoPagoTerminal = async (
+    providerReference?: string | null
+  ) => {
+    const reference = String(providerReference || "").trim();
+    let released = false;
+
+    if (reference) {
+      const cancelRes = await fetch("/api/payments/mercadopago/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerReference: reference }),
+      }).catch(() => null);
+
+      if (cancelRes?.ok) {
+        const cancelBody = await cancelRes.json().catch(() => ({}));
+        released = Boolean(cancelBody?.cancelled);
+      }
+    }
+
+    if (!released) {
+      const clearRes = await fetch("/api/payments/mercadopago/clear-queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          providerReference: reference || undefined,
+        }),
+      }).catch(() => null);
+
+      if (clearRes?.ok) {
+        const clearBody = await clearRes.json().catch(() => ({}));
+        released = Boolean(clearBody?.cleared);
+      }
+    }
+
+    if (reference) {
+      const statusRes = await fetch(
+        `/api/payments/mercadopago/status/${encodeURIComponent(reference)}`
+      , {
+        cache: "no-store",
+      }).catch(() => null);
+      if (statusRes?.ok) {
+        const statusBody = await statusRes.json().catch(() => ({}));
+        const status = String(statusBody?.status || "").toLowerCase();
+        if (status && status !== "processing") {
+          released = true;
+        } else if (status === "processing") {
+          released = false;
+        }
+      }
+    }
+
+    return released;
+  };
 
   const handleSelectPayment = async (method: PdvPaymentMethod) => {
+    if (terminalLockActive) {
+      toast({
+        title: "PDV bloqueado",
+        description:
+          "Existe uma cobranca pendente na maquininha. Libere no terminal para continuar.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!method) return;
     if (cart.length === 0) {
       toast({
@@ -494,8 +601,10 @@ export default function POS() {
     setSelectedPayment(method);
     setPaymentResult(null);
     setShowPixQrDialog(false);
+    setShowTerminalActionDialog(false);
+    paymentFlowCancelledRef.current = false;
 
-    const tefMethod = inferTefMethod(method);
+    const tefMethod = resolveTefMethod(method);
 
     if (!tefMethod) {
       setPaymentStatus("approved");
@@ -511,13 +620,18 @@ export default function POS() {
       return;
     }
 
-    if (isAuthorizingRef.current || paymentStatus === "processing") {
+    if (isAuthorizingRef.current) {
       toast({
         title: "Pagamento em andamento",
         description:
           "Ja existe uma autorizacao em andamento para esta venda. Aguarde o retorno da maquininha.",
       });
       return;
+    }
+
+    if (paymentStatus === "processing") {
+      setPaymentStatus("idle");
+      setPaymentResult(null);
     }
 
     setPaymentStatus("processing");
@@ -546,6 +660,7 @@ export default function POS() {
               : "processing"
         );
         setShowPixQrDialog(true);
+        setShowTerminalActionDialog(false);
       } else {
         let res: Response | null = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
@@ -593,6 +708,7 @@ export default function POS() {
         setPaymentResult(authResult);
         if (authResult.status === "approved") {
           setPaymentStatus("approved");
+          setShowTerminalActionDialog(false);
           toast({
             title: "Pagamento aprovado",
             description: authResult.brand
@@ -605,6 +721,7 @@ export default function POS() {
 
         if (authResult.status === "declined") {
           setPaymentStatus("declined");
+          setShowTerminalActionDialog(false);
           toast({
             title: "Pagamento negado",
             description: "Tente outra forma de pagamento.",
@@ -615,6 +732,7 @@ export default function POS() {
       }
 
       setPaymentStatus("processing");
+      setShowTerminalActionDialog(tefMethod !== "pix");
       toast({
         title: "Pagamento em andamento",
         description:
@@ -629,13 +747,22 @@ export default function POS() {
         result.providerReference &&
         result.status === "processing"
       ) {
-        const maxAttempts = 10;
+        const maxAttempts = Math.ceil(
+          PAYMENT_TIMEOUT_MS / PAYMENT_POLL_INTERVAL_MS
+        );
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-          await sleep(3000);
+          if (paymentFlowCancelledRef.current) {
+            return;
+          }
+          await sleep(PAYMENT_POLL_INTERVAL_MS);
           const statusRes = await fetch(
             `/api/payments/mercadopago/status/${encodeURIComponent(
               result.providerReference
             )}`
+            ,
+            {
+              cache: "no-store",
+            }
           );
           if (!statusRes.ok) {
             continue;
@@ -646,6 +773,7 @@ export default function POS() {
           if (statusResult.status === "approved") {
             setPaymentStatus("approved");
             setShowPixQrDialog(false);
+            setShowTerminalActionDialog(false);
             toast({
               title: "Pagamento aprovado",
               description: statusResult.brand
@@ -659,6 +787,7 @@ export default function POS() {
           if (statusResult.status === "declined") {
             setPaymentStatus("declined");
             setShowPixQrDialog(false);
+            setShowTerminalActionDialog(false);
             toast({
               title: "Pagamento negado",
               description: "Tente outra forma de pagamento.",
@@ -668,20 +797,49 @@ export default function POS() {
           }
         }
 
+        let autoCancelled = false;
+        const cancelRes = await fetch("/api/payments/mercadopago/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            providerReference: result.providerReference,
+          }),
+        }).catch(() => null);
+        if (cancelRes?.ok) {
+          const cancelBody = await cancelRes.json().catch(() => ({}));
+          autoCancelled = Boolean(cancelBody?.ok || cancelBody?.cancelled);
+        }
+
+        if (!autoCancelled) {
+          const clearRes = await fetch("/api/payments/mercadopago/clear-queue", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              providerReference: result.providerReference,
+            }),
+          }).catch(() => null);
+          if (clearRes?.ok) {
+            const clearBody = await clearRes.json().catch(() => ({}));
+            autoCancelled = Boolean(clearBody?.ok || clearBody?.cleared);
+          }
+        }
+
         setPaymentStatus("error");
         setShowPixQrDialog(false);
+        setShowTerminalActionDialog(false);
         toast({
-          title: tefMethod === "pix" ? "PIX pendente" : "Sem retorno da maquininha",
+          title: "Tempo de pagamento expirado",
           description:
-            tefMethod === "pix"
-              ? "QR gerado, mas ainda sem confirmacao de pagamento."
-              : "Pedido enviado, mas o terminal nao confirmou. Verifique internet da maquininha e tente novamente.",
+            autoCancelled
+              ? `Pagamento nao confirmado em ${safeTimeoutSeconds} segundos. Cobranca cancelada automaticamente.`
+              : `Pagamento nao confirmado em ${safeTimeoutSeconds} segundos. Tente cancelar no terminal.`,
           variant: "destructive",
         });
       }
     } catch (error) {
       setPaymentStatus("error");
       setShowPixQrDialog(false);
+      setShowTerminalActionDialog(false);
       toast({
         title: "Erro no pagamento",
         description: error instanceof Error ? error.message : "Falha no pagamento",
@@ -693,6 +851,16 @@ export default function POS() {
   };
 
   const handleFinishSale = async () => {
+    if (terminalLockActive) {
+      toast({
+        title: "PDV bloqueado",
+        description:
+          "Existe uma cobranca pendente na maquininha. Libere o terminal para finalizar vendas.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!selectedPayment) {
       toast({
         title: "Selecione a forma de pagamento",
@@ -805,9 +973,30 @@ export default function POS() {
     setPaymentStatus("idle");
     setPaymentResult(null);
     setShowPixQrDialog(false);
+    setShowTerminalActionDialog(false);
   };
 
-  const handleCancelSale = () => {
+  const handleCancelSale = async () => {
+    paymentFlowCancelledRef.current = true;
+    let remoteCancelled = false;
+    const shouldTryRemoteCancel =
+      paymentResult?.provider === "mercadopago" &&
+      !!paymentResult?.providerReference &&
+      paymentResult?.status !== "approved";
+    const shouldTryClearQueue =
+      paymentResult?.provider === "mercadopago" &&
+      paymentResult?.status !== "approved";
+    if (shouldTryRemoteCancel || shouldTryClearQueue) {
+      setTerminalLockReference(paymentResult?.providerReference || null);
+      setTerminalLockActive(true);
+      remoteCancelled = await tryReleaseMercadoPagoTerminal(
+        paymentResult?.providerReference
+      );
+      if (remoteCancelled) {
+        setTerminalLockActive(false);
+        setTerminalLockReference(null);
+      }
+    }
     setCancelledItems([...cart]);
     setCancelledTotal(total);
     setShowCancelDialog(false);
@@ -816,12 +1005,42 @@ export default function POS() {
     setSelectedPayment(null);
     setPaymentStatus("idle");
     setPaymentResult(null);
+    setShowPixQrDialog(false);
+    setShowTerminalActionDialog(false);
     toast({
       title: "Venda Cancelada",
-      description: "A venda foi cancelada com sucesso.",
+      description: remoteCancelled
+        ? "Venda cancelada e cobranca removida da maquininha."
+        : "Venda cancelada no PDV. Como a maquininha segue pendente, o PDV foi bloqueado ate liberar o terminal.",
       variant: "default",
       className: "bg-red-500 text-white border-none",
     });
+  };
+
+  const handleRetryTerminalRelease = async () => {
+    if (!terminalLockActive || isReleasingTerminal) return;
+    setIsReleasingTerminal(true);
+    try {
+      const released = await tryReleaseMercadoPagoTerminal(terminalLockReference);
+      if (released) {
+        setTerminalLockActive(false);
+        setTerminalLockReference(null);
+        toast({
+          title: "PDV liberado",
+          description: "Terminal liberado com sucesso.",
+          className: "bg-emerald-500 text-white border-none",
+        });
+      } else {
+        toast({
+          title: "Terminal ainda pendente",
+          description:
+            "Cancele a cobranca na maquininha e tente novamente para liberar o PDV.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsReleasingTerminal(false);
+    }
   };
 
   const closeCancelReceipt = () => {
@@ -838,6 +1057,7 @@ export default function POS() {
 
   const lastTotalRef = useRef(total);
   const isAuthorizingRef = useRef(false);
+  const paymentFlowCancelledRef = useRef(false);
 
   useEffect(() => {
     if (lastTotalRef.current !== total) {
@@ -846,6 +1066,7 @@ export default function POS() {
         setPaymentStatus("idle");
         setPaymentResult(null);
         setSelectedPayment(null);
+        setShowTerminalActionDialog(false);
       }
     }
   }, [paymentStatus, total]);
@@ -1283,7 +1504,13 @@ export default function POS() {
       <Dialog
         open={showPixQrDialog}
         onOpenChange={(open) => {
-          if (paymentStatus === "processing") return;
+          if (!open && paymentStatus === "processing") {
+            toast({
+              title: "PIX em andamento",
+              description:
+                "O pagamento continua em processamento mesmo com a janela fechada.",
+            });
+          }
           setShowPixQrDialog(open);
         }}
       >
@@ -1542,6 +1769,69 @@ export default function POS() {
             >
               <Printer className="mr-2 h-4 w-4" />
               Imprimir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showTerminalActionDialog}>
+        <DialogContent
+          className="sm:max-w-md"
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Aguardando na Maquininha</DialogTitle>
+            <DialogDescription>
+              Para continuar o pagamento, aperte o botao verde na maquininha e
+              siga as instrucoes no terminal.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setShowTerminalActionDialog(false);
+                setShowCancelDialog(true);
+              }}
+              className="w-full"
+            >
+              Cancelar Venda
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={terminalLockActive}>
+        <DialogContent
+          className="sm:max-w-lg"
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle className="text-destructive">PDV Bloqueado</DialogTitle>
+            <DialogDescription>
+              A venda foi cancelada no PDV, mas a maquininha ainda esta aguardando
+              pagamento. Libere a cobranca no terminal para continuar.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+            Referencia: {terminalLockReference || "Nao informada"}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handleRetryTerminalRelease}
+              disabled={isReleasingTerminal}
+              className="w-full"
+            >
+              {isReleasingTerminal ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Verificando...
+                </>
+              ) : (
+                "Tentar liberar PDV"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

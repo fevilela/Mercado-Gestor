@@ -131,6 +131,11 @@ export const products = pgTable("products", {
   ean: text("ean"),
   sku: text("sku"),
   category: text("category").notNull(),
+  marketClassification: text("market_classification"),
+  additionalInfo: text("additional_info"),
+  complementaryInfo: text("complementary_info"),
+  nutritionalInfo: text("nutritional_info"),
+  labelInfo: text("label_info"),
   unit: text("unit").notNull().default("UN"),
   brand: text("brand"),
   type: text("type"),
@@ -406,6 +411,7 @@ export const companySettings = pgTable("company_settings", {
   mpAccessToken: text("mp_access_token"),
   mpTerminalId: text("mp_terminal_id"),
   mpEnabled: boolean("mp_enabled").default(false),
+  paymentTimeoutSeconds: integer("payment_timeout_seconds").default(30),
   printerEnabled: boolean("printer_enabled").default(false),
   printerModel: text("printer_model"),
   printerPort: text("printer_port"),
@@ -454,6 +460,24 @@ export const insertPaymentMethodSchema = createInsertSchema(
 ).omit({ id: true, createdAt: true });
 export type InsertPaymentMethod = z.infer<typeof insertPaymentMethodSchema>;
 export type PaymentMethod = typeof paymentMethods.$inferSelect;
+
+export const referenceTables = pgTable("reference_tables", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  type: text("type").notNull(),
+  code: text("code"),
+  name: text("name").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertReferenceTableSchema = createInsertSchema(
+  referenceTables
+).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertReferenceTable = z.infer<typeof insertReferenceTableSchema>;
+export type ReferenceTable = typeof referenceTables.$inferSelect;
 
 export const pdvLoads = pgTable("pdv_loads", {
   id: serial("id").primaryKey(),

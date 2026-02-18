@@ -100,6 +100,7 @@ interface CompanySettings {
   mpAccessToken?: string;
   mpTerminalId?: string;
   mpEnabled?: boolean;
+  paymentTimeoutSeconds?: number;
   printerEnabled?: boolean;
   printerModel?: string;
   printerPort?: string;
@@ -198,6 +199,7 @@ export default function Settings() {
     mpAccessToken: "",
     mpTerminalId: "",
     mpEnabled: false,
+    paymentTimeoutSeconds: 30,
     printerEnabled: false,
     printerModel: "",
     printerPort: "",
@@ -674,7 +676,7 @@ export default function Settings() {
 
   const updateSetting = (
     key: keyof CompanySettings,
-    value: string | boolean
+    value: string | boolean | number
   ) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
@@ -1925,6 +1927,26 @@ export default function Settings() {
                         Informe Store ID + POS ID ou Terminal ID para salvar.
                       </p>
                     )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Timeout de pagamento (segundos)</Label>
+                    <Input
+                      type="number"
+                      min={10}
+                      max={300}
+                      step={1}
+                      value={Number(settings.paymentTimeoutSeconds || 30)}
+                      onChange={(e) => {
+                        const raw = Number(e.target.value);
+                        const normalized = Number.isFinite(raw)
+                          ? Math.min(300, Math.max(10, Math.round(raw)))
+                          : 30;
+                        updateSetting("paymentTimeoutSeconds", normalized);
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Tempo maximo para aprovar o pagamento no terminal antes de cancelar automaticamente.
+                    </p>
                   </div>
 
                   {mpStatus === "connected" ? (

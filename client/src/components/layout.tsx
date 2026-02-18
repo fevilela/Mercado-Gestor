@@ -82,6 +82,24 @@ const sidebarItems = [
     permissions: ["fiscal:view", "fiscal:manage"],
   },
   {
+    icon: FileText,
+    label: "Nova venda NF-e",
+    href: "/nfe-emissao",
+    permissions: ["fiscal:view", "fiscal:manage"],
+  },
+  {
+    icon: FileText,
+    label: "NF-e Criadas",
+    href: "/nfe-historico",
+    permissions: ["fiscal:view", "fiscal:manage"],
+  },
+  {
+    icon: FileText,
+    label: "Carta de Correcao",
+    href: "/carta-correcao",
+    permissions: ["fiscal:view", "fiscal:manage"],
+  },
+  {
     icon: Shield,
     label: "Certificado Digital",
     href: "/certificates",
@@ -133,6 +151,12 @@ const sidebarItems = [
     label: "Formas de Pagamento",
     href: "/payment-methods",
     permissions: ["settings:payments"],
+  },
+  {
+    icon: FileText,
+    label: "Tabelas",
+    href: "/tables",
+    permissions: ["inventory:view", "settings:view"],
   },
 ];
 

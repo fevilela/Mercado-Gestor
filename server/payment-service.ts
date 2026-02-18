@@ -120,11 +120,80 @@ const cancelMercadoPagoOrder = async (token: string, orderId: string) => {
   return response.ok;
 };
 
+const cancelMercadoPagoPayment = async (token: string, paymentId: string) => {
+  const normalizedPaymentId = String(paymentId || "").trim();
+  if (!normalizedPaymentId) return false;
+  const response = await fetch(
+    `https://api.mercadopago.com/v1/payments/${encodeURIComponent(normalizedPaymentId)}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Idempotency-Key": `cancel-pay-${normalizedPaymentId}-${Date.now()}`,
+      },
+      body: JSON.stringify({ status: "cancelled" }),
+    }
+  );
+  return response.ok;
+};
+
 const extractMpDevices = (payload: any): any[] => {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.results)) return payload.results;
   if (Array.isArray(payload?.devices)) return payload.devices;
   return [];
+};
+
+const extractTerminalIdFromDevice = (device: any): string => {
+  const directTerminalId =
+    device?.terminal_id ||
+    device?.terminalId ||
+    device?.terminal?.id ||
+    "";
+  if (String(directTerminalId || "").trim()) {
+    return String(directTerminalId).trim();
+  }
+  const fallbackId =
+    device?.device_id ||
+    device?.deviceId ||
+    device?.code ||
+    device?.id ||
+    "";
+  return String(fallbackId || "").trim();
+};
+
+const isLikelyOnlineDevice = (device: any): boolean => {
+  const statusToken = String(
+    device?.status ||
+      device?.connection_status ||
+      device?.connectionStatus ||
+      ""
+  )
+    .toLowerCase()
+    .trim();
+  if (!statusToken) return true;
+  return ["online", "connected", "available", "idle", "ready"].some((token) =>
+    statusToken.includes(token)
+  );
+};
+
+const isLikelyPdvModeDevice = (device: any): boolean => {
+  const modeToken = String(
+    device?.operating_mode ||
+      device?.operatingMode ||
+      device?.mode ||
+      ""
+  )
+    .toLowerCase()
+    .trim();
+  if (!modeToken) return true;
+  return (
+    modeToken.includes("pdv") ||
+    modeToken.includes("pos") ||
+    modeToken.includes("integration")
+  );
 };
 
 const resolveMercadoPagoTerminalId = async (
@@ -178,16 +247,36 @@ const resolveMercadoPagoTerminalId = async (
     throw new Error("Nenhum dispositivo encontrado para store_id + pos_id");
   }
 
-  const preferred = devices[0] || {};
-  const candidate =
-    preferred?.terminal_id ||
-    preferred?.terminalId ||
-    preferred?.id ||
-    preferred?.device_id ||
-    preferred?.deviceId ||
-    preferred?.code ||
-    "";
-  const resolved = String(candidate || "").trim();
+  const withTerminalId = devices
+    .map((device) => ({
+      device,
+      terminalId: extractTerminalIdFromDevice(device),
+    }))
+    .filter((item) => item.terminalId);
+  const onlineAndPdv = withTerminalId.filter(
+    (item) => isLikelyOnlineDevice(item.device) && isLikelyPdvModeDevice(item.device)
+  );
+  const onlineOnly = withTerminalId.filter((item) =>
+    isLikelyOnlineDevice(item.device)
+  );
+
+  const candidates =
+    onlineAndPdv.length > 0
+      ? onlineAndPdv
+      : onlineOnly.length > 0
+        ? onlineOnly
+        : withTerminalId;
+
+  const uniqueTerminalIds = Array.from(
+    new Set(candidates.map((item) => item.terminalId))
+  );
+  if (uniqueTerminalIds.length > 1) {
+    throw new Error(
+      "Mais de um terminal encontrado para este Store/POS. Informe o Terminal ID exato nas configuracoes do Mercado Pago."
+    );
+  }
+
+  const resolved = String(uniqueTerminalIds[0] || "").trim();
   if (!resolved) {
     throw new Error(
       "Dispositivo encontrado, mas sem terminal_id valido para autorizacao"
@@ -482,11 +571,26 @@ export const getMercadoPagoOrderStatus = async (
 
 export const clearMercadoPagoTerminalQueue = async (
   accessToken: string,
-  terminalRef: string
+  terminalRef: string,
+  providerReference?: string
 ) => {
   const token = String(accessToken || "").trim().replace(/^Bearer\s+/i, "");
   if (!token) {
     throw new Error("Access token nao informado");
+  }
+  const normalizedReference = String(providerReference || "").trim();
+  if (normalizedReference) {
+    const cancelledByReference = await cancelMercadoPagoByReference({
+      accessToken: token,
+      providerReference: normalizedReference,
+    }).catch(() => ({ ok: false, cancelled: false }));
+    if (cancelledByReference.ok) {
+      return {
+        ok: true,
+        cleared: true,
+        message: "Pendencia cancelada pela referencia do pagamento",
+      };
+    }
   }
   const resolvedTerminalId = await resolveMercadoPagoTerminalId(token, terminalRef);
   const knownOrderId = lastOrderByTerminal.get(resolvedTerminalId);
@@ -514,6 +618,66 @@ export const clearMercadoPagoTerminalQueue = async (
       ? "Pendencia cancelada com sucesso"
       : "Nao foi possivel cancelar a pendencia",
   };
+};
+
+export const cancelMercadoPagoByReference = async ({
+  accessToken,
+  providerReference,
+}: {
+  accessToken: string;
+  providerReference: string;
+}) => {
+  const token = String(accessToken || "").trim().replace(/^Bearer\s+/i, "");
+  const ref = String(providerReference || "").trim();
+  if (!token) throw new Error("Access token nao informado");
+  if (!ref) throw new Error("Referencia do pagamento nao informada");
+
+  const looksLikePayId = /^PAY/i.test(ref);
+  const attempts: Array<() => Promise<boolean>> = looksLikePayId
+    ? [
+        () => cancelMercadoPagoPayment(token, ref).catch(() => false),
+        () => cancelMercadoPagoOrder(token, ref).catch(() => false),
+      ]
+    : [
+        () => cancelMercadoPagoOrder(token, ref).catch(() => false),
+        () => cancelMercadoPagoPayment(token, ref).catch(() => false),
+      ];
+
+  for (const attempt of attempts) {
+    if (await attempt()) {
+      return { ok: true, cancelled: true };
+    }
+  }
+
+  const paymentLookup = await fetch(
+    `https://api.mercadopago.com/v1/payments/${encodeURIComponent(ref)}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+    }
+  ).catch(() => null);
+
+  if (paymentLookup?.ok) {
+    const payload = await paymentLookup.json().catch(() => ({}));
+    const relatedOrderId = String(
+      payload?.order?.id || payload?.order_id || ""
+    ).trim();
+    if (relatedOrderId) {
+      const orderCancelled = await cancelMercadoPagoOrder(
+        token,
+        relatedOrderId
+      ).catch(() => false);
+      if (orderCancelled) {
+        return { ok: true, cancelled: true };
+      }
+    }
+  }
+
+  return { ok: false, cancelled: false };
 };
 
 export const createMercadoPagoPixQr = async ({

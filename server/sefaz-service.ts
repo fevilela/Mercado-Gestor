@@ -1,4 +1,11 @@
 import { Tools } from "node-sped-nfe";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import * as crypto from "crypto";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
 
 export interface SefazConfig {
   environment: "homologacao" | "producao";
@@ -70,8 +77,106 @@ const stripEnviNFe = (xmlContent: string): string => {
   return nfeMatch?.[0] ?? xmlContent;
 };
 
+const normalizeXmlForTransmission = (xmlContent: string): string => {
+  return String(xmlContent || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/<\?xml[\s\S]*?\?>/i, "")
+    .trim();
+};
+
+const readTpAmb = (xmlContent: string): string => {
+  const match = String(xmlContent || "").match(/<tpAmb>(\d)<\/tpAmb>/);
+  return match?.[1] || "";
+};
+
+const forceTpAmb = (xmlContent: string, tpAmb: "1" | "2"): string => {
+  if (/<tpAmb>\d<\/tpAmb>/.test(xmlContent)) {
+    return xmlContent.replace(/<tpAmb>\d<\/tpAmb>/, `<tpAmb>${tpAmb}</tpAmb>`);
+  }
+  return xmlContent;
+};
+
 const hasSignature = (xmlContent: string): boolean =>
   /<\s*Signature\b/.test(xmlContent);
+
+const stripWrappingQuotes = (value?: string): string | undefined => {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+};
+
+const patchPemPkcs12ReaderWithForge = () => {
+  try {
+    const pem = require("pem");
+    if ((pem as any).__zyvoPkcs12Patched) return;
+    const forge = require("node-forge");
+
+    const originalReadPkcs12 = pem.readPkcs12?.bind(pem);
+    pem.readPkcs12 = (pfxInput: any, options: any, callback: any) => {
+      try {
+        const cb = typeof callback === "function" ? callback : () => undefined;
+        const opts = options || {};
+        const password = String(opts.p12Password || opts.password || "");
+
+        let pfxBuffer: Buffer;
+        if (Buffer.isBuffer(pfxInput)) {
+          pfxBuffer = pfxInput;
+        } else if (typeof pfxInput === "string" && fs.existsSync(pfxInput)) {
+          pfxBuffer = fs.readFileSync(pfxInput);
+        } else if (typeof pfxInput === "string") {
+          pfxBuffer = Buffer.from(pfxInput, "binary");
+        } else {
+          throw new Error("Formato de certificado PKCS#12 invalido");
+        }
+
+        const asn1 = forge.asn1.fromDer(pfxBuffer.toString("binary"));
+        const p12 = forge.pkcs12.pkcs12FromAsn1(asn1, password);
+
+        const keyBags =
+          p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[
+            forge.pki.oids.pkcs8ShroudedKeyBag
+          ] || [];
+        const certBags =
+          p12.getBags({ bagType: forge.pki.oids.certBag })[
+            forge.pki.oids.certBag
+          ] || [];
+
+        const privateKey = keyBags[0]?.key;
+        const certs = certBags
+          .map((bag: any) => bag?.cert)
+          .filter(Boolean)
+          .map((cert: any) => forge.pki.certificateToPem(cert));
+
+        if (!privateKey || certs.length === 0) {
+          throw new Error("Nao foi possivel extrair chave/certificado do PFX");
+        }
+
+        const payload = {
+          key: forge.pki.privateKeyToPem(privateKey),
+          cert: certs[0],
+          ca: certs.slice(1),
+          pem: certs[0],
+        };
+        return cb(null, payload);
+      } catch (error) {
+        if (typeof originalReadPkcs12 === "function") {
+          return originalReadPkcs12(pfxInput, options, callback);
+        }
+        return callback(error);
+      }
+    };
+
+    (pem as any).__zyvoPkcs12Patched = true;
+  } catch {
+    // noop
+  }
+};
 
 const resolveFinalStatus = (xmlContent: string) => {
   const outerStatus = extractTag("cStat", xmlContent);
@@ -116,6 +221,41 @@ const resolveEventStatus = (xmlContent: string) => {
   return { status, message, protocol };
 };
 
+const extractSoapFaultMessage = (xmlContent: string): string => {
+  const reason =
+    extractTag("Text", xmlContent) ||
+    extractTag("faultstring", xmlContent) ||
+    "";
+  return reason.trim();
+};
+
+const describeUnknownError = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message || "Erro desconhecido";
+  }
+  if (error && typeof error === "object") {
+    const candidate = error as {
+      message?: unknown;
+      reason?: unknown;
+      faultstring?: unknown;
+      name?: unknown;
+      code?: unknown;
+    };
+    const directMessage =
+      (typeof candidate.message === "string" && candidate.message.trim()) ||
+      (typeof candidate.reason === "string" && candidate.reason.trim()) ||
+      (typeof candidate.faultstring === "string" &&
+        candidate.faultstring.trim());
+    if (directMessage) return directMessage;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error || "Erro desconhecido");
+};
+
 export class SefazService {
   private config: SefazConfig;
 
@@ -124,6 +264,75 @@ export class SefazService {
   }
 
   private buildTools(mod: "55" | "65") {
+    patchPemPkcs12ReaderWithForge();
+
+    const resolveOpenSSLPath = () => {
+      const configured = stripWrappingQuotes(
+        this.config.opensslPath ||
+          process.env.OPENSSL_PATH ||
+          process.env.OPENSSL_BIN,
+      );
+      if (configured) return configured;
+
+      if (process.platform === "win32") {
+        const candidates = [
+          "C:\\Program Files\\OpenSSL-Win64\\bin\\openssl.exe",
+          "C:\\Program Files\\Git\\usr\\bin\\openssl.exe",
+          "C:\\Program Files (x86)\\GnuWin32\\bin\\openssl.exe",
+        ];
+        for (const candidate of candidates) {
+          if (fs.existsSync(candidate)) return candidate;
+        }
+      }
+      return undefined;
+    };
+
+    const ensureLegacyOpenSSLConfig = (opensslPath?: string) => {
+      if (process.platform !== "win32") return;
+      if (!opensslPath || !fs.existsSync(opensslPath)) return;
+      if (process.env.OPENSSL_CONF) return;
+
+      const opensslBinDir = path.dirname(opensslPath);
+      const opensslRootDir = path.dirname(opensslBinDir);
+      const modulesCandidates = [
+        path.join(opensslRootDir, "lib", "ossl-modules"),
+        path.join(opensslRootDir, "lib64", "ossl-modules"),
+        path.join(opensslBinDir, "ossl-modules"),
+      ];
+      const modulesDir = modulesCandidates.find((candidate) =>
+        fs.existsSync(candidate),
+      );
+      if (modulesDir && !process.env.OPENSSL_MODULES) {
+        process.env.OPENSSL_MODULES = modulesDir;
+      }
+
+      const legacyConfigPath = path.join(
+        os.tmpdir(),
+        "openssl-legacy-auto.cnf",
+      );
+      if (!fs.existsSync(legacyConfigPath)) {
+        const configContent = [
+          "openssl_conf = openssl_init",
+          "",
+          "[openssl_init]",
+          "providers = provider_sect",
+          "",
+          "[provider_sect]",
+          "default = default_sect",
+          "legacy = legacy_sect",
+          "",
+          "[default_sect]",
+          "activate = 1",
+          "",
+          "[legacy_sect]",
+          "activate = 1",
+          "",
+        ].join("\n");
+        fs.writeFileSync(legacyConfigPath, configContent, "utf8");
+      }
+      process.env.OPENSSL_CONF = legacyConfigPath;
+    };
+
     const toolsConfig: any = {
       mod,
       UF: this.config.uf,
@@ -133,30 +342,88 @@ export class SefazService {
       xmllint: this.config.xmllintPath ?? process.env.XMLLINT_PATH ?? "xmllint",
       CNPJ: this.config.cnpj ?? "",
     };
-    if (this.config.opensslPath) {
-      toolsConfig.openssl = this.config.opensslPath;
+    const opensslPath = resolveOpenSSLPath();
+    if (opensslPath) {
+      toolsConfig.openssl = opensslPath;
+      // pem (usado internamente) le OPENSSL_BIN, nao OPENSSL_PATH
+      process.env.OPENSSL_BIN = opensslPath;
+      ensureLegacyOpenSSLConfig(opensslPath);
+      try {
+        // Garante que o modulo pem use o mesmo binario explicitamente
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const pemOpenSSL = require("pem/lib/openssl");
+        if (typeof pemOpenSSL?.set === "function") {
+          pemOpenSSL.set("pathOpenSSL", opensslPath);
+        }
+      } catch {
+        // noop
+      }
     }
+    const tempPfxPath = path.join(
+      os.tmpdir(),
+      `sefaz-cert-${crypto.randomBytes(8).toString("hex")}.pfx`,
+    );
+    fs.writeFileSync(tempPfxPath, this.config.certificateBuffer);
+
     return new Tools(
       toolsConfig,
       {
-        pfx: this.config.certificateBuffer.toString("base64"),
+        // node-sped-nfe/pem expects a filesystem path for pfx
+        pfx: tempPfxPath,
         senha: this.config.certificatePassword,
       },
     );
   }
 
+  async signNFe(xmlContent: string): Promise<string> {
+    const tools = this.buildTools("55");
+    const expectedTpAmb: "1" | "2" =
+      this.config.environment === "producao" ? "1" : "2";
+    let xmlBody = normalizeXmlForTransmission(stripEnviNFe(xmlContent));
+    xmlBody = forceTpAmb(xmlBody, expectedTpAmb);
+    return tools.xmlSign(xmlBody, { tag: "infNFe" });
+  }
+
   async submitNFe(xmlContent: string): Promise<SubmissionResult> {
     try {
       const tools = this.buildTools("55");
-      const xmlBody = stripEnviNFe(xmlContent);
-      const signedXml = hasSignature(xmlBody)
+      const loteId = String(Date.now());
+      const expectedTpAmb: "1" | "2" =
+        this.config.environment === "producao" ? "1" : "2";
+      let xmlBody = normalizeXmlForTransmission(stripEnviNFe(xmlContent));
+      const currentTpAmb = readTpAmb(xmlBody);
+      const alreadySigned = hasSignature(xmlBody);
+
+      if (currentTpAmb && currentTpAmb !== expectedTpAmb && alreadySigned) {
+        throw new Error(
+          `XML assinado com tpAmb=${currentTpAmb}, mas envio esta em ${
+            expectedTpAmb === "1" ? "producao" : "homologacao"
+          }. Gere/assine novamente no ambiente correto.`,
+        );
+      }
+
+      if (!alreadySigned) {
+        xmlBody = forceTpAmb(xmlBody, expectedTpAmb);
+      }
+
+      const signedXml = alreadySigned
         ? xmlBody
         : await tools.xmlSign(xmlBody, { tag: "infNFe" });
+
+      // Valida schema localmente para retornar erro objetivo antes de chamar a SEFAZ.
+      try {
+        await tools.validarNFe(signedXml);
+      } catch (validationError) {
+        const message = describeUnknownError(validationError);
+        if (!/xmllint/i.test(message)) {
+          throw new Error(`XML invalido no schema local: ${message}`);
+        }
+      }
 
       const response = await tools.sefazEnviaLote(
         signedXml,
         {
-          idLote: String(Date.now()),
+          idLote: loteId,
           indSinc: 1,
           compactar: false,
         } as any,
@@ -164,7 +431,11 @@ export class SefazService {
 
       const parsed = resolveFinalStatus(String(response || ""));
       const status = parsed.status || "0";
-      const message = parsed.message || "Resposta SEFAZ sem cStat";
+      const soapFault = extractSoapFaultMessage(String(response || ""));
+      const message =
+        parsed.message ||
+        (soapFault ? `Fault SOAP da SEFAZ: ${soapFault}` : "") ||
+        "Resposta SEFAZ sem cStat";
       const success = status === "100" || status === "150";
 
       return {
@@ -178,13 +449,16 @@ export class SefazService {
         rawResponse: String(response || ""),
       };
     } catch (error) {
+      const detailedMessage = describeUnknownError(error);
       return {
         success: false,
         protocol: "",
         timestamp: new Date(),
         status: "error",
         message:
-          error instanceof Error ? error.message : "Erro ao enviar NF-e",
+          detailedMessage.toLowerCase().includes("could not find openssl")
+            ? "OpenSSL nao encontrado no servidor. Configure OPENSSL_PATH no .env (Windows ex.: C:\\Program Files\\OpenSSL-Win64\\bin\\openssl.exe)."
+            : detailedMessage || "Erro ao enviar NF-e",
       };
     }
   }
@@ -192,9 +466,19 @@ export class SefazService {
   async submitNFCe(xmlContent: string): Promise<SubmissionResult> {
     try {
       const tools = this.buildTools("65");
-      const xmlBody = stripEnviNFe(xmlContent);
+      const expectedTpAmb: "1" | "2" =
+        this.config.environment === "producao" ? "1" : "2";
+      const xmlBody = normalizeXmlForTransmission(stripEnviNFe(xmlContent));
       if (!hasSignature(xmlBody)) {
         throw new Error("XML NFC-e sem assinatura. Assine antes do envio.");
+      }
+      const currentTpAmb = readTpAmb(xmlBody);
+      if (currentTpAmb && currentTpAmb !== expectedTpAmb) {
+        throw new Error(
+          `XML NFC-e assinado com tpAmb=${currentTpAmb}, mas envio esta em ${
+            expectedTpAmb === "1" ? "producao" : "homologacao"
+          }.`,
+        );
       }
 
       const response = await tools.sefazEnviaLote(
