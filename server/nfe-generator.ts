@@ -132,6 +132,7 @@ export class NFEGenerator {
       cNF,
       tpEmis: "1",
     });
+    const serieXml = String(parseInt(padNumber(series || "1", 3), 10));
     const tpAmb = environment === "producao" ? "1" : "2";
     const emissionDateTime = formatDateTimeWithOffset(new Date());
     const emitUF = (config.companyState || "MG").toUpperCase();
@@ -188,6 +189,25 @@ export class NFEGenerator {
         const ncm = padNumber(item.ncm || "00000000", 8);
         const cfop = padNumber(item.cfop || config.cfop || "5102", 4);
         const csosn = padNumber(item.csosn || "102", 3);
+        const icmsXmlByCsosn = (() => {
+          if (csosn === "101") {
+            return `<ICMSSN101>
+            <orig>0</orig>
+            <CSOSN>101</CSOSN>
+            <pCredSN>0.00</pCredSN>
+            <vCredICMSSN>0.00</vCredICMSSN>
+          </ICMSSN101>`;
+          }
+          if (["102", "103", "300", "400"].includes(csosn)) {
+            return `<ICMSSN${csosn}>
+            <orig>0</orig>
+            <CSOSN>${csosn}</CSOSN>
+          </ICMSSN${csosn}>`;
+          }
+          throw new Error(
+            `CSOSN ${csosn} nao suportado no gerador NF-e para CRT=1. Ajuste o cadastro fiscal do produto ou implemente a regra especifica.`,
+          );
+        })();
         const vProd = asMoney(subtotal);
         const vUnCom = asMoney(unitPrice);
         const qCom = asQty(qty);
@@ -211,10 +231,7 @@ export class NFEGenerator {
       </prod>
       <imposto>
         <ICMS>
-          <ICMSSN102>
-            <orig>0</orig>
-            <CSOSN>${csosn}</CSOSN>
-          </ICMSSN102>
+          ${icmsXmlByCsosn}
         </ICMS>
         <PIS>
           <PISNT>
@@ -251,7 +268,7 @@ export class NFEGenerator {
       <cNF>${cNF}</cNF>
       <natOp>Venda</natOp>
       <mod>55</mod>
-      <serie>${padNumber(series || "1", 3)}</serie>
+      <serie>${serieXml}</serie>
       <nNF>${parseInt(nNF, 10)}</nNF>
       <dhEmi>${emissionDateTime}</dhEmi>
       <tpNF>1</tpNF>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import {
   Card,
   CardContent,
@@ -42,9 +42,6 @@ const UFS = [
 ];
 
 export default function SefazTestPage() {
-  const [environment, setEnvironment] = useState<"homologacao" | "producao">(
-    "homologacao"
-  );
   const [uf, setUf] = useState("SP");
   const [documentType, setDocumentType] = useState<"nfe" | "nfce">("nfe");
   const [loading, setLoading] = useState(false);
@@ -62,13 +59,13 @@ export default function SefazTestPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ environment, uf, documentType }),
+        body: JSON.stringify({ uf, documentType }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || "Erro ao testar conexão");
+        setError(data.error || "Erro ao testar conexÃ£o");
         return;
       }
 
@@ -88,40 +85,18 @@ export default function SefazTestPage() {
         <Card>
           <CardHeader>
             <CardTitle data-testid="text-sefaz-test">
-              Teste de Conexão SEFAZ
+              Teste de ConexÃ£o SEFAZ
             </CardTitle>
             <CardDescription>
-              Teste a conexão com os webservices da SEFAZ em homologação ou
-              produção
+              Teste a conexÃ£o com os webservices da SEFAZ em homologaÃ§Ã£o ou
+              produÃ§Ã£o
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Environment Selection */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Ambiente</label>
-              <div className="flex gap-4">
-                <button
-                  data-testid="button-homologacao"
-                  onClick={() => setEnvironment("homologacao")}
-                  className={`px-4 py-2 rounded border transition-colors ${
-                    environment === "homologacao"
-                      ? "bg-blue-500 text-white border-blue-500"
-                      : "border-gray-300 hover:border-gray-400"
-                  }`}
-                >
-                  Homologação
-                </button>
-                <button
-                  data-testid="button-producao"
-                  onClick={() => setEnvironment("producao")}
-                  className={`px-4 py-2 rounded border transition-colors ${
-                    environment === "producao"
-                      ? "bg-red-500 text-white border-red-500"
-                      : "border-gray-300 hover:border-gray-400"
-                  }`}
-                >
-                  Produção
-                </button>
+              <div className="rounded border px-3 py-2 text-sm text-muted-foreground">
+                Definido na configuracao fiscal da empresa
               </div>
             </div>
             <div className="space-y-2">
@@ -160,7 +135,7 @@ export default function SefazTestPage() {
               className="w-full"
               size="lg"
             >
-              {loading ? "Testando..." : "Testar Conexão"}
+              {loading ? "Testando..." : "Testar ConexÃ£o"}
             </Button>
 
             {/* Error Message */}
@@ -180,7 +155,7 @@ export default function SefazTestPage() {
                     className="text-green-800"
                     data-testid="text-success"
                   >
-                    Conexão estabelecida com sucesso!
+                    ConexÃ£o estabelecida com sucesso!
                   </AlertDescription>
                 </Alert>
 
@@ -226,9 +201,9 @@ export default function SefazTestPage() {
                       className="text-sm text-gray-700"
                       data-testid="text-environment"
                     >
-                      {environment === "homologacao"
-                        ? "Homologação"
-                        : "Produção"}
+                      {result?.environment === "producao"
+                        ? "Producao"
+                        : "Homologacao"}
                     </p>
                   </div>
 
@@ -239,7 +214,7 @@ export default function SefazTestPage() {
                       </label>
                       <p className="text-sm" data-testid="text-certificate">
                         {result.certificateRequired ? (
-                          <Badge variant="destructive">Obrigatório</Badge>
+                          <Badge variant="destructive">ObrigatÃ³rio</Badge>
                         ) : (
                           <Badge variant="secondary">Opcional</Badge>
                         )}
@@ -250,9 +225,9 @@ export default function SefazTestPage() {
 
                 <div className="text-xs text-gray-600 bg-blue-50 p-3 rounded">
                   <p>
-                    <strong>ℹ️ Dica:</strong> Em homologação, você pode testar
-                    sem certificado digital. Em produção, um certificado e-CNPJ
-                    válido é obrigatório.
+                    <strong>â„¹ï¸ Dica:</strong> Em homologaÃ§Ã£o, vocÃª pode testar
+                    sem certificado digital. Em produÃ§Ã£o, um certificado e-CNPJ
+                    vÃ¡lido Ã© obrigatÃ³rio.
                   </p>
                 </div>
               </div>
@@ -261,15 +236,15 @@ export default function SefazTestPage() {
             {/* Info Section */}
             <div className="bg-blue-50 border border-blue-200 rounded p-4 space-y-2">
               <h3 className="font-semibold text-sm text-blue-900">
-                📋 Informações
+                ðŸ“‹ InformaÃ§Ãµes
               </h3>
               <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
-                <li>Teste a conexão com SEFAZ antes de emitir notas fiscais</li>
+                <li>Teste a conexÃ£o com SEFAZ antes de emitir notas fiscais</li>
                 <li>
-                  Em <strong>homologação</strong>: use para testes sem riscos
+                  Em <strong>homologaÃ§Ã£o</strong>: use para testes sem riscos
                 </li>
                 <li>
-                  Em <strong>produção</strong>: requer certificado e-CNPJ válido
+                  Em <strong>produÃ§Ã£o</strong>: requer certificado e-CNPJ vÃ¡lido
                 </li>
                 <li>Tempo de resposta normal: 100-500ms</li>
               </ul>
@@ -280,3 +255,4 @@ export default function SefazTestPage() {
     </div>
   );
 }
+

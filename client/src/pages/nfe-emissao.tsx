@@ -99,7 +99,6 @@ export default function NFEEmissao() {
   const [, setLocation] = useLocation();
 
   const [activeSection, setActiveSection] = useState("itens");
-  const [environment, setEnvironment] = useState("homologacao");
   const [series, setSeries] = useState("1");
   const [documentNumber] = useState("Automatico");
   const [operationType, setOperationType] = useState("saida");
@@ -190,13 +189,6 @@ export default function NFEEmissao() {
       return res.json();
     },
   });
-
-  useEffect(() => {
-    const fiscalEnvironment = settings?.fiscalEnvironment;
-    if (fiscalEnvironment === "producao" || fiscalEnvironment === "homologacao") {
-      setEnvironment(fiscalEnvironment);
-    }
-  }, [settings?.fiscalEnvironment]);
 
   const ufToCode: Record<string, string> = {
     RO: "11",
@@ -296,7 +288,7 @@ export default function NFEEmissao() {
       const response = await fetch("/api/fiscal/nfe/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config, series, environment }),
+        body: JSON.stringify({ config, series }),
       });
       if (!response.ok) {
         const error = await response.json();
@@ -312,7 +304,7 @@ export default function NFEEmissao() {
       const response = await fetch("/api/fiscal/sefaz/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ xmlContent: xml, environment, uf }),
+        body: JSON.stringify({ xmlContent: xml, uf }),
       });
       if (!response.ok) {
         const error = await response.json();
@@ -812,13 +804,14 @@ export default function NFEEmissao() {
                     <div className="grid gap-4 md:grid-cols-3">
                       <div>
                         <Label>Ambiente</Label>
-                        <Select value={environment} onValueChange={setEnvironment}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="homologacao">Homologacao</SelectItem>
-                            <SelectItem value="producao">Producao</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <Input
+                          value={
+                            settings?.fiscalEnvironment === "producao"
+                              ? "Producao (configuracao da empresa)"
+                              : "Homologacao (configuracao da empresa)"
+                          }
+                          disabled
+                        />
                       </div>
                       <div>
                         <Label>Tipo operacao</Label>

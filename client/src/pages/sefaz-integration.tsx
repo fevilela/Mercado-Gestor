@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Card,
@@ -65,34 +65,18 @@ interface PendingNFe {
 
 export default function SefazIntegration() {
   const { toast } = useToast();
-  const [environment, setEnvironment] = useState("homologacao");
   const [uf, setUf] = useState("SP");
   const [documentType, setDocumentType] = useState<"nfe" | "nfce">("nfe");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [selectedNFe, setSelectedNFe] = useState<number | null>(null);
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const response = await fetch("/api/settings");
-        if (!response.ok) return;
-        const data = await response.json();
-        if (data?.fiscalEnvironment) {
-          setEnvironment(data.fiscalEnvironment);
-        }
-      } catch {
-        return;
-      }
-    };
-    loadSettings();
-  }, []);
 
   // Cancelar NF-e
   const [cancelNumber, setCancelNumber] = useState("");
   const [cancelSeries, setCancelSeries] = useState("");
   const [cancelReason, setCancelReason] = useState("");
 
-  // Carta de Correção
+  // Carta de CorreÃ§Ã£o
   const [correctionNumber, setCorrectionNumber] = useState("");
   const [correctionSeries, setCorrectionSeries] = useState("");
   const [correctionReason, setCorrectionReason] = useState("");
@@ -104,7 +88,7 @@ export default function SefazIntegration() {
   const [inutilEnd, setInutilEnd] = useState("");
   const [inutilReason, setInutilReason] = useState("");
 
-  // Contingência
+  // ContingÃªncia
   const [contingencyMode, setContingencyMode] = useState("offline");
 
   // Status
@@ -136,13 +120,13 @@ export default function SefazIntegration() {
       if (data.success || data.message) {
         toast({
           title: "Sucesso",
-          description: data.message || "Operação realizada com sucesso",
+          description: data.message || "OperaÃ§Ã£o realizada com sucesso",
         });
         refetchNFes();
       } else {
         toast({
           title: "Erro",
-          description: data.error || "Erro ao processar solicitação",
+          description: data.error || "Erro ao processar solicitaÃ§Ã£o",
           variant: "destructive",
         });
       }
@@ -171,7 +155,6 @@ export default function SefazIntegration() {
     }
     apiCall("/api/fiscal/sefaz/submit", {
       nfeLogId: selectedNFe,
-      environment,
       uf,
     });
   };
@@ -180,7 +163,7 @@ export default function SefazIntegration() {
     if (!cancelNumber || !cancelSeries || !cancelReason.trim()) {
       toast({
         title: "Erro",
-        description: "Preencha todos os campos obrigatórios",
+        description: "Preencha todos os campos obrigatÃ³rios",
         variant: "destructive",
       });
       return;
@@ -189,7 +172,6 @@ export default function SefazIntegration() {
       nfeNumber: cancelNumber,
       nfeSeries: cancelSeries,
       reason: cancelReason,
-      environment,
     });
   };
 
@@ -202,7 +184,7 @@ export default function SefazIntegration() {
     ) {
       toast({
         title: "Erro",
-        description: "Preencha todos os campos obrigatórios",
+        description: "Preencha todos os campos obrigatÃ³rios",
         variant: "destructive",
       });
       return;
@@ -212,7 +194,6 @@ export default function SefazIntegration() {
       nfeSeries: correctionSeries,
       correctionReason,
       correctedContent,
-      environment,
     });
   };
 
@@ -220,7 +201,7 @@ export default function SefazIntegration() {
     if (!inutilSeries || !inutilStart || !inutilEnd || !inutilReason.trim()) {
       toast({
         title: "Erro",
-        description: "Preencha todos os campos obrigatórios",
+        description: "Preencha todos os campos obrigatÃ³rios",
         variant: "destructive",
       });
       return;
@@ -230,7 +211,6 @@ export default function SefazIntegration() {
       startNumber: inutilStart,
       endNumber: inutilEnd,
       reason: inutilReason,
-      environment,
     });
   };
 
@@ -245,17 +225,17 @@ export default function SefazIntegration() {
       const response = await fetch("/api/fiscal/sefaz/test-connection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ environment, uf, documentType }),
+        body: JSON.stringify({ uf, documentType }),
       });
       const data = await response.json();
       setResult(data);
       toast({
-        title: data.success ? "Conexão OK" : "Erro",
+        title: data.success ? "ConexÃ£o OK" : "Erro",
         description: `${data.message} (${data.responseTime}ms)`,
       });
     } catch (error) {
       const errorMsg =
-        error instanceof Error ? error.message : "Erro na conexão";
+        error instanceof Error ? error.message : "Erro na conexÃ£o";
       setResult({ error: errorMsg });
       toast({ title: "Erro", description: errorMsg, variant: "destructive" });
     } finally {
@@ -267,7 +247,7 @@ export default function SefazIntegration() {
     if (!statusProtocol.trim()) {
       toast({
         title: "Erro",
-        description: "Protocolo é obrigatório",
+        description: "Protocolo Ã© obrigatÃ³rio",
         variant: "destructive",
       });
       return;
@@ -328,7 +308,7 @@ export default function SefazIntegration() {
                 navigator.clipboard.writeText(result.protocol);
                 toast({
                   title: "Copiado",
-                  description: "Protocolo copiado para a área de transferência",
+                  description: "Protocolo copiado para a Ã¡rea de transferÃªncia",
                 });
               }}
               data-testid="button-copy-protocol"
@@ -346,23 +326,15 @@ export default function SefazIntegration() {
       <div className="space-y-6 p-6">
         <div>
           <h1 className="text-3xl font-bold" data-testid="text-sefaz-title">
-            Integração SEFAZ
+            IntegraÃ§Ã£o SEFAZ
           </h1>
           <p className="text-gray-600">
-            Gerenciar envio e autorização de notas fiscais
+            Gerenciar envio e autorizaÃ§Ã£o de notas fiscais
           </p>
         </div>
 
         <div className="flex gap-2">
-          <Select value={environment} onValueChange={setEnvironment}>
-            <SelectTrigger className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="homologacao">Homologação</SelectItem>
-              <SelectItem value="producao">Produção</SelectItem>
-            </SelectContent>
-          </Select>
+          <Input value="Ambiente da configuracao da empresa" disabled className="w-72" />
           <Select value={uf} onValueChange={setUf}>
             <SelectTrigger className="w-32">
               <SelectValue />
@@ -398,7 +370,7 @@ export default function SefazIntegration() {
             {loading ? (
               <Loader className="mr-2 animate-spin" size={16} />
             ) : null}
-            Testar Conexão
+            Testar ConexÃ£o
           </Button>
         </div>
 
@@ -406,9 +378,9 @@ export default function SefazIntegration() {
           <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="submit">Enviar</TabsTrigger>
             <TabsTrigger value="cancel">Cancelar</TabsTrigger>
-            <TabsTrigger value="correction">Correção</TabsTrigger>
+            <TabsTrigger value="correction">CorreÃ§Ã£o</TabsTrigger>
             <TabsTrigger value="inutilize">Inutilizar</TabsTrigger>
-            <TabsTrigger value="contingency">Contingência</TabsTrigger>
+            <TabsTrigger value="contingency">ContingÃªncia</TabsTrigger>
             <TabsTrigger value="status">Status</TabsTrigger>
           </TabsList>
 
@@ -495,18 +467,18 @@ export default function SefazIntegration() {
               <CardHeader>
                 <CardTitle>Cancelar NF-e</CardTitle>
                 <CardDescription>
-                  Cancele uma NF-e já autorizada
+                  Cancele uma NF-e jÃ¡ autorizada
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <Input
-                  placeholder="Número da NF-e"
+                  placeholder="NÃºmero da NF-e"
                   value={cancelNumber}
                   onChange={(e) => setCancelNumber(e.target.value)}
                   data-testid="input-cancel-number"
                 />
                 <Input
-                  placeholder="Série"
+                  placeholder="SÃ©rie"
                   value={cancelSeries}
                   onChange={(e) => setCancelSeries(e.target.value)}
                   data-testid="input-cancel-series"
@@ -533,37 +505,37 @@ export default function SefazIntegration() {
             </Card>
           </TabsContent>
 
-          {/* Carta de Correção */}
+          {/* Carta de CorreÃ§Ã£o */}
           <TabsContent value="correction">
             <Card>
               <CardHeader>
-                <CardTitle>Carta de Correção</CardTitle>
+                <CardTitle>Carta de CorreÃ§Ã£o</CardTitle>
                 <CardDescription>
-                  Envie uma carta de correção para uma NF-e
+                  Envie uma carta de correÃ§Ã£o para uma NF-e
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <Input
-                  placeholder="Número da NF-e"
+                  placeholder="NÃºmero da NF-e"
                   value={correctionNumber}
                   onChange={(e) => setCorrectionNumber(e.target.value)}
                   data-testid="input-correction-number"
                 />
                 <Input
-                  placeholder="Série"
+                  placeholder="SÃ©rie"
                   value={correctionSeries}
                   onChange={(e) => setCorrectionSeries(e.target.value)}
                   data-testid="input-correction-series"
                 />
                 <Textarea
-                  placeholder="Motivo da correção"
+                  placeholder="Motivo da correÃ§Ã£o"
                   value={correctionReason}
                   onChange={(e) => setCorrectionReason(e.target.value)}
                   rows={3}
                   data-testid="textarea-correction-reason"
                 />
                 <Textarea
-                  placeholder="Conteúdo corrigido"
+                  placeholder="ConteÃºdo corrigido"
                   value={correctedContent}
                   onChange={(e) => setCorrectedContent(e.target.value)}
                   rows={5}
@@ -578,44 +550,44 @@ export default function SefazIntegration() {
                   {loading ? (
                     <Loader className="mr-2 animate-spin" size={16} />
                   ) : null}
-                  Enviar Carta de Correção
+                  Enviar Carta de CorreÃ§Ã£o
                 </Button>
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Inutilizar Numeração */}
+          {/* Inutilizar NumeraÃ§Ã£o */}
           <TabsContent value="inutilize">
             <Card>
               <CardHeader>
-                <CardTitle>Inutilizar Numeração</CardTitle>
+                <CardTitle>Inutilizar NumeraÃ§Ã£o</CardTitle>
                 <CardDescription>
-                  Inutilize um intervalo de números de NF-e
+                  Inutilize um intervalo de nÃºmeros de NF-e
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <Input
-                  placeholder="Série"
+                  placeholder="SÃ©rie"
                   value={inutilSeries}
                   onChange={(e) => setInutilSeries(e.target.value)}
                   data-testid="input-inutilize-series"
                 />
                 <Input
-                  placeholder="Número inicial"
+                  placeholder="NÃºmero inicial"
                   type="number"
                   value={inutilStart}
                   onChange={(e) => setInutilStart(e.target.value)}
                   data-testid="input-inutilize-start"
                 />
                 <Input
-                  placeholder="Número final"
+                  placeholder="NÃºmero final"
                   type="number"
                   value={inutilEnd}
                   onChange={(e) => setInutilEnd(e.target.value)}
                   data-testid="input-inutilize-end"
                 />
                 <Textarea
-                  placeholder="Motivo da inutilização"
+                  placeholder="Motivo da inutilizaÃ§Ã£o"
                   value={inutilReason}
                   onChange={(e) => setInutilReason(e.target.value)}
                   rows={4}
@@ -630,19 +602,19 @@ export default function SefazIntegration() {
                   {loading ? (
                     <Loader className="mr-2 animate-spin" size={16} />
                   ) : null}
-                  Inutilizar Numeração
+                  Inutilizar NumeraÃ§Ã£o
                 </Button>
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Contingência */}
+          {/* ContingÃªncia */}
           <TabsContent value="contingency">
             <Card>
               <CardHeader>
-                <CardTitle>Modo Contingência</CardTitle>
+                <CardTitle>Modo ContingÃªncia</CardTitle>
                 <CardDescription>
-                  Ative o modo contingência em caso de indisponibilidade da
+                  Ative o modo contingÃªncia em caso de indisponibilidade da
                   SEFAZ
                 </CardDescription>
               </CardHeader>
@@ -674,7 +646,7 @@ export default function SefazIntegration() {
                   {loading ? (
                     <Loader className="mr-2 animate-spin" size={16} />
                   ) : null}
-                  Ativar Contingência
+                  Ativar ContingÃªncia
                 </Button>
               </CardContent>
             </Card>
@@ -686,12 +658,12 @@ export default function SefazIntegration() {
               <CardHeader>
                 <CardTitle>Consultar Status</CardTitle>
                 <CardDescription>
-                  Consulte o status de autorização de uma NF-e
+                  Consulte o status de autorizaÃ§Ã£o de uma NF-e
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <Input
-                  placeholder="Número do protocolo"
+                  placeholder="NÃºmero do protocolo"
                   value={statusProtocol}
                   onChange={(e) => setStatusProtocol(e.target.value)}
                   data-testid="input-status-protocol"
@@ -717,3 +689,4 @@ export default function SefazIntegration() {
     </Layout>
   );
 }
+

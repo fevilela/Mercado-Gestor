@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
 import { createRequire } from "module";
+import { XMLSignatureService } from "./xml-signature";
 
 const require = createRequire(import.meta.url);
 
@@ -27,6 +28,8 @@ export interface SubmissionResult {
   key?: string;
   signedXml?: string;
   rawResponse?: string;
+  sentXmlPath?: string;
+  sentXmlSha256?: string;
 }
 
 export interface CancellationResult {
@@ -84,6 +87,24 @@ const normalizeXmlForTransmission = (xmlContent: string): string => {
     .trim();
 };
 
+const sanitizeXmlPayload = (xmlContent: string): string => {
+  let source = String(xmlContent || "").trim();
+  if (
+    (source.startsWith('"') && source.endsWith('"')) ||
+    (source.startsWith("'") && source.endsWith("'"))
+  ) {
+    try {
+      const parsed = JSON.parse(source);
+      if (typeof parsed === "string") {
+        source = parsed;
+      }
+    } catch {
+      source = source.slice(1, -1);
+    }
+  }
+  return normalizeXmlForTransmission(source);
+};
+
 const readTpAmb = (xmlContent: string): string => {
   const match = String(xmlContent || "").match(/<tpAmb>(\d)<\/tpAmb>/);
   return match?.[1] || "";
@@ -98,6 +119,37 @@ const forceTpAmb = (xmlContent: string, tpAmb: "1" | "2"): string => {
 
 const hasSignature = (xmlContent: string): boolean =>
   /<\s*Signature\b/.test(xmlContent);
+
+const extractInfNFeId = (xmlContent: string): string => {
+  const match = String(xmlContent || "").match(/<infNFe[^>]*Id="([^"]+)"/i);
+  return match?.[1] || "";
+};
+
+const saveSubmitDebugXml = async (params: {
+  xmlContent: string;
+  docType: "nfe" | "nfce";
+  uf: string;
+  environment: "homologacao" | "producao";
+}) => {
+  const debugEnabled = process.env.SEFAZ_DEBUG_XML === "true";
+  const sha256 = crypto
+    .createHash("sha256")
+    .update(params.xmlContent, "utf8")
+    .digest("hex");
+  if (!debugEnabled) {
+    return { path: undefined as string | undefined, sha256 };
+  }
+
+  const dir = path.join(process.cwd(), "server", "logs");
+  await fs.promises.mkdir(dir, { recursive: true });
+  const filename = `${params.docType}-submit-${params.environment}-${params.uf.toLowerCase()}-${Date.now()}-${sha256.slice(
+    0,
+    12,
+  )}.xml`;
+  const fullPath = path.join(dir, filename);
+  await fs.promises.writeFile(fullPath, params.xmlContent, "utf8");
+  return { path: fullPath, sha256 };
+};
 
 const stripWrappingQuotes = (value?: string): string | undefined => {
   if (!value) return undefined;
@@ -338,7 +390,9 @@ export class SefazService {
       UF: this.config.uf,
       tpAmb: this.config.environment === "producao" ? 1 : 2,
       versao: "4.00",
-      timeout: this.config.timeout ?? 30,
+      timeout:
+        this.config.timeout ??
+        Number(process.env.SEFAZ_REQUEST_TIMEOUT_SECONDS || "60"),
       xmllint: this.config.xmllintPath ?? process.env.XMLLINT_PATH ?? "xmllint",
       CNPJ: this.config.cnpj ?? "",
     };
@@ -376,6 +430,23 @@ export class SefazService {
   }
 
   async signNFe(xmlContent: string): Promise<string> {
+    const expectedTpAmb: "1" | "2" =
+      this.config.environment === "producao" ? "1" : "2";
+    let xmlBody = normalizeXmlForTransmission(stripEnviNFe(xmlContent));
+    xmlBody = forceTpAmb(xmlBody, expectedTpAmb);
+    const referenceId = extractInfNFeId(xmlBody);
+    if (!referenceId) {
+      throw new Error("XML invalido: infNFe Id nao encontrado para assinatura");
+    }
+    return XMLSignatureService.signXML(
+      xmlBody,
+      this.config.certificateBuffer.toString("base64"),
+      this.config.certificatePassword,
+      referenceId,
+    );
+  }
+
+  async signNFeWithTools(xmlContent: string): Promise<string> {
     const tools = this.buildTools("55");
     const expectedTpAmb: "1" | "2" =
       this.config.environment === "producao" ? "1" : "2";
@@ -390,9 +461,10 @@ export class SefazService {
       const loteId = String(Date.now());
       const expectedTpAmb: "1" | "2" =
         this.config.environment === "producao" ? "1" : "2";
-      let xmlBody = normalizeXmlForTransmission(stripEnviNFe(xmlContent));
+      const strippedXml = stripEnviNFe(sanitizeXmlPayload(xmlContent));
+      const alreadySigned = hasSignature(strippedXml);
+      let xmlBody = normalizeXmlForTransmission(strippedXml);
       const currentTpAmb = readTpAmb(xmlBody);
-      const alreadySigned = hasSignature(xmlBody);
 
       if (currentTpAmb && currentTpAmb !== expectedTpAmb && alreadySigned) {
         throw new Error(
@@ -408,14 +480,24 @@ export class SefazService {
 
       const signedXml = alreadySigned
         ? xmlBody
-        : await tools.xmlSign(xmlBody, { tag: "infNFe" });
+        : await this.signNFe(xmlBody);
+      const submitDebug = await saveSubmitDebugXml({
+        xmlContent: signedXml,
+        docType: "nfe",
+        uf: this.config.uf,
+        environment: this.config.environment,
+      });
 
       // Valida schema localmente para retornar erro objetivo antes de chamar a SEFAZ.
       try {
         await tools.validarNFe(signedXml);
       } catch (validationError) {
         const message = describeUnknownError(validationError);
-        if (!/xmllint/i.test(message)) {
+        if (/xmllint/i.test(message)) {
+          console.warn(
+            "[SEFAZ] Validacao de schema local indisponivel (xmllint nao encontrado). Prosseguindo com envio para a SEFAZ.",
+          );
+        } else {
           throw new Error(`XML invalido no schema local: ${message}`);
         }
       }
@@ -447,6 +529,8 @@ export class SefazService {
         key: parsed.key || "",
         signedXml,
         rawResponse: String(response || ""),
+        sentXmlPath: submitDebug.path,
+        sentXmlSha256: submitDebug.sha256,
       };
     } catch (error) {
       const detailedMessage = describeUnknownError(error);
@@ -468,8 +552,10 @@ export class SefazService {
       const tools = this.buildTools("65");
       const expectedTpAmb: "1" | "2" =
         this.config.environment === "producao" ? "1" : "2";
-      const xmlBody = normalizeXmlForTransmission(stripEnviNFe(xmlContent));
-      if (!hasSignature(xmlBody)) {
+      const strippedXml = stripEnviNFe(sanitizeXmlPayload(xmlContent));
+      const alreadySigned = hasSignature(strippedXml);
+      const xmlBody = normalizeXmlForTransmission(strippedXml);
+      if (!alreadySigned) {
         throw new Error("XML NFC-e sem assinatura. Assine antes do envio.");
       }
       const currentTpAmb = readTpAmb(xmlBody);
@@ -489,6 +575,12 @@ export class SefazService {
           compactar: false,
         } as any,
       );
+      const submitDebug = await saveSubmitDebugXml({
+        xmlContent: xmlBody,
+        docType: "nfce",
+        uf: this.config.uf,
+        environment: this.config.environment,
+      });
 
       const parsed = resolveFinalStatus(String(response || ""));
       const status = parsed.status || "0";
@@ -504,6 +596,8 @@ export class SefazService {
         key: parsed.key || "",
         signedXml: xmlBody,
         rawResponse: String(response || ""),
+        sentXmlPath: submitDebug.path,
+        sentXmlSha256: submitDebug.sha256,
       };
     } catch (error) {
       return {

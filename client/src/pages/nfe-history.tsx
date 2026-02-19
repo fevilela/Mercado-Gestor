@@ -90,12 +90,10 @@ export default function NfeHistoryPage() {
     open: boolean;
     doc: NFeHistoryRecord | null;
     xmlContent: string;
-    environment: "homologacao" | "producao";
   }>({
     open: false,
     doc: null,
     xmlContent: "",
-    environment: "homologacao",
   });
 
   const { data: records = [], isLoading } = useQuery<NFeHistoryRecord[]>({
@@ -114,7 +112,6 @@ export default function NfeHistoryPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           nfeLogId: doc.id,
-          environment: doc.environment,
           uf,
         }),
       });
@@ -162,7 +159,6 @@ export default function NfeHistoryPage() {
           accessKey: doc.documentKey,
           protocol: doc.protocol,
           reason,
-          environment: doc.environment,
           uf,
         }),
       });
@@ -190,11 +186,9 @@ export default function NfeHistoryPage() {
     mutationFn: async ({
       doc,
       xmlContent,
-      environment,
     }: {
       doc: NFeHistoryRecord;
       xmlContent: string;
-      environment: "homologacao" | "producao";
     }) => {
       const res = await fetch("/api/fiscal/nfe/re-sign", {
         method: "POST",
@@ -202,7 +196,6 @@ export default function NfeHistoryPage() {
         body: JSON.stringify({
           nfeLogId: doc.id,
           xmlContent,
-          environment,
         }),
       });
       if (!res.ok) {
@@ -220,7 +213,6 @@ export default function NfeHistoryPage() {
         open: false,
         doc: null,
         xmlContent: "",
-        environment: "homologacao",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
     },
@@ -335,7 +327,6 @@ export default function NfeHistoryPage() {
                           open: true,
                           doc,
                           xmlContent: doc.xmlContent || "",
-                          environment: doc.environment,
                         })
                       }
                       disabled={!doc.canSend || reSignMutation.isPending}
@@ -440,25 +431,12 @@ export default function NfeHistoryPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="w-44">
+            <div className="w-96">
               <Label>Ambiente de assinatura</Label>
-              <Select
-                value={editDialog.environment}
-                onValueChange={(value) =>
-                  setEditDialog((prev) => ({
-                    ...prev,
-                    environment: value as "homologacao" | "producao",
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="homologacao">Homologacao</SelectItem>
-                  <SelectItem value="producao">Producao</SelectItem>
-                </SelectContent>
-              </Select>
+              <Input
+                value="Configuracao da empresa"
+                disabled
+              />
             </div>
             <div className="space-y-2">
               <Label>XML da NF-e</Label>
@@ -483,7 +461,6 @@ export default function NfeHistoryPage() {
                   open: false,
                   doc: null,
                   xmlContent: "",
-                  environment: "homologacao",
                 })
               }
             >
@@ -495,7 +472,6 @@ export default function NfeHistoryPage() {
                 reSignMutation.mutate({
                   doc: editDialog.doc,
                   xmlContent: editDialog.xmlContent,
-                  environment: editDialog.environment,
                 });
               }}
               disabled={

@@ -202,7 +202,6 @@ export default function FiscalDocuments() {
   });
   const [nfeOps, setNfeOps] = useState({
     uf: "MG",
-    environment: "homologacao",
     xmlContent: "",
     cancelAccessKey: "",
     cancelProtocol: "",
@@ -556,7 +555,6 @@ export default function FiscalDocuments() {
         body: JSON.stringify({
           xmlContent: payload.xmlContent,
           uf: payload.uf,
-          environment: payload.environment,
         }),
       });
       if (!res.ok) {
@@ -583,7 +581,6 @@ export default function FiscalDocuments() {
           protocol: payload.cancelProtocol,
           reason: payload.cancelReason,
           uf: payload.uf,
-          environment: payload.environment,
         }),
       });
       if (!res.ok) {
@@ -610,7 +607,6 @@ export default function FiscalDocuments() {
           correctedContent: payload.cceText,
           sequence: Number(payload.cceSequence || "1"),
           uf: payload.uf,
-          environment: payload.environment,
         }),
       });
       if (!res.ok) {
@@ -638,7 +634,6 @@ export default function FiscalDocuments() {
           endNumber: payload.inutilizeEnd,
           reason: payload.inutilizeReason,
           uf: payload.uf,
-          environment: payload.environment,
         }),
       });
       if (!res.ok) {
@@ -2256,20 +2251,11 @@ export default function FiscalDocuments() {
                   </div>
                   <div>
                     <Label>Ambiente</Label>
-                    <Select
-                      value={nfeOps.environment}
-                      onValueChange={(val) => updateNfeOps("environment", val)}
-                    >
-                      <SelectTrigger data-testid="select-nfe-environment">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="homologacao">
-                          Homologacao
-                        </SelectItem>
-                        <SelectItem value="producao">Producao</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Input
+                      value="Configuracao da empresa"
+                      disabled
+                      data-testid="input-nfe-environment"
+                    />
                   </div>
                 </div>
 

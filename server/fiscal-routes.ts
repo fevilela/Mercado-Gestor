@@ -138,6 +138,15 @@ const forceXmlTpAmb = (xmlContent: string, tpAmb: "1" | "2"): string => {
   return xmlContent;
 };
 
+const normalizeXmlSerieTag = (xmlContent: string): string => {
+  const source = String(xmlContent || "");
+  const match = source.match(/<serie>(\d+)<\/serie>/i);
+  if (!match?.[1]) return source;
+  const normalized = String(parseInt(match[1], 10));
+  if (!normalized || normalized === match[1]) return source;
+  return source.replace(/<serie>\d+<\/serie>/i, `<serie>${normalized}</serie>`);
+};
+
 const normalizeLegacyNfeXml = (xmlContent: string): string => {
   const source = String(xmlContent || "");
   const pick = (tag: string, fallback = "") =>
@@ -226,6 +235,28 @@ const normalizeLegacyNfeXml = (xmlContent: string): string => {
   const pICMS = money(pick("pICMS", "0"), "0.00");
   const vICMS = money(pick("vICMS", "0"), "0.00");
   const vNF = money(pick("vNF", vProd), vProd);
+  const isSimplesNacional = crt === "1" || crt === "4";
+  const csosn = num(pick("CSOSN", "102"), 3);
+  const cst = num(pick("CST", "00"), 2);
+  const icmsXml = isSimplesNacional
+    ? `<ICMS>
+          <ICMSSN102>
+            <orig>0</orig>
+            <CSOSN>${csosn || "102"}</CSOSN>
+          </ICMSSN102>
+        </ICMS>`
+    : `<ICMS>
+          <ICMS00>
+            <orig>0</orig>
+            <CST>${cst || "00"}</CST>
+            <modBC>3</modBC>
+            <vBC>${vBC}</vBC>
+            <pICMS>${pICMS}</pICMS>
+            <vICMS>${vICMS}</vICMS>
+          </ICMS00>
+        </ICMS>`;
+  const totalVBC = isSimplesNacional ? "0.00" : vBC;
+  const totalVICMS = isSimplesNacional ? "0.00" : vICMS;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
@@ -302,24 +333,15 @@ const normalizeLegacyNfeXml = (xmlContent: string): string => {
         <indTot>1</indTot>
       </prod>
       <imposto>
-        <ICMS>
-          <ICMS00>
-            <orig>0</orig>
-            <CST>00</CST>
-            <modBC>3</modBC>
-            <vBC>${vBC}</vBC>
-            <pICMS>${pICMS}</pICMS>
-            <vICMS>${vICMS}</vICMS>
-          </ICMS00>
-        </ICMS>
+        ${icmsXml}
         <PIS><PISNT><CST>07</CST></PISNT></PIS>
         <COFINS><COFINSNT><CST>07</CST></COFINSNT></COFINS>
       </imposto>
     </det>
     <total>
       <ICMSTot>
-        <vBC>${vBC}</vBC>
-        <vICMS>${vICMS}</vICMS>
+        <vBC>${totalVBC}</vBC>
+        <vICMS>${totalVICMS}</vICMS>
         <vICMSDeson>0.00</vICMSDeson>
         <vFCP>0.00</vFCP>
         <vBCST>0.00</vBCST>
@@ -411,11 +433,7 @@ const buildIssueDateFromKey = (
 
 const resolveSefazEnvironment = async (
   companyId: number,
-  environment?: string,
 ): Promise<"homologacao" | "producao"> => {
-  if (environment === "producao") {
-    return "producao";
-  }
   const settings = await storage.getCompanySettings(companyId);
   return settings?.fiscalEnvironment === "producao"
     ? "producao"
@@ -1175,22 +1193,29 @@ router.post(
               uf: customer?.state || null,
             },
             respTec: (() => {
-              const cnpj = String(fiscalConfig?.respTecCnpj || "").trim();
-              const contato = String(fiscalConfig?.respTecContato || "").trim();
-              const email = String(fiscalConfig?.respTecEmail || "").trim();
-              const fone = String(fiscalConfig?.respTecFone || "").trim();
-              if (!cnpj && !contato && !email && !fone) {
-                if (uf === "MG") {
-                  throw new Error(
-                    "infRespTec obrigatorio em MG. Preencha o Responsavel Tecnico na Configuracao Fiscal.",
-                  );
-                }
-                return null;
-              }
+              const respTecDigits = String(
+                fiscalConfig?.respTecCnpj || "",
+              ).replace(/\D/g, "");
+              const companyDigits = String(
+                company.cnpj || settings.cnpj || "",
+              ).replace(/\D/g, "");
+              const cnpj = (
+                respTecDigits.length === 14 ? respTecDigits : companyDigits
+              ).trim();
+              const contato = String(
+                fiscalConfig?.respTecContato ||
+                  company.nomeFantasia ||
+                  company.razaoSocial ||
+                  "",
+              ).trim();
+              const email = String(
+                fiscalConfig?.respTecEmail || settings.email || company.email || "",
+              ).trim();
+              const fone = String(
+                fiscalConfig?.respTecFone || settings.phone || company.phone || "",
+              ).trim();
               if (!cnpj || !contato || !email || !fone) {
-                throw new Error(
-                  "infRespTec incompleto: preencha CNPJ, Contato, Email e Telefone na Configuracao Fiscal.",
-                );
+                return null;
               }
               return { cnpj, contato, email, fone };
             })(),
@@ -1936,7 +1961,15 @@ router.post(
       }
 
       const certPem = fs.readFileSync(certPath);
-      const caPem = caPath ? fs.readFileSync(caPath) : undefined;
+      const caPem =
+        caPath && fs.existsSync(caPath)
+          ? fs.readFileSync(caPath)
+          : undefined;
+      if (caPath && !caPem) {
+        console.warn(
+          `[SEFAZ] SEFAZ_CA_CERT_PATH nao encontrado em: ${caPath}. Ignorando CA customizado.`,
+        );
+      }
       const strictSSL = process.env.SEFAZ_STRICT_SSL !== "false";
       const tlsOptions = {
         minVersion: "TLSv1.2",
@@ -1979,17 +2012,14 @@ router.post(
   requirePermission("fiscal:view"),
   async (req, res) => {
     try {
-      const { environment, uf, documentType } = req.body;
+      const { uf, documentType } = req.body;
       const companyId = getCompanyId(req);
       if (!companyId) {
         return res.status(401).json({ error: "Empresa nao identificada" });
       }
 
       const settings = await storage.getCompanySettings(companyId);
-      const resolvedEnvironment = await resolveSefazEnvironment(
-        companyId,
-        environment,
-      );
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
       const sefazUrl =
         resolvedEnvironment === "producao"
           ? settings?.sefazUrlProducao
@@ -2013,7 +2043,6 @@ router.post(
         action: "test-connection",
         environment: resolvedEnvironment,
         requestPayload: {
-          environment,
           uf: resolvedUf,
           documentType: resolvedDocumentType,
           sefazUrl,
@@ -2048,7 +2077,7 @@ router.post(
   requireValidFiscalCertificate(),
   async (req, res) => {
     try {
-      const { config, series = "1", environment = "homologacao" } = req.body;
+      const { config, series = "1" } = req.body;
       const companyId = getCompanyId(req);
 
       if (!config) {
@@ -2074,10 +2103,7 @@ router.post(
         });
       }
 
-      const resolvedEnvironment = await resolveSefazEnvironment(
-        companyId,
-        environment,
-      );
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
 
       const company = await storage.getCompanyById(companyId);
       const settings = await storage.getCompanySettings(companyId);
@@ -2247,7 +2273,7 @@ router.post(
         return res.status(401).json({ error: "Empresa nao identificada" });
       }
 
-      const { nfeLogId, xmlContent: editedXmlContent, environment } = req.body || {};
+      const { nfeLogId, xmlContent: editedXmlContent } = req.body || {};
       const selectedLogId = Number(nfeLogId);
       if (!Number.isFinite(selectedLogId) || selectedLogId <= 0) {
         return res.status(400).json({ error: "nfeLogId invalido" });
@@ -2319,10 +2345,7 @@ router.post(
         });
       }
 
-      const resolvedEnvironment = await resolveSefazEnvironment(
-        companyId,
-        environment,
-      );
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
       const expectedTpAmb: "1" | "2" =
         resolvedEnvironment === "producao" ? "1" : "2";
 
@@ -2530,7 +2553,6 @@ router.post(
     try {
       const {
         xmlContent: rawXmlContent,
-        environment,
         uf,
         nfeLogId,
         nfeId,
@@ -2581,11 +2603,16 @@ router.post(
       if (appearsLegacyXml || missingRequiredAddressBlocks) {
         xmlContent = normalizeLegacyNfeXml(stripXmlSignature(xmlContent));
       }
+      const xmlWithNormalizedSerie = normalizeXmlSerieTag(xmlContent);
+      if (xmlWithNormalizedSerie !== xmlContent) {
+        // Qualquer alteracao estrutural invalida assinatura existente; re-assina no envio.
+        xmlContent = stripXmlSignature(xmlWithNormalizedSerie);
+      }
+      // Evita divergencia entre assinatura validada externamente e payload final enviado:
+      // sempre re-assina no pipeline de envio antes de chamar a SEFAZ.
+      xmlContent = stripXmlSignature(xmlContent);
 
-      const resolvedEnvironment = await resolveSefazEnvironment(
-        companyId,
-        environment,
-      );
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
 
       const company = await storage.getCompanyById(companyId);
       if (!company) {
@@ -2617,7 +2644,42 @@ router.post(
         cnpj: String(company.cnpj || "").replace(/\D/g, ""),
       });
 
-      const result = await sefazService.submitNFe(xmlContent);
+      let result = await sefazService.submitNFe(xmlContent);
+
+      // Alguns XMLs antigos do historico passam na assinatura, mas a SEFAZ
+      // devolve cStat 225 (falha de schema). Fazemos 1 tentativa de
+      // autocorrecao: normaliza para estrutura NF-e 4.00 e re-assina.
+      if (!result.success && String(result.status || "") === "225") {
+        const expectedTpAmb: "1" | "2" =
+          resolvedEnvironment === "producao" ? "1" : "2";
+        const retryXml = forceXmlTpAmb(
+          stripXmlSignature(normalizeLegacyNfeXml(xmlContent)),
+          expectedTpAmb,
+        );
+        result = await sefazService.submitNFe(retryXml);
+      }
+
+      // Em alguns XMLs pendentes antigos, a SEFAZ retorna rejeicao de assinatura
+      // (cStat 297). Tenta novamente assinando explicitamente com o mesmo servico.
+      const isSignatureMismatch =
+        !result.success &&
+        (String(result.status || "") === "297" ||
+          /assinatura difere do calculado/i.test(String(result.message || "")));
+      if (isSignatureMismatch) {
+        const resignedXml = await sefazService.signNFe(xmlContent);
+        result = await sefazService.submitNFe(stripXmlSignature(resignedXml));
+        if (
+          !result.success &&
+          (String(result.status || "") === "297" ||
+            /assinatura difere do calculado/i.test(
+              String(result.message || ""),
+            ))
+        ) {
+          const toolsSignedXml = await sefazService.signNFeWithTools(xmlContent);
+          result = await sefazService.submitNFe(stripXmlSignature(toolsSignedXml));
+        }
+      }
+
       const signedXml = result.signedXml || xmlContent;
       const signed = Boolean(result.signedXml);
       await logSefazTransmission({
@@ -2672,10 +2734,7 @@ router.post(
     } catch (error) {
       const companyId = getCompanyId(req);
       if (companyId) {
-        const resolvedEnvironment = await resolveSefazEnvironment(
-          companyId,
-          req.body?.environment,
-        );
+        const resolvedEnvironment = await resolveSefazEnvironment(companyId);
         await logSefazTransmission({
           companyId,
           action: "submit",
@@ -2716,10 +2775,7 @@ router.post(
         return res.status(400).json({ error: "Empresa nao configurada" });
       }
 
-      const resolvedEnvironment = await resolveSefazEnvironment(
-        companyId,
-        req.body?.environment,
-      );
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
       const uf = String(
         req.body?.uf || settings?.sefazUf || company.state || "SP",
       ).toUpperCase();
@@ -2769,7 +2825,7 @@ router.post(
   requireValidFiscalCertificate(),
   async (req, res) => {
     try {
-      const { nfeNumber, nfeSeries, reason, environment, uf, accessKey, protocol } =
+      const { nfeNumber, nfeSeries, reason, uf, accessKey, protocol } =
         req.body;
       const companyId = getCompanyId(req);
       if (!companyId) {
@@ -2779,10 +2835,7 @@ router.post(
         return res.status(400).json({ error: "Campos obrigatorios ausentes" });
       }
 
-      const resolvedEnvironment = await resolveSefazEnvironment(
-        companyId,
-        environment,
-      );
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
 
       const company = await storage.getCompanyById(companyId);
       if (!company) {
@@ -2871,7 +2924,6 @@ router.post(
         nfeSeries,
         correctionReason,
         correctedContent,
-        environment,
         uf,
         accessKey,
         sequence,
@@ -2884,10 +2936,7 @@ router.post(
         return res.status(400).json({ error: "Campos obrigatorios ausentes" });
       }
 
-      const resolvedEnvironment = await resolveSefazEnvironment(
-        companyId,
-        environment,
-      );
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
 
       const company = await storage.getCompanyById(companyId);
       if (!company) {
@@ -2972,7 +3021,7 @@ router.post(
   requireValidFiscalCertificate(),
   async (req, res) => {
     try {
-      const { series, startNumber, endNumber, reason, environment, uf } =
+      const { series, startNumber, endNumber, reason, uf } =
         req.body;
       const companyId = getCompanyId(req);
       if (!companyId) {
@@ -2982,10 +3031,7 @@ router.post(
         return res.status(400).json({ error: "Campos obrigatorios ausentes" });
       }
 
-      const resolvedEnvironment = await resolveSefazEnvironment(
-        companyId,
-        environment,
-      );
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
 
       const company = await storage.getCompanyById(companyId);
       if (!company) {
@@ -3140,7 +3186,7 @@ router.get(
 // Consultar Recibo SEFAZ
 router.post("/sefaz/receipt", async (req, res) => {
   try {
-    const { xmlContent, environment, uf, sefazUrl } = req.body;
+    const { xmlContent, uf, sefazUrl } = req.body;
     const companyId = getCompanyId(req);
 
     if (!xmlContent) {
@@ -3152,10 +3198,8 @@ router.post("/sefaz/receipt", async (req, res) => {
     }
 
     const resolvedEnvironment = companyId
-      ? await resolveSefazEnvironment(companyId, environment)
-      : environment === "producao"
-        ? "producao"
-        : "homologacao";
+      ? await resolveSefazEnvironment(companyId)
+      : "homologacao";
 
     const sefazService = new SefazService({
       environment: resolvedEnvironment,

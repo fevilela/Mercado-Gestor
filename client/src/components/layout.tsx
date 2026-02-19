@@ -1,4 +1,4 @@
-import {
+﻿import {
   LayoutDashboard,
   ShoppingCart,
   Package,
@@ -37,126 +37,158 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 
-const sidebarItems = [
-  { icon: LayoutDashboard, label: "Dashboard", href: "/", permissions: [] },
+type SidebarItem = {
+  icon: any;
+  label: string;
+  href: string;
+  permissions: string[];
+};
+
+type SidebarSection = {
+  title: string;
+  items: SidebarItem[];
+};
+
+const sidebarSections: SidebarSection[] = [
   {
-    icon: ShoppingCart,
-    label: "PDV (Frente de Caixa)",
-    href: "/pos",
-    permissions: ["pos:view", "pos:sell"],
-  },
-  {
-    icon: Package,
-    label: "Produtos & Estoque",
-    href: "/inventory",
-    permissions: ["inventory:view", "inventory:manage"],
-  },
-  {
-    icon: Store,
-    label: "Vendas & Pedidos",
-    href: "/sales",
-    permissions: ["pos:view", "reports:view"],
-  },
-  {
-    icon: Wallet,
-    label: "Financeiro",
-    href: "/finance",
-    permissions: ["finance:view", "finance:manage"],
-  },
-  {
-    icon: History,
-    label: "Histórico de Caixa",
-    href: "/cash-history",
-    permissions: ["pos:cash_history"],
-  },
-  {
-    icon: FileText,
-    label: "Documentos Fiscais",
-    href: "/fiscal-documents",
-    permissions: ["fiscal:view", "fiscal:manage"],
-  },
-  {
-    icon: Zap,
-    label: "SEFAZ (NF-e)",
-    href: "/sefaz",
-    permissions: ["fiscal:view", "fiscal:manage"],
-  },
-  {
-    icon: FileText,
-    label: "Nova venda NF-e",
-    href: "/nfe-emissao",
-    permissions: ["fiscal:view", "fiscal:manage"],
-  },
-  {
-    icon: FileText,
-    label: "NF-e Criadas",
-    href: "/nfe-historico",
-    permissions: ["fiscal:view", "fiscal:manage"],
-  },
-  {
-    icon: FileText,
-    label: "Carta de Correcao",
-    href: "/carta-correcao",
-    permissions: ["fiscal:view", "fiscal:manage"],
-  },
-  {
-    icon: Shield,
-    label: "Certificado Digital",
-    href: "/certificates",
-    permissions: ["fiscal:view", "fiscal:manage"],
-  },
-  {
-    icon: FileText,
-    label: "Numeração Sequencial (NSA)",
-    href: "/sequential-numbering",
-    permissions: ["fiscal:view", "fiscal:manage"],
-  },
-  {
-    icon: Users,
-    label: "Clientes & Fornecedores",
-    href: "/contacts",
-    permissions: [
-      "customers:view",
-      "customers:manage",
-      "suppliers:view",
-      "suppliers:manage",
+    title: "Principal",
+    items: [
+      { icon: LayoutDashboard, label: "Dashboard", href: "/", permissions: [] },
+      {
+        icon: ShoppingCart,
+        label: "PDV (Frente de Caixa)",
+        href: "/pos",
+        permissions: ["pos:view", "pos:sell"],
+      },
+      {
+        icon: Store,
+        label: "Vendas & Pedidos",
+        href: "/sales",
+        permissions: ["pos:view", "reports:view"],
+      },
+      {
+        icon: Wallet,
+        label: "Financeiro",
+        href: "/finance",
+        permissions: ["finance:view", "finance:manage"],
+      },
+      {
+        icon: History,
+        label: "Historico de Caixa",
+        href: "/cash-history",
+        permissions: ["pos:cash_history"],
+      },
+      {
+        icon: BarChart3,
+        label: "Relatorios",
+        href: "/reports",
+        permissions: ["reports:view"],
+      },
     ],
   },
   {
-    icon: BarChart3,
-    label: "Relatórios",
-    href: "/reports",
-    permissions: ["reports:view"],
+    title: "Cadastro",
+    items: [
+      {
+        icon: Package,
+        label: "Produtos & Estoque",
+        href: "/inventory",
+        permissions: ["inventory:view", "inventory:manage"],
+      },
+      {
+        icon: Users,
+        label: "Clientes & Fornecedores",
+        href: "/contacts",
+        permissions: [
+          "customers:view",
+          "customers:manage",
+          "suppliers:view",
+          "suppliers:manage",
+        ],
+      },
+      {
+        icon: CreditCard,
+        label: "Formas de Pagamento",
+        href: "/payment-methods",
+        permissions: ["settings:payments"],
+      },
+      {
+        icon: FileText,
+        label: "Tabelas de Referencia",
+        href: "/tables",
+        permissions: ["inventory:view", "settings:view"],
+      },
+      {
+        icon: User,
+        label: "Gestao de Usuarios",
+        href: "/users",
+        permissions: ["users:view", "users:manage"],
+      },
+    ],
   },
   {
-    icon: User,
-    label: "Usuários",
-    href: "/users",
-    permissions: ["users:view", "users:manage"],
+    title: "Fiscal",
+    items: [
+      {
+        icon: FileText,
+        label: "Emitir NF-e",
+        href: "/nfe-emissao",
+        permissions: ["fiscal:view", "fiscal:manage"],
+      },
+      {
+        icon: Zap,
+        label: "Operacoes SEFAZ",
+        href: "/sefaz",
+        permissions: ["fiscal:view", "fiscal:manage"],
+      },
+      {
+        icon: FileText,
+        label: "Historico NF-e",
+        href: "/nfe-historico",
+        permissions: ["fiscal:view", "fiscal:manage"],
+      },
+      {
+        icon: FileText,
+        label: "Carta de Correcao",
+        href: "/carta-correcao",
+        permissions: ["fiscal:view", "fiscal:manage"],
+      },
+      {
+        icon: FileText,
+        label: "Documentos Fiscais",
+        href: "/fiscal-documents",
+        permissions: ["fiscal:view", "fiscal:manage"],
+      },
+      {
+        icon: Shield,
+        label: "Certificado Digital",
+        href: "/certificates",
+        permissions: ["fiscal:view", "fiscal:manage"],
+      },
+      {
+        icon: FileText,
+        label: "Numeracao Sequencial (NSA)",
+        href: "/sequential-numbering",
+        permissions: ["fiscal:view", "fiscal:manage"],
+      },
+      {
+        icon: FileText,
+        label: "Configuracao Fiscal",
+        href: "/fiscal-config",
+        permissions: ["fiscal:view", "fiscal:manage"],
+      },
+    ],
   },
   {
-    icon: FileText,
-    label: "Fiscal",
-    href: "/fiscal-config",
-    permissions: ["fiscal:view", "fiscal:manage"],
-  },
-  {
-    icon: Settings,
-    label: "Configurações",
-    href: "/settings",
-    permissions: ["settings:view", "settings:manage"],
-  },
-  {
-    icon: CreditCard,
-    label: "Formas de Pagamento",
-    href: "/payment-methods",
-    permissions: ["settings:payments"],
-  },
-  {
-    icon: FileText,
-    label: "Tabelas",
-    href: "/tables",
-    permissions: ["inventory:view", "settings:view"],
+    title: "Sistema",
+    items: [
+      {
+        icon: Settings,
+        label: "Configuracoes",
+        href: "/settings",
+        permissions: ["settings:view", "settings:manage"],
+      },
+    ],
   },
 ];
 
@@ -211,29 +243,40 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <div className="flex-1 overflow-auto py-4">
-        <nav className="grid gap-1 px-2">
-          {sidebarItems
-            .filter((item) => {
+                <nav className="grid gap-3 px-2">
+          {sidebarSections.map((section) => {
+            const visibleItems = section.items.filter((item) => {
               if (item.permissions.length === 0) return true;
               return hasAnyPermission(...item.permissions);
-            })
-            .map((item) => {
-              const isActive = location === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
-                    isActive
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                  }`}
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              );
-            })}
+            });
+
+            if (visibleItems.length === 0) return null;
+
+            return (
+              <div key={section.title} className="space-y-1">
+                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
+                  {section.title}
+                </p>
+                {visibleItems.map((item) => {
+                  const isActive = location === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
+                        isActive
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      }`}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            );
+          })}
         </nav>
       </div>
       <div className="border-t border-sidebar-border p-4">
@@ -246,7 +289,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </Avatar>
             <div className="flex flex-col overflow-hidden">
               <span className="truncate font-semibold text-sidebar-foreground">
-                {user?.name || "Usuário"}
+                {user?.name || "UsuÃ¡rio"}
               </span>
               <span className="truncate text-xs text-sidebar-foreground/70">
                 {user?.role?.name || "Carregando..."}
@@ -312,11 +355,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-80">
-                <DropdownMenuLabel>Notificações</DropdownMenuLabel>
+                <DropdownMenuLabel>NotificaÃ§Ãµes</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {notifications.length === 0 ? (
                   <div className="p-4 text-center text-sm text-muted-foreground">
-                    Nenhuma notificação
+                    Nenhuma notificaÃ§Ã£o
                   </div>
                 ) : (
                   notifications.slice(0, 5).map((notification) => (
@@ -340,7 +383,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       className="justify-center text-primary"
                       onClick={() => setLocation("/notifications")}
                     >
-                      Ver todas as notificações
+                      Ver todas as notificaÃ§Ãµes
                     </DropdownMenuItem>
                   </>
                 )}
@@ -375,7 +418,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   onClick={() => setLocation("/settings")}
                   data-testid="menu-settings"
                 >
-                  <Settings className="mr-2 h-4 w-4" /> Configurações
+                  <Settings className="mr-2 h-4 w-4" /> ConfiguraÃ§Ãµes
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -396,3 +439,5 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
+

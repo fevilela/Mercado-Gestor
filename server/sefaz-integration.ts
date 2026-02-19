@@ -11,6 +11,16 @@ import { getFiscalCertificateStatus } from "./fiscal-certificate";
 
 const cache = new NodeCache({ stdTTL: 3600 });
 
+const readOptionalFile = (filePath?: string, label = "arquivo") => {
+  const normalized = String(filePath || "").trim();
+  if (!normalized) return undefined;
+  if (!fs.existsSync(normalized)) {
+    console.warn(`[SEFAZ] ${label} nao encontrado em: ${normalized}. Ignorando.`);
+    return undefined;
+  }
+  return fs.readFileSync(normalized);
+};
+
 export interface SefazResponse {
   success: boolean;
   protocol?: string;
@@ -659,12 +669,13 @@ export class SefazIntegration {
       }
 
       const caPath = process.env.SEFAZ_CA_CERT_PATH;
-      const ca = caPath ? fs.readFileSync(caPath) : undefined;
+      const ca = readOptionalFile(caPath, "SEFAZ_CA_CERT_PATH");
       const strictSSL = process.env.SEFAZ_STRICT_SSL !== "false";
       const clientPemPath = process.env.SEFAZ_CLIENT_PEM_PATH;
-      const clientPem = clientPemPath
-        ? fs.readFileSync(clientPemPath)
-        : undefined;
+      const clientPem = readOptionalFile(
+        clientPemPath,
+        "SEFAZ_CLIENT_PEM_PATH",
+      );
       const tlsOptions = {
         pfx: certificateBuffer,
         passphrase: certificatePassword,
@@ -843,12 +854,13 @@ export class SefazIntegration {
       const servername = new URL(statusUrl).hostname;
 
       const caPath = process.env.SEFAZ_CA_CERT_PATH;
-      const ca = caPath ? fs.readFileSync(caPath) : undefined;
+      const ca = readOptionalFile(caPath, "SEFAZ_CA_CERT_PATH");
       const strictSSL = process.env.SEFAZ_STRICT_SSL !== "false";
       const clientPemPath = process.env.SEFAZ_CLIENT_PEM_PATH;
-      const clientPem = clientPemPath
-        ? fs.readFileSync(clientPemPath)
-        : undefined;
+      const clientPem = readOptionalFile(
+        clientPemPath,
+        "SEFAZ_CLIENT_PEM_PATH",
+      );
       const tlsOptions = {
         pfx: certificateBuffer,
         passphrase: certificatePassword,
@@ -1070,12 +1082,13 @@ export class SefazIntegration {
       const servername = new URL(statusUrl).hostname;
 
       const caPath = process.env.SEFAZ_CA_CERT_PATH;
-      const ca = caPath ? fs.readFileSync(caPath) : undefined;
+      const ca = readOptionalFile(caPath, "SEFAZ_CA_CERT_PATH");
       const strictSSL = process.env.SEFAZ_STRICT_SSL !== "false";
       const clientPemPath = process.env.SEFAZ_CLIENT_PEM_PATH;
-      const clientPem = clientPemPath
-        ? fs.readFileSync(clientPemPath)
-        : undefined;
+      const clientPem = readOptionalFile(
+        clientPemPath,
+        "SEFAZ_CLIENT_PEM_PATH",
+      );
       const tlsOptions = {
         pfx: certificateBuffer,
         passphrase: certificatePassword,

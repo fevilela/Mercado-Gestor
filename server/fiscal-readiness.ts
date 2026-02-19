@@ -111,35 +111,6 @@ export async function getFiscalReadiness(
     },
   ];
 
-  if (environment === "producao") {
-    checks.push(
-      {
-        key: "respTecCnpj",
-        label: "Responsavel tecnico CNPJ",
-        ok: onlyDigits(fiscalConfig?.respTecCnpj).length === 14,
-        details: "Informe CNPJ do responsavel tecnico.",
-      },
-      {
-        key: "respTecContato",
-        label: "Responsavel tecnico contato",
-        ok: hasValue(fiscalConfig?.respTecContato),
-        details: "Informe nome do contato tecnico.",
-      },
-      {
-        key: "respTecEmail",
-        label: "Responsavel tecnico email",
-        ok: hasValue(fiscalConfig?.respTecEmail),
-        details: "Informe email do contato tecnico.",
-      },
-      {
-        key: "respTecFone",
-        label: "Responsavel tecnico telefone",
-        ok: onlyDigits(fiscalConfig?.respTecFone).length >= 10,
-        details: "Informe telefone com DDD do contato tecnico.",
-      },
-    );
-  }
-
   const missingChecks = checks.filter((check) => !check.ok);
 
   return {
