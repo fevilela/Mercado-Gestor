@@ -29,6 +29,10 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
+
 const PgSession = connectPgSimple(session);
 app.use(
   session({
