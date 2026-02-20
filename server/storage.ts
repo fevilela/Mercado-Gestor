@@ -19,6 +19,7 @@ import {
   users,
   fiscalConfigs,
   taxAliquots,
+  fiscalTaxRules,
   cfopCodes,
   companies,
   cstCodes,
@@ -51,6 +52,7 @@ import {
   type InsertCashMovement,
   type InsertFiscalConfig,
   type InsertTaxAliquot,
+  type InsertFiscalTaxRule,
   type InsertSimplesNacionalAliquot,
   type InsertPaymentMethod,
   type InsertPdvLoad,
@@ -60,6 +62,7 @@ import {
   type InsertFiscalXmlStorage,
   type InsertManifestDocument,
   type InsertSefazTransmissionLog,
+  type FiscalTaxRule,
 } from "@shared/schema";
 import { eq, and, desc, sql, ilike } from "drizzle-orm";
 
@@ -932,6 +935,156 @@ export const storage = {
     return aliquot;
   },
 
+  async listFiscalTaxRules(companyId: number, filters?: {
+    isActive?: boolean;
+    operationType?: string;
+    customerType?: string;
+    regime?: string;
+    originUf?: string;
+    destinationUf?: string;
+    ncm?: string;
+    cest?: string;
+    cfop?: string;
+  }) {
+    const conditions = [eq(fiscalTaxRules.companyId, companyId)];
+    if (typeof filters?.isActive === "boolean") {
+      conditions.push(eq(fiscalTaxRules.isActive, filters.isActive));
+    }
+    if (filters?.operationType) {
+      conditions.push(eq(fiscalTaxRules.operationType, filters.operationType));
+    }
+    if (filters?.customerType) {
+      conditions.push(eq(fiscalTaxRules.customerType, filters.customerType));
+    }
+    if (filters?.regime) {
+      conditions.push(eq(fiscalTaxRules.regime, filters.regime));
+    }
+    if (filters?.originUf) {
+      conditions.push(eq(fiscalTaxRules.originUf, filters.originUf.toUpperCase()));
+    }
+    if (filters?.destinationUf) {
+      conditions.push(
+        eq(fiscalTaxRules.destinationUf, filters.destinationUf.toUpperCase())
+      );
+    }
+    if (filters?.ncm) {
+      conditions.push(eq(fiscalTaxRules.ncm, filters.ncm));
+    }
+    if (filters?.cest) {
+      conditions.push(eq(fiscalTaxRules.cest, filters.cest));
+    }
+    if (filters?.cfop) {
+      conditions.push(eq(fiscalTaxRules.cfop, filters.cfop));
+    }
+
+    return await db
+      .select()
+      .from(fiscalTaxRules)
+      .where(and(...conditions))
+      .orderBy(desc(fiscalTaxRules.priority), desc(fiscalTaxRules.updatedAt));
+  },
+
+  async createFiscalTaxRule(data: InsertFiscalTaxRule) {
+    const [rule] = await db.insert(fiscalTaxRules).values(data).returning();
+    return rule;
+  },
+
+  async updateFiscalTaxRule(
+    id: number,
+    companyId: number,
+    data: Partial<InsertFiscalTaxRule>
+  ) {
+    const [rule] = await db
+      .update(fiscalTaxRules)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(fiscalTaxRules.id, id), eq(fiscalTaxRules.companyId, companyId)))
+      .returning();
+    return rule;
+  },
+
+  async deleteFiscalTaxRule(id: number, companyId: number) {
+    const [rule] = await db
+      .delete(fiscalTaxRules)
+      .where(and(eq(fiscalTaxRules.id, id), eq(fiscalTaxRules.companyId, companyId)))
+      .returning();
+    return rule;
+  },
+
+  async resolveFiscalTaxRule(
+    companyId: number,
+    context: {
+      operationType?: string;
+      customerType?: string;
+      regime?: string;
+      originUf?: string;
+      destinationUf?: string;
+      scope?: string;
+      ncm?: string;
+      cest?: string;
+      cfop?: string;
+      at?: Date;
+    }
+  ): Promise<FiscalTaxRule | null> {
+    const activeRules = await this.listFiscalTaxRules(companyId, {
+      isActive: true,
+    });
+
+    const at = context.at || new Date();
+    const norm = {
+      operationType: String(context.operationType || "").toLowerCase(),
+      customerType: String(context.customerType || "").toLowerCase(),
+      regime: String(context.regime || "").toLowerCase(),
+      originUf: String(context.originUf || "").toUpperCase(),
+      destinationUf: String(context.destinationUf || "").toUpperCase(),
+      scope: String(context.scope || "").toLowerCase(),
+      ncm: String(context.ncm || ""),
+      cest: String(context.cest || ""),
+      cfop: String(context.cfop || ""),
+    };
+
+    const matches: Array<{ rule: FiscalTaxRule; score: number }> = [];
+    for (const rule of activeRules) {
+      const validFrom = rule.validFrom ? new Date(rule.validFrom) : null;
+      const validTo = rule.validTo ? new Date(rule.validTo) : null;
+      if (validFrom && at < validFrom) continue;
+      if (validTo && at > validTo) continue;
+
+      let score = 0;
+      const checks: Array<[string | null | undefined, string, number, boolean?]> = [
+        [rule.operationType, norm.operationType, 4, true],
+        [rule.customerType, norm.customerType, 4, true],
+        [rule.regime, norm.regime, 4, true],
+        [rule.originUf, norm.originUf, 3, false],
+        [rule.destinationUf, norm.destinationUf, 3, false],
+        [rule.scope, norm.scope, 3, true],
+        [rule.ncm, norm.ncm, 5, false],
+        [rule.cest, norm.cest, 5, false],
+        [rule.cfop, norm.cfop, 5, false],
+      ];
+
+      let reject = false;
+      for (const [ruleValue, ctxValue, weight, normalizeLower] of checks) {
+        if (!ruleValue) continue;
+        const left = normalizeLower
+          ? String(ruleValue).toLowerCase()
+          : String(ruleValue);
+        if (left !== ctxValue) {
+          reject = true;
+          break;
+        }
+        score += weight;
+      }
+      if (reject) continue;
+
+      score += Number(rule.priority || 0);
+      matches.push({ rule, score });
+    }
+
+    if (matches.length === 0) return null;
+    matches.sort((a, b) => b.score - a.score);
+    return matches[0].rule;
+  },
+
   async listSimplesNacionalAliquots(companyId: number) {
     return await db
       .select()
@@ -1198,5 +1351,19 @@ export const storage = {
       .from(manifestDocuments)
       .where(eq(manifestDocuments.companyId, companyId))
       .orderBy(desc(manifestDocuments.createdAt));
+  },
+
+  async getManifestDocumentByKey(companyId: number, documentKey: string) {
+    const [record] = await db
+      .select()
+      .from(manifestDocuments)
+      .where(
+        and(
+          eq(manifestDocuments.companyId, companyId),
+          eq(manifestDocuments.documentKey, documentKey),
+        ),
+      )
+      .limit(1);
+    return record || null;
   },
 };

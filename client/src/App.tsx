@@ -21,11 +21,7 @@ import Users from "@/pages/users";
 import Profile from "@/pages/profile";
 import CashHistory from "@/pages/cash-history";
 import FiscalConfig from "@/pages/fiscal-config";
-import FiscalDocuments from "@/pages/fiscal-documents";
-import NFEEmissao from "@/pages/nfe-emissao";
-import NfeHistoryPage from "@/pages/nfe-history";
-import CorrectionLetterPage from "@/pages/correction-letter";
-import SefazIntegration from "@/pages/sefaz-integration";
+import FiscalCentralPage from "@/pages/fiscal-central";
 import { CertificateConfig } from "@/pages/certificate-config";
 import SequentialNumberingConfig from "@/pages/sequential-numbering-config";
 import { Loader2 } from "lucide-react";
@@ -126,19 +122,22 @@ function Router() {
         <ProtectedRoute component={FiscalConfig} />
       </Route>
       <Route path="/fiscal-documents">
-        <ProtectedRoute component={FiscalDocuments} />
+        <Redirect to="/fiscal-central" />
+      </Route>
+      <Route path="/fiscal-central">
+        <ProtectedRoute component={FiscalCentralPage} />
       </Route>
       <Route path="/nfe-emissao">
-        <ProtectedRoute component={NFEEmissao} />
+        <Redirect to="/fiscal-central" />
       </Route>
       <Route path="/nfe-historico">
-        <ProtectedRoute component={NfeHistoryPage} />
+        <Redirect to="/fiscal-central" />
       </Route>
       <Route path="/carta-correcao">
-        <ProtectedRoute component={CorrectionLetterPage} />
+        <Redirect to="/fiscal-central" />
       </Route>
       <Route path="/sefaz">
-        <ProtectedRoute component={SefazIntegration} />
+        <Redirect to="/fiscal-central" />
       </Route>
       <Route path="/certificates">
         <ProtectedRoute component={CertificateConfig} />

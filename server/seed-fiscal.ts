@@ -1,5 +1,6 @@
 import { db } from "./db";
-import { cfopCodes, cstCodes } from "@shared/schema";
+import { cfopCodes, cstCodes, companies, fiscalTaxRules } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 export async function seedFiscalData() {
   try {
@@ -521,6 +522,79 @@ export async function seedFiscalData() {
 
     await db.insert(cfopCodes).values(cfopData).onConflictDoNothing();
     await db.insert(cstCodes).values(cstData).onConflictDoNothing();
+
+    // Seed baseline tax rules per company only if company has no custom rules yet.
+    const allCompanies = await db.select({ id: companies.id }).from(companies);
+
+    for (const company of allCompanies) {
+      const existingRule = await db
+        .select({ id: fiscalTaxRules.id })
+        .from(fiscalTaxRules)
+        .where(eq(fiscalTaxRules.companyId, company.id))
+        .limit(1);
+
+      if (existingRule.length > 0) {
+        continue;
+      }
+
+      await db.insert(fiscalTaxRules).values([
+        {
+          companyId: company.id,
+          name: "Venda SN interna consumidor final",
+          description: "Regra inicial para Simples Nacional em venda interna",
+          isActive: true,
+          priority: 100,
+          operationType: "venda",
+          customerType: "consumidor_final",
+          regime: "Simples Nacional",
+          scope: "interna",
+          cfop: "5102",
+          csosn: "102",
+          cstPis: "49",
+          cstCofins: "49",
+          icmsAliquot: "0.00",
+          pisAliquot: "0.00",
+          cofinsAliquot: "0.00",
+        },
+        {
+          companyId: company.id,
+          name: "Venda SN interestadual consumidor final",
+          description:
+            "Regra inicial para Simples Nacional em venda interestadual",
+          isActive: true,
+          priority: 90,
+          operationType: "venda",
+          customerType: "consumidor_final",
+          regime: "Simples Nacional",
+          scope: "interestadual",
+          cfop: "6102",
+          csosn: "102",
+          cstPis: "49",
+          cstCofins: "49",
+          icmsAliquot: "0.00",
+          pisAliquot: "0.00",
+          cofinsAliquot: "0.00",
+        },
+        {
+          companyId: company.id,
+          name: "Venda regime normal interna",
+          description:
+            "Regra inicial para Lucro Presumido/Real em venda interna",
+          isActive: true,
+          priority: 80,
+          operationType: "venda",
+          regime: "Lucro Real",
+          scope: "interna",
+          cfop: "5102",
+          cstIcms: "00",
+          cstPis: "01",
+          cstCofins: "01",
+          icmsAliquot: "18.00",
+          pisAliquot: "1.65",
+          cofinsAliquot: "7.60",
+        },
+      ]);
+    }
 
     console.log("✓ Fiscal data seeded successfully");
   } catch (error) {

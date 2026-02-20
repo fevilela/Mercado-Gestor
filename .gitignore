@@ -4,3 +4,23 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Ambiente/local
+.env
+.env.*
+!.env.example
+
+# Certificados e chaves (nunca versionar)
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+*.cer
+
+# Artefatos fiscais gerados localmente
+server/logs/
+nfe.xml
+nfe-assinada.xml
+nfce.xml
+nfce-assinada.xml

@@ -3,10 +3,29 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
+import * as https from "https";
+import * as zlib from "zlib";
 import { createRequire } from "module";
 import { XMLSignatureService } from "./xml-signature";
 
 const require = createRequire(import.meta.url);
+const resolveUrlEventos = (uf: string, versao: string): any => {
+  try {
+    const mod = require("node-sped-nfe/dist/utils/eventos.js");
+    return typeof mod?.urlEventos === "function"
+      ? mod.urlEventos(uf, versao)
+      : null;
+  } catch {
+    try {
+      const mod = require("node-sped-nfe/dist/utils/eventos");
+      return typeof mod?.urlEventos === "function"
+        ? mod.urlEventos(uf, versao)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+};
 
 export interface SefazConfig {
   environment: "homologacao" | "producao";
@@ -57,6 +76,34 @@ export interface InutilizationResult {
   timestamp: Date;
   message: string;
   status?: string;
+  rawResponse?: string;
+}
+
+export interface DistributionDocument {
+  nsu?: string;
+  schema?: string;
+  documentKey?: string;
+  issuerCnpj?: string;
+  receiverCnpj?: string;
+  xmlContent: string;
+}
+
+export interface DistributionResult {
+  success: boolean;
+  status?: string;
+  message: string;
+  lastNSU?: string;
+  maxNSU?: string;
+  documents: DistributionDocument[];
+  rawResponse?: string;
+}
+
+export interface ManifestationResult {
+  success: boolean;
+  status?: string;
+  message: string;
+  protocol?: string;
+  eventId?: string;
   rawResponse?: string;
 }
 
@@ -279,6 +326,31 @@ const extractSoapFaultMessage = (xmlContent: string): string => {
     extractTag("faultstring", xmlContent) ||
     "";
   return reason.trim();
+};
+
+const extractDocZipNodes = (
+  xmlContent: string,
+): Array<{ nsu?: string; schema?: string; payload: string }> => {
+  const nodes: Array<{ nsu?: string; schema?: string; payload: string }> = [];
+  const regex = /<docZip([^>]*)>([\s\S]*?)<\/docZip>/gi;
+  let match: RegExpExecArray | null = null;
+  while ((match = regex.exec(xmlContent)) !== null) {
+    const attrs = match[1] || "";
+    const payload = String(match[2] || "").trim();
+    const nsu = attrs.match(/NSU="([^"]+)"/i)?.[1];
+    const schema = attrs.match(/schema="([^"]+)"/i)?.[1];
+    if (payload) nodes.push({ nsu, schema, payload });
+  }
+  return nodes;
+};
+
+const decodeDocZipPayload = (payload: string): string => {
+  const buffer = Buffer.from(payload, "base64");
+  try {
+    return zlib.gunzipSync(buffer).toString("utf8");
+  } catch {
+    return buffer.toString("utf8");
+  }
 };
 
 const describeUnknownError = (error: unknown): string => {
@@ -770,13 +842,147 @@ export class SefazService {
   }
 
   async queryReceipt(_xmlContent: string): Promise<SubmissionResult> {
-    return {
-      success: false,
-      protocol: "",
-      timestamp: new Date(),
-      status: "error",
-      message: "Consulta de recibo nao suportada nesta integracao",
-    };
+    try {
+      const xmlContent = String(_xmlContent || "");
+      const receipt = extractTag("nRec", xmlContent).replace(/\D/g, "");
+      const accessKey = (
+        extractTag("chNFe", xmlContent) ||
+        xmlContent.match(/<infNFe[^>]*Id="NFe(\d{44})"/i)?.[1] ||
+        ""
+      )
+        .trim()
+        .replace(/\D/g, "");
+      const modFromXml = extractTag("mod", xmlContent);
+      const mod: "55" | "65" = modFromXml === "65" ? "65" : "55";
+
+      // If XML already contains final authorization result, return it directly.
+      const initialParsed = resolveFinalStatus(xmlContent);
+      if (["100", "150", "110", "301", "302", "303", "304"].includes(initialParsed.status)) {
+        return {
+          success: ["100", "150"].includes(initialParsed.status),
+          protocol: initialParsed.protocol || "",
+          timestamp: new Date(),
+          status: initialParsed.status || "0",
+          message: initialParsed.message || "Retorno processado",
+          key: initialParsed.key || accessKey || undefined,
+          rawResponse: xmlContent,
+        };
+      }
+
+      if (accessKey && accessKey.length === 44) {
+        const tools = this.buildTools(mod);
+        const response = await tools.consultarNFe(accessKey);
+        const parsed = resolveFinalStatus(String(response || ""));
+        const status = parsed.status || "0";
+        return {
+          success: ["100", "150", "135", "136", "155"].includes(status),
+          protocol: parsed.protocol || "",
+          timestamp: new Date(),
+          status,
+          message: parsed.message || "Consulta de chave realizada",
+          key: parsed.key || accessKey,
+          rawResponse: String(response || ""),
+        };
+      }
+
+      if (!receipt || receipt.length !== 15) {
+        return {
+          success: false,
+          protocol: "",
+          timestamp: new Date(),
+          status: initialParsed.status || "0",
+          message:
+            initialParsed.message ||
+            "Nao foi possivel identificar nRec/chNFe para consulta",
+          rawResponse: xmlContent,
+        };
+      }
+
+      const tools = this.buildTools(mod);
+      const cert = (await tools.getCertificado()) as {
+        key?: string;
+        cert?: string;
+        ca?: string[];
+      };
+
+      const endpoints = resolveUrlEventos(this.config.uf, "4.00") as any;
+      const envKey =
+        this.config.environment === "producao" ? "producao" : "homologacao";
+      const ws =
+        endpoints?.[`mod${mod}`]?.[envKey]?.NFeRetAutorizacao ||
+        endpoints?.[envKey]?.NFeRetAutorizacao;
+
+      if (!ws) {
+        return {
+          success: false,
+          protocol: "",
+          timestamp: new Date(),
+          status: "0",
+          message: `Webservice de recibo indisponivel para UF ${this.config.uf}/mod ${mod}`,
+        };
+      }
+
+      const tpAmb = this.config.environment === "producao" ? "1" : "2";
+      const body =
+        `<?xml version="1.0" encoding="utf-8"?>` +
+        `<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:nfe="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRetAutorizacao4">` +
+        `<soap:Body><nfe:nfeDadosMsg>` +
+        `<consReciNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">` +
+        `<tpAmb>${tpAmb}</tpAmb><nRec>${receipt}</nRec>` +
+        `</consReciNFe></nfe:nfeDadosMsg></soap:Body></soap:Envelope>`;
+
+      const responseXml = await new Promise<string>((resolve, reject) => {
+        const req = https.request(
+          ws,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/soap+xml; charset=utf-8",
+              "Content-Length": Buffer.byteLength(body),
+            },
+            rejectUnauthorized: false,
+            key: cert?.key,
+            cert: cert?.cert,
+            ca: cert?.ca,
+          },
+          (res) => {
+            let data = "";
+            res.on("data", (chunk) => {
+              data += String(chunk);
+            });
+            res.on("end", () => resolve(data));
+          },
+        );
+
+        req.setTimeout((this.config.timeout ?? 60) * 1000, () => {
+          req.destroy(new Error("Timeout ao consultar recibo"));
+        });
+        req.on("error", reject);
+        req.write(body);
+        req.end();
+      });
+
+      const parsed = resolveFinalStatus(responseXml);
+      const status = parsed.status || "0";
+      return {
+        success: ["100", "150", "104", "135", "136", "155"].includes(status),
+        protocol: parsed.protocol || "",
+        timestamp: new Date(),
+        status,
+        message: parsed.message || "Consulta de recibo realizada",
+        key: parsed.key || accessKey || undefined,
+        rawResponse: responseXml,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        protocol: "",
+        timestamp: new Date(),
+        status: "error",
+        message:
+          error instanceof Error ? error.message : "Erro ao consultar recibo",
+      };
+    }
   }
 
   async checkAuthorizationStatus(accessKey: string): Promise<any> {
@@ -797,6 +1003,133 @@ export class SefazService {
         success: false,
         message:
           error instanceof Error ? error.message : "Erro ao consultar status",
+      };
+    }
+  }
+
+  async distributeDFe(params?: {
+    ultNSU?: string;
+    accessKey?: string;
+  }): Promise<DistributionResult> {
+    try {
+      const tools = this.buildTools("55");
+      const response = await tools.sefazDistDFe({
+        ultNSU: params?.ultNSU,
+        chNFe: params?.accessKey,
+      });
+      const xml = String(response || "");
+      const status = extractTag("cStat", xml) || "0";
+      const message = extractTag("xMotivo", xml) || "Resposta sem xMotivo";
+      const lastNSU = extractTag("ultNSU", xml) || undefined;
+      const maxNSU = extractTag("maxNSU", xml) || undefined;
+
+      const documents = extractDocZipNodes(xml).map((node) => {
+        const decoded = decodeDocZipPayload(node.payload);
+        const documentKey =
+          extractTag("chNFe", decoded) ||
+          decoded.match(/<infNFe[^>]*Id="NFe(\d{44})"/i)?.[1] ||
+          "";
+        const issuerCnpj =
+          extractTag("CNPJ", extractBlock("emit", decoded)) ||
+          extractTag("CPF", extractBlock("emit", decoded)) ||
+          "";
+        const receiverCnpj =
+          extractTag("CNPJ", extractBlock("dest", decoded)) ||
+          extractTag("CPF", extractBlock("dest", decoded)) ||
+          "";
+        return {
+          nsu: node.nsu,
+          schema: node.schema,
+          documentKey: documentKey || undefined,
+          issuerCnpj: issuerCnpj || undefined,
+          receiverCnpj: receiverCnpj || undefined,
+          xmlContent: decoded,
+        };
+      });
+
+      return {
+        success: ["138", "137", "656"].includes(status),
+        status,
+        message,
+        lastNSU,
+        maxNSU,
+        documents,
+        rawResponse: xml,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Erro na distribuicao de DF-e",
+        documents: [],
+      };
+    }
+  }
+
+  async sendManifestationEvent(params: {
+    accessKey: string;
+    eventType:
+      | "ciencia_da_operacao"
+      | "confirmacao_da_operacao"
+      | "desconhecimento_da_operacao"
+      | "operacao_nao_realizada";
+    reason?: string;
+    sequence?: number;
+  }): Promise<ManifestationResult> {
+    try {
+      const tools = this.buildTools("55");
+      const eventMap: Record<string, string> = {
+        ciencia_da_operacao: "210210",
+        confirmacao_da_operacao: "210200",
+        desconhecimento_da_operacao: "210220",
+        operacao_nao_realizada: "210240",
+      };
+      const tpEvento = eventMap[params.eventType];
+      if (!tpEvento) {
+        return {
+          success: false,
+          status: "0",
+          message: "Tipo de evento de manifestacao invalido",
+        };
+      }
+
+      const response = await tools.sefazEvento({
+        chNFe: params.accessKey,
+        tpEvento,
+        xJust:
+          params.eventType === "operacao_nao_realizada"
+            ? String(params.reason || "").trim()
+            : undefined,
+        nSeqEvento:
+          typeof params.sequence === "number" && params.sequence > 0
+            ? params.sequence
+            : 1,
+      });
+
+      const parsed = resolveEventStatus(String(response || ""));
+      const status = parsed.status || "0";
+      const success = ["135", "136", "155"].includes(status);
+
+      return {
+        success,
+        status,
+        message: parsed.message || "Resposta sem xMotivo",
+        protocol: parsed.protocol || undefined,
+        eventId: `ID${tpEvento}${params.accessKey}${String(
+          params.sequence || 1,
+        ).padStart(2, "0")}`,
+        rawResponse: String(response || ""),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        status: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Erro ao manifestar destinatario",
       };
     }
   }

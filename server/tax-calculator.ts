@@ -1,4 +1,4 @@
-// Calculadora de Impostos para Notas Fiscais
+// Calculadora de impostos para documentos fiscais
 export interface TaxCalculation {
   icmsValue: number;
   icmsAliquot: number;
@@ -16,42 +16,39 @@ export interface TaxCalculation {
 }
 
 export class TaxCalculator {
-  // Calcula ICMS (Imposto sobre Circulação de Mercadorias e Serviços)
+  private static round2(value: number): number {
+    return Math.round(value * 100) / 100;
+  }
+
   static calculateICMS(
     baseValue: number,
     aliquot: number,
-    reduction: number = 0
+    reduction: number = 0,
   ): number {
     const effectiveAliquot = aliquot * (1 - reduction / 100);
     return (baseValue * effectiveAliquot) / 100;
   }
 
-  // Calcula IPI (Imposto sobre Produtos Industrializados)
   static calculateIPI(baseValue: number, aliquot: number): number {
     return (baseValue * aliquot) / 100;
   }
 
-  // Calcula PIS (Programa de Integração Social)
   static calculatePIS(baseValue: number, aliquot: number): number {
     return (baseValue * aliquot) / 100;
   }
 
-  // Calcula COFINS (Contribuição para Financiamento da Seguridade Social)
   static calculateCOFINS(baseValue: number, aliquot: number): number {
     return (baseValue * aliquot) / 100;
   }
 
-  // Calcula ISS (Imposto Sobre Serviços)
   static calculateISS(baseValue: number, aliquot: number): number {
     return (baseValue * aliquot) / 100;
   }
 
-  // Calcula IRRF (Imposto de Renda Retido na Fonte)
   static calculateIRRF(baseValue: number, aliquot: number): number {
     return (baseValue * aliquot) / 100;
   }
 
-  // Calcula todas as tributações de um item
   static calculateAllTaxes(
     quantity: number,
     unitPrice: number,
@@ -61,7 +58,7 @@ export class TaxCalculator {
     pisAliquot: number = 0,
     cofinsAliquot: number = 0,
     issAliquot: number = 0,
-    irrfAliquot: number = 0
+    irrfAliquot: number = 0,
   ): TaxCalculation {
     const subtotal = quantity * unitPrice;
 
@@ -73,61 +70,51 @@ export class TaxCalculator {
     const irrfValue = this.calculateIRRF(subtotal, irrfAliquot);
 
     return {
-      icmsValue: Math.round(icmsValue * 100) / 100,
+      icmsValue: this.round2(icmsValue),
       icmsAliquot,
-      ipiValue: Math.round(ipiValue * 100) / 100,
+      ipiValue: this.round2(ipiValue),
       ipiAliquot,
-      pisValue: Math.round(pisValue * 100) / 100,
+      pisValue: this.round2(pisValue),
       pisAliquot,
-      cofinsValue: Math.round(cofinsValue * 100) / 100,
+      cofinsValue: this.round2(cofinsValue),
       cofinsAliquot,
-      issValue: Math.round(issValue * 100) / 100,
+      issValue: this.round2(issValue),
       issAliquot,
-      irrfValue: Math.round(irrfValue * 100) / 100,
+      irrfValue: this.round2(irrfValue),
       irrfAliquot,
-      totalTaxes:
-        Math.round(
-          (icmsValue +
-            ipiValue +
-            pisValue +
-            cofinsValue +
-            issValue +
-            irrfValue) *
-            100
-        ) / 100,
+      totalTaxes: this.round2(
+        icmsValue + ipiValue + pisValue + cofinsValue + issValue + irrfValue,
+      ),
     };
   }
 
-  // Calcula IBPT (Imposto Básico de Produtos Tributados)
   static calculateIBPT(baseValue: number, ibptRate: number): number {
     return (baseValue * ibptRate) / 100;
   }
 
-  // Retorna alíquota padrão por CST/CSOSN
   static getDefaultAliquotByCST(
     cst: string,
-    taxType: "icms" | "ipi" | "pis" | "cofins" = "icms"
+    taxType: "icms" | "ipi" | "pis" | "cofins" = "icms",
   ): number {
-    // Alíquotas padrão conforme CST/CSOSN
     const aliquots: Record<string, Record<string, number>> = {
       icms: {
-        "00": 18, // Tributada com crédito
-        "10": 18, // Tributada sem crédito
-        "20": 0, // Submetida à substituição
-        "30": 0, // Isenta ou não tributada
-        "40": 0, // Isenta
-        "41": 0, // Não tributada
-        "50": 0, // Suspensão
-        "60": 18, // ICMS cobrado por ST
-        "70": 18, // Diferimento
-        "90": 18, // Outras operações
-        "101": 0, // Sem movimento
-        "102": 0, // Microempresa
-        "103": 0, // ME/EPP
-        "300": 0, // Isenta
-        "400": 0, // Não tributada
-        "500": 0, // Suspensão
-        "900": 0, // Outras
+        "00": 18,
+        "10": 18,
+        "20": 0,
+        "30": 0,
+        "40": 0,
+        "41": 0,
+        "50": 0,
+        "60": 18,
+        "70": 18,
+        "90": 18,
+        "101": 0,
+        "102": 0,
+        "103": 0,
+        "300": 0,
+        "400": 0,
+        "500": 0,
+        "900": 0,
       },
       ipi: {
         "00": 0,
@@ -177,19 +164,74 @@ export class TaxCalculator {
     municipal: number;
     fonte: string;
   }> {
-    // ImplementaÇõÇœo simulada: em produÇõÇœo, integrar com o serviÇõ IBPT.
-    const base = params.valor || 0;
-    const nacional = Math.round(base * 0.03 * 100) / 100;
-    const importado = Math.round(base * 0.035 * 100) / 100;
-    const estadual = Math.round(base * 0.01 * 100) / 100;
-    const municipal = Math.round(base * 0.005 * 100) / 100;
-
-    return {
-      nacional,
-      importado,
-      estadual,
-      municipal,
-      fonte: "simulado",
+    const fallback = () => {
+      const base = params.valor || 0;
+      return {
+        nacional: this.round2(base * 0.03),
+        importado: this.round2(base * 0.035),
+        estadual: this.round2(base * 0.01),
+        municipal: this.round2(base * 0.005),
+        fonte: "simulado",
+      };
     };
+
+    const token = String(params.token || "").trim();
+    const cnpj = String(params.cnpj || "").replace(/\D/g, "");
+    const uf = String(params.uf || "").toUpperCase().slice(0, 2);
+    const codigo = String(params.codigo || "").replace(/\D/g, "");
+    const descricao = String(params.descricao || "").trim();
+    const unidade = String(params.unidade || "").trim() || "UN";
+    const valor = Number(params.valor || 0);
+
+    if (!token || cnpj.length !== 14 || !uf || !codigo || valor <= 0) {
+      return fallback();
+    }
+
+    const endpoint = "https://apidoni.ibpt.org.br/api/v1/produtos";
+    const query = new URLSearchParams({
+      token,
+      cnpj,
+      codigo,
+      uf,
+      ex: "0",
+      descricao: descricao || "PRODUTO",
+      unidade,
+      valor: valor.toFixed(2),
+      gtin: "",
+    });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    try {
+      const response = await fetch(`${endpoint}?${query.toString()}`, {
+        method: "GET",
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        return fallback();
+      }
+
+      const payload = (await response.json()) as any;
+      const data = Array.isArray(payload) ? payload[0] || {} : payload || {};
+
+      const nacional = Number(data.nacional ?? data.Nacional ?? 0);
+      const importado = Number(data.importado ?? data.Importado ?? 0);
+      const estadual = Number(data.estadual ?? data.Estadual ?? 0);
+      const municipal = Number(data.municipal ?? data.Municipal ?? 0);
+
+      return {
+        nacional: this.round2(Number.isFinite(nacional) ? nacional : 0),
+        importado: this.round2(Number.isFinite(importado) ? importado : 0),
+        estadual: this.round2(Number.isFinite(estadual) ? estadual : 0),
+        municipal: this.round2(Number.isFinite(municipal) ? municipal : 0),
+        fonte: String(data.fonte ?? data.Fonte ?? "IBPT"),
+      };
+    } catch {
+      return fallback();
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }

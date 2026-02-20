@@ -11,6 +11,7 @@ import {
   customers,
   suppliers,
   digitalCertificates,
+  sefazTransmissionLogs,
 } from "@shared/schema";
 import {
   insertProductSchema,
@@ -24,10 +25,12 @@ import {
   insertNotificationSchema,
   insertFiscalConfigSchema,
   insertTaxAliquotSchema,
+  insertFiscalTaxRuleSchema,
   insertSimplesNacionalAliquotSchema,
 } from "@shared/schema";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
+import { createHash } from "crypto";
 import { lookupEAN } from "./ean-service";
 import {
   requireAuth,
@@ -146,6 +149,202 @@ function parseNFeHeaderTotals(xmlContent: string): {
     icmsStTotal: getTagValue("vST", totalsSource),
     ipiTotal: getTagValue("vIPI", totalsSource),
     noteTotal: getTagValue("vNF", totalsSource),
+  };
+}
+
+type AccessoryObligationType = "sped" | "sintegra";
+
+function formatPeriodDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function parseAccessoryPeriod(input?: string): {
+  period: string;
+  start: Date;
+  end: Date;
+} {
+  const now = new Date();
+  const fallbackPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const period = String(input || fallbackPeriod).trim();
+  const match = /^(\d{4})-(\d{2})$/.exec(period);
+  if (!match) {
+    throw new Error("Periodo invalido. Use YYYY-MM");
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) {
+    throw new Error("Mes invalido no periodo");
+  }
+  const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+  const end = new Date(year, month, 0, 23, 59, 59, 999);
+  return { period, start, end };
+}
+
+function generateAccessoryContent(params: {
+  type: AccessoryObligationType;
+  companyId: number;
+  period: string;
+  generatedAt: Date;
+  sales: any[];
+}) {
+  const header =
+    params.type === "sped"
+      ? `|0000|SPED FISCAL|${params.period}|EMPRESA ${params.companyId}|`
+      : `10|SINTEGRA|${params.period}|EMPRESA ${params.companyId}|`;
+
+  const lines: string[] = [header];
+  let totalValue = 0;
+
+  for (const sale of params.sales) {
+    const createdAt = sale.createdAt instanceof Date ? sale.createdAt : new Date(sale.createdAt);
+    const saleDate = formatPeriodDate(createdAt);
+    const total = Number(String(sale.total || "0").replace(",", "."));
+    const safeTotal = Number.isFinite(total) ? total : 0;
+    totalValue += safeTotal;
+
+    if (params.type === "sped") {
+      lines.push(
+        `|C100|${sale.id}|${saleDate}|${String(sale.customerName || "CONSUMIDOR FINAL").toUpperCase()}|${safeTotal.toFixed(
+          2,
+        )}|${String(sale.nfceKey || "")}|${String(sale.nfceProtocol || "")}|`,
+      );
+    } else {
+      lines.push(
+        `50|${saleDate}|${String(sale.id).padStart(6, "0")}|${safeTotal.toFixed(2)}|${String(
+          sale.nfceStatus || "PENDENTE",
+        ).toUpperCase()}|`,
+      );
+    }
+  }
+
+  if (params.type === "sped") {
+    lines.push(`|9900|REGISTROS|${Math.max(lines.length - 1, 0)}|`);
+    lines.push(`|9999|${lines.length + 1}|`);
+  } else {
+    lines.push(`90|TOTAL|${params.sales.length}|${totalValue.toFixed(2)}|`);
+  }
+
+  return {
+    content: lines.join("\r\n"),
+    totalDocuments: params.sales.length,
+    totalValue: Number(totalValue.toFixed(2)),
+  };
+}
+
+async function pushAccessoryObligationToProvider(params: {
+  obligationType: AccessoryObligationType;
+  companyId: number;
+  period: string;
+  fileName: string;
+  content: string;
+  deliveryUrl: string;
+  deliveryToken?: string;
+  deliveryApiKey?: string;
+}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000);
+
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (params.deliveryToken) {
+      headers.Authorization = `Bearer ${params.deliveryToken}`;
+    }
+    if (params.deliveryApiKey) {
+      headers["x-api-key"] = params.deliveryApiKey;
+    }
+
+    const response = await fetch(params.deliveryUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        obligationType: params.obligationType.toUpperCase(),
+        companyId: params.companyId,
+        period: params.period,
+        fileName: params.fileName,
+        contentBase64: Buffer.from(params.content, "utf8").toString("base64"),
+      }),
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    let parsed: any = null;
+    try {
+      parsed = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      parsed = null;
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        parsed?.error ||
+          parsed?.message ||
+          `Falha no provedor externo (${response.status})`,
+      );
+    }
+
+    return {
+      providerStatus: response.status,
+      providerPayload: parsed,
+      rawResponse: rawText,
+      protocol:
+        parsed?.protocol ||
+        parsed?.receipt ||
+        response.headers.get("x-protocol") ||
+        null,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function resolveAccessoryProviderMode(): "homolog" | "prod" {
+  return String(process.env.ACCESSORY_PROVIDER_MODE || "homolog").toLowerCase() ===
+    "prod"
+    ? "prod"
+    : "homolog";
+}
+
+function isAccessoryProviderAuthorized(req: any) {
+  const configuredBearer = String(
+    process.env.ACCESSORY_PROVIDER_BEARER_TOKEN || "",
+  ).trim();
+  const configuredApiKey = String(
+    process.env.ACCESSORY_PROVIDER_API_KEY || "",
+  ).trim();
+
+  const authHeader = String(req.headers?.authorization || "");
+  const apiKeyHeader = String(req.headers?.["x-api-key"] || "");
+  const bearerToken = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : "";
+
+  const hasBearerConfig = configuredBearer.length > 0;
+  const hasApiKeyConfig = configuredApiKey.length > 0;
+
+  if (!hasBearerConfig && !hasApiKeyConfig) {
+    // In homolog, allow testing without credentials.
+    return {
+      allowed: resolveAccessoryProviderMode() !== "prod",
+      reason:
+        "Configure ACCESSORY_PROVIDER_BEARER_TOKEN ou ACCESSORY_PROVIDER_API_KEY",
+      hasBearerConfig,
+      hasApiKeyConfig,
+    };
+  }
+
+  const bearerOk = !hasBearerConfig || configuredBearer === bearerToken;
+  const apiKeyOk = !hasApiKeyConfig || configuredApiKey === apiKeyHeader;
+
+  return {
+    allowed: bearerOk && apiKeyOk,
+    reason: "Credenciais invalidas para o provedor",
+    hasBearerConfig,
+    hasApiKeyConfig,
   };
 }
 
@@ -3556,6 +3755,681 @@ export async function registerRoutes(
         }
         console.error("Failed to create tax aliquot:", error);
         res.status(500).json({ error: "Failed to create tax aliquot" });
+      }
+    }
+  );
+
+  // ============================================
+  // Accessory Obligations (SPED / SINTEGRA)
+  // ============================================
+  app.post(
+    "/api/fiscal/sped/generate",
+    requireAuth,
+    requirePermission("fiscal:sped"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { period, start, end } = parseAccessoryPeriod(req.body?.period);
+        const allSales = await storage.getAllSales(companyId);
+        const salesInPeriod = allSales.filter((sale: any) => {
+          const saleDate = new Date(sale.createdAt);
+          return saleDate >= start && saleDate <= end;
+        });
+
+        const generatedAt = new Date();
+        const generated = generateAccessoryContent({
+          type: "sped",
+          companyId,
+          period,
+          generatedAt,
+          sales: salesInPeriod,
+        });
+
+        const fileName = `SPED_FISCAL_${period.replace("-", "")}_EMP_${companyId}.txt`;
+
+        await storage.createSefazTransmissionLog({
+          companyId,
+          action: "sped-generate",
+          environment: "producao",
+          requestPayload: {
+            period,
+            from: start.toISOString(),
+            to: end.toISOString(),
+          },
+          responsePayload: {
+            fileName,
+            totalDocuments: generated.totalDocuments,
+            totalValue: generated.totalValue,
+            generatedAt: generatedAt.toISOString(),
+          },
+          success: true,
+        });
+
+        res.json({
+          success: true,
+          type: "SPED",
+          period,
+          fileName,
+          generatedAt: generatedAt.toISOString(),
+          totalDocuments: generated.totalDocuments,
+          totalValue: generated.totalValue,
+          content: generated.content,
+        });
+      } catch (error) {
+        res.status(400).json({
+          error: error instanceof Error ? error.message : "Falha ao gerar SPED",
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/api/fiscal/sintegra/generate",
+    requireAuth,
+    requirePermission("fiscal:sintegra"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const { period, start, end } = parseAccessoryPeriod(req.body?.period);
+        const allSales = await storage.getAllSales(companyId);
+        const salesInPeriod = allSales.filter((sale: any) => {
+          const saleDate = new Date(sale.createdAt);
+          return saleDate >= start && saleDate <= end;
+        });
+
+        const generatedAt = new Date();
+        const generated = generateAccessoryContent({
+          type: "sintegra",
+          companyId,
+          period,
+          generatedAt,
+          sales: salesInPeriod,
+        });
+
+        const fileName = `SINTEGRA_${period.replace("-", "")}_EMP_${companyId}.txt`;
+
+        await storage.createSefazTransmissionLog({
+          companyId,
+          action: "sintegra-generate",
+          environment: "producao",
+          requestPayload: {
+            period,
+            from: start.toISOString(),
+            to: end.toISOString(),
+          },
+          responsePayload: {
+            fileName,
+            totalDocuments: generated.totalDocuments,
+            totalValue: generated.totalValue,
+            generatedAt: generatedAt.toISOString(),
+          },
+          success: true,
+        });
+
+        res.json({
+          success: true,
+          type: "SINTEGRA",
+          period,
+          fileName,
+          generatedAt: generatedAt.toISOString(),
+          totalDocuments: generated.totalDocuments,
+          totalValue: generated.totalValue,
+          content: generated.content,
+        });
+      } catch (error) {
+        res.status(400).json({
+          error:
+            error instanceof Error ? error.message : "Falha ao gerar Sintegra",
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/api/fiscal/sped/deliver",
+    requireAuth,
+    requirePermission("fiscal:sped"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const period = String(req.body?.period || "").trim();
+        const fileName = String(req.body?.fileName || "").trim();
+        const content = String(req.body?.content || "");
+        const deliveryUrl = String(req.body?.deliveryUrl || "").trim();
+        const deliveryToken = String(req.body?.deliveryToken || "").trim();
+        const deliveryApiKey = String(req.body?.deliveryApiKey || "").trim();
+        if (!period || !fileName) {
+          return res
+            .status(400)
+            .json({ error: "Campos obrigatorios: period, fileName" });
+        }
+
+        let protocol = `SPED-${Date.now()}`;
+        const deliveredAt = new Date();
+        let providerStatus: number | null = null;
+        let providerPayload: any = null;
+        let mode: "local" | "provider_http" = "local";
+
+        if (deliveryUrl) {
+          if (!content) {
+            return res.status(400).json({
+              error: "Campo obrigatorio para entrega externa: content",
+            });
+          }
+          const external = await pushAccessoryObligationToProvider({
+            obligationType: "sped",
+            companyId,
+            period,
+            fileName,
+            content,
+            deliveryUrl,
+            deliveryToken: deliveryToken || undefined,
+            deliveryApiKey: deliveryApiKey || undefined,
+          });
+          protocol = external.protocol || protocol;
+          providerStatus = external.providerStatus;
+          providerPayload = external.providerPayload || external.rawResponse;
+          mode = "provider_http";
+        }
+
+        await storage.createSefazTransmissionLog({
+          companyId,
+          action: "sped-deliver",
+          environment: "producao",
+          requestPayload: {
+            period,
+            fileName,
+            mode,
+            deliveryUrl: deliveryUrl || null,
+          },
+          responsePayload: {
+            protocol,
+            deliveredAt: deliveredAt.toISOString(),
+            receiptStatus: "received",
+            providerStatus,
+            providerPayload,
+          },
+          success: true,
+        });
+
+        res.json({
+          success: true,
+          type: "SPED",
+          period,
+          fileName,
+          mode,
+          protocol,
+          deliveredAt: deliveredAt.toISOString(),
+          receiptStatus: "received",
+          providerStatus,
+          providerPayload,
+        });
+      } catch (error) {
+        res.status(400).json({
+          error: error instanceof Error ? error.message : "Falha ao entregar SPED",
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/api/fiscal/sintegra/deliver",
+    requireAuth,
+    requirePermission("fiscal:sintegra"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const period = String(req.body?.period || "").trim();
+        const fileName = String(req.body?.fileName || "").trim();
+        const content = String(req.body?.content || "");
+        const deliveryUrl = String(req.body?.deliveryUrl || "").trim();
+        const deliveryToken = String(req.body?.deliveryToken || "").trim();
+        const deliveryApiKey = String(req.body?.deliveryApiKey || "").trim();
+        if (!period || !fileName) {
+          return res
+            .status(400)
+            .json({ error: "Campos obrigatorios: period, fileName" });
+        }
+
+        let protocol = `SINTEGRA-${Date.now()}`;
+        const deliveredAt = new Date();
+        let providerStatus: number | null = null;
+        let providerPayload: any = null;
+        let mode: "local" | "provider_http" = "local";
+
+        if (deliveryUrl) {
+          if (!content) {
+            return res.status(400).json({
+              error: "Campo obrigatorio para entrega externa: content",
+            });
+          }
+          const external = await pushAccessoryObligationToProvider({
+            obligationType: "sintegra",
+            companyId,
+            period,
+            fileName,
+            content,
+            deliveryUrl,
+            deliveryToken: deliveryToken || undefined,
+            deliveryApiKey: deliveryApiKey || undefined,
+          });
+          protocol = external.protocol || protocol;
+          providerStatus = external.providerStatus;
+          providerPayload = external.providerPayload || external.rawResponse;
+          mode = "provider_http";
+        }
+
+        await storage.createSefazTransmissionLog({
+          companyId,
+          action: "sintegra-deliver",
+          environment: "producao",
+          requestPayload: {
+            period,
+            fileName,
+            mode,
+            deliveryUrl: deliveryUrl || null,
+          },
+          responsePayload: {
+            protocol,
+            deliveredAt: deliveredAt.toISOString(),
+            receiptStatus: "received",
+            providerStatus,
+            providerPayload,
+          },
+          success: true,
+        });
+
+        res.json({
+          success: true,
+          type: "SINTEGRA",
+          period,
+          fileName,
+          mode,
+          protocol,
+          deliveredAt: deliveredAt.toISOString(),
+          receiptStatus: "received",
+          providerStatus,
+          providerPayload,
+        });
+      } catch (error) {
+        res.status(400).json({
+          error:
+            error instanceof Error ? error.message : "Falha ao entregar Sintegra",
+        });
+      }
+    },
+  );
+
+  app.get(
+    "/api/fiscal/accessory-obligations/history",
+    requireAuth,
+    requirePermission("fiscal:view", "fiscal:sped", "fiscal:sintegra"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const type = String(req.query.type || "").trim().toLowerCase();
+        const allowed = new Set([
+          "sped-generate",
+          "sped-deliver",
+          "sintegra-generate",
+          "sintegra-deliver",
+        ]);
+
+        const logs = await db
+          .select()
+          .from(sefazTransmissionLogs)
+          .where(eq(sefazTransmissionLogs.companyId, companyId))
+          .orderBy(desc(sefazTransmissionLogs.createdAt))
+          .limit(300);
+
+        const filtered = logs.filter((log) => {
+          if (!allowed.has(log.action)) return false;
+          if (!type) return true;
+          return log.action.startsWith(type);
+        });
+
+        res.json(
+          filtered.map((log) => ({
+            id: log.id,
+            action: log.action,
+            success: Boolean(log.success),
+            requestPayload: log.requestPayload,
+            responsePayload: log.responsePayload,
+            createdAt: log.createdAt,
+          })),
+        );
+      } catch (error) {
+        res.status(500).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Falha ao carregar historico de obrigacoes acessorias",
+        });
+      }
+    },
+  );
+
+  // Provedor receptor para obrigacoes acessorias (homologacao/producao)
+  app.post("/api/fiscal/accessory-provider/receive", async (req, res) => {
+    try {
+      const auth = isAccessoryProviderAuthorized(req);
+      if (!auth.allowed) {
+        const code =
+          resolveAccessoryProviderMode() === "prod" ? 503 : 401;
+        return res.status(code).json({
+          error: auth.reason,
+          mode: resolveAccessoryProviderMode(),
+          hasBearerConfig: auth.hasBearerConfig,
+          hasApiKeyConfig: auth.hasApiKeyConfig,
+        });
+      }
+
+      const obligationType = String(req.body?.obligationType || "")
+        .trim()
+        .toUpperCase();
+      const companyId = Number(req.body?.companyId);
+      const period = String(req.body?.period || "").trim();
+      const fileName = String(req.body?.fileName || "").trim();
+      const contentBase64 = String(req.body?.contentBase64 || "").trim();
+      const confirmProduction = req.body?.confirmProduction === true;
+
+      if (!["SPED", "SINTEGRA"].includes(obligationType)) {
+        return res.status(400).json({
+          error: "obligationType invalido. Use SPED ou SINTEGRA",
+        });
+      }
+      if (!Number.isFinite(companyId) || companyId <= 0) {
+        return res.status(400).json({ error: "companyId invalido" });
+      }
+      if (!/^\d{4}-\d{2}$/.test(period)) {
+        return res.status(400).json({ error: "period invalido. Use YYYY-MM" });
+      }
+      if (!fileName) {
+        return res.status(400).json({ error: "fileName obrigatorio" });
+      }
+      if (!contentBase64) {
+        return res.status(400).json({ error: "contentBase64 obrigatorio" });
+      }
+
+      const providerMode = resolveAccessoryProviderMode();
+      if (providerMode === "prod" && !confirmProduction) {
+        return res.status(428).json({
+          error:
+            "Confirmacao obrigatoria para entrega em producao (confirmProduction=true)",
+          mode: providerMode,
+        });
+      }
+
+      const contentBuffer = Buffer.from(contentBase64, "base64");
+      if (!contentBuffer.length) {
+        return res.status(400).json({ error: "contentBase64 invalido" });
+      }
+
+      const hash = createHash("sha256").update(contentBuffer).digest("hex");
+      const protocol = `${obligationType}-${Date.now()}`;
+      const receivedAt = new Date();
+      const environment = providerMode === "prod" ? "producao" : "homologacao";
+
+      await storage.createSefazTransmissionLog({
+        companyId,
+        action: `accessory-provider-receive-${obligationType.toLowerCase()}`,
+        environment,
+        requestPayload: {
+          obligationType,
+          period,
+          fileName,
+          confirmProduction,
+          byteLength: contentBuffer.length,
+          sha256: hash,
+        },
+        responsePayload: {
+          protocol,
+          mode: providerMode,
+          receivedAt: receivedAt.toISOString(),
+          receiptStatus: "received",
+        },
+        success: true,
+      });
+
+      res.json({
+        success: true,
+        mode: providerMode,
+        obligationType,
+        protocol,
+        receivedAt: receivedAt.toISOString(),
+        receiptStatus: "received",
+      });
+    } catch (error) {
+      res.status(500).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Falha ao receber obrigacao acessoria",
+      });
+    }
+  });
+
+  app.get(
+    "/api/fiscal/accessory-provider/status",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (_req, res) => {
+      const mode = resolveAccessoryProviderMode();
+      const hasBearerConfig = Boolean(
+        String(process.env.ACCESSORY_PROVIDER_BEARER_TOKEN || "").trim(),
+      );
+      const hasApiKeyConfig = Boolean(
+        String(process.env.ACCESSORY_PROVIDER_API_KEY || "").trim(),
+      );
+
+      res.json({
+        mode,
+        hasBearerConfig,
+        hasApiKeyConfig,
+        productionConfirmationRequired: mode === "prod",
+      });
+    },
+  );
+
+  app.get(
+    "/api/fiscal/accessory-provider/audit",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Nao autenticado" });
+
+        const logs = await db
+          .select()
+          .from(sefazTransmissionLogs)
+          .where(eq(sefazTransmissionLogs.companyId, companyId))
+          .orderBy(desc(sefazTransmissionLogs.createdAt))
+          .limit(300);
+
+        const filtered = logs.filter((log) =>
+          String(log.action).startsWith("accessory-provider-receive-"),
+        );
+
+        res.json(
+          filtered.map((log) => ({
+            id: log.id,
+            action: log.action,
+            environment: log.environment,
+            success: Boolean(log.success),
+            requestPayload: log.requestPayload,
+            responsePayload: log.responsePayload,
+            createdAt: log.createdAt,
+          })),
+        );
+      } catch (error) {
+        res.status(500).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Falha ao carregar auditoria do provedor",
+        });
+      }
+    },
+  );
+
+  app.get(
+    "/api/fiscal-tax-rules",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÃ£o autenticado" });
+
+        const rules = await storage.listFiscalTaxRules(companyId, {
+          isActive:
+            typeof req.query.isActive === "string"
+              ? req.query.isActive === "true"
+              : undefined,
+          operationType: (req.query.operationType as string) || undefined,
+          customerType: (req.query.customerType as string) || undefined,
+          regime: (req.query.regime as string) || undefined,
+          originUf: (req.query.originUf as string) || undefined,
+          destinationUf: (req.query.destinationUf as string) || undefined,
+          ncm: (req.query.ncm as string) || undefined,
+          cest: (req.query.cest as string) || undefined,
+          cfop: (req.query.cfop as string) || undefined,
+        });
+        res.json(rules);
+      } catch (error) {
+        console.error("Failed to fetch fiscal tax rules:", error);
+        res.status(500).json({ error: "Failed to fetch fiscal tax rules" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/fiscal-tax-rules",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÃ£o autenticado" });
+
+        const validated = insertFiscalTaxRuleSchema.parse({
+          ...req.body,
+          companyId,
+        });
+        const created = await storage.createFiscalTaxRule(validated);
+        res.status(201).json(created);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to create fiscal tax rule:", error);
+        res.status(500).json({ error: "Failed to create fiscal tax rule" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/fiscal-tax-rules/:id",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÃ£o autenticado" });
+
+        const id = parseInt(req.params.id, 10);
+        if (isNaN(id)) {
+          return res.status(400).json({ error: "ID invÃ¡lido" });
+        }
+
+        const validated = z.object({}).passthrough().parse(req.body) as any;
+        const updated = await storage.updateFiscalTaxRule(id, companyId, validated);
+        if (!updated) {
+          return res.status(404).json({ error: "Regra fiscal nÃ£o encontrada" });
+        }
+        res.json(updated);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        console.error("Failed to update fiscal tax rule:", error);
+        res.status(500).json({ error: "Failed to update fiscal tax rule" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/fiscal-tax-rules/:id",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÃ£o autenticado" });
+
+        const id = parseInt(req.params.id, 10);
+        if (isNaN(id)) {
+          return res.status(400).json({ error: "ID invÃ¡lido" });
+        }
+
+        const deleted = await storage.deleteFiscalTaxRule(id, companyId);
+        if (!deleted) {
+          return res.status(404).json({ error: "Regra fiscal nÃ£o encontrada" });
+        }
+        res.json({ success: true });
+      } catch (error) {
+        console.error("Failed to delete fiscal tax rule:", error);
+        res.status(500).json({ error: "Failed to delete fiscal tax rule" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/fiscal-tax-rules/resolve",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÃ£o autenticado" });
+
+        const rule = await storage.resolveFiscalTaxRule(companyId, {
+          operationType: req.body?.operationType,
+          customerType: req.body?.customerType,
+          regime: req.body?.regime,
+          originUf: req.body?.originUf,
+          destinationUf: req.body?.destinationUf,
+          scope: req.body?.scope,
+          ncm: req.body?.ncm,
+          cest: req.body?.cest,
+          cfop: req.body?.cfop,
+        });
+        res.json({ rule });
+      } catch (error) {
+        console.error("Failed to resolve fiscal tax rule:", error);
+        res.status(500).json({ error: "Failed to resolve fiscal tax rule" });
       }
     }
   );

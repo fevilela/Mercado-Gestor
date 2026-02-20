@@ -462,6 +462,95 @@ const logSefazTransmission = async (data: {
   }
 };
 
+type FiscalWorkflowDocument = "NFS-e" | "CT-e" | "MDF-e";
+
+const FISCAL_WORKFLOW_CONFIG: Record<
+  FiscalWorkflowDocument,
+  {
+    actionPrefix: "nfse" | "cte" | "mdfe";
+    authority: "prefeitura" | "sefaz";
+    model: string;
+  }
+> = {
+  "NFS-e": { actionPrefix: "nfse", authority: "prefeitura", model: "60" },
+  "CT-e": { actionPrefix: "cte", authority: "sefaz", model: "57" },
+  "MDF-e": { actionPrefix: "mdfe", authority: "sefaz", model: "58" },
+};
+
+const generateWorkflowDocumentKey = (
+  companyId: number,
+  model: string,
+): string => {
+  const base = `${Date.now()}${companyId}${Math.floor(Math.random() * 1_000_000)}`;
+  const onlyDigits = `${model}${base}`.replace(/\D/g, "");
+  return onlyDigits.padEnd(44, "0").slice(0, 44);
+};
+
+const buildWorkflowProtocol = (prefix: string): string =>
+  `${prefix.toUpperCase()}-${Date.now()}`;
+
+const buildWorkflowXml = (
+  documentType: FiscalWorkflowDocument,
+  payload: any,
+  documentKey: string,
+  protocol: string,
+  environment: "homologacao" | "producao",
+) => {
+  const tpAmb = environment === "producao" ? "1" : "2";
+  const number = String(payload?.documentNumber || Date.now()).replace(/\D/g, "");
+  const series = String(payload?.documentSeries || "1").replace(/\D/g, "") || "1";
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<fiscalDocument>
+  <documentType>${documentType}</documentType>
+  <documentKey>${documentKey}</documentKey>
+  <model>${FISCAL_WORKFLOW_CONFIG[documentType].model}</model>
+  <number>${number}</number>
+  <series>${series}</series>
+  <tpAmb>${tpAmb}</tpAmb>
+  <protocol>${protocol}</protocol>
+</fiscalDocument>`;
+};
+
+const payloadContainsDocumentKey = (payload: any, documentKey: string) => {
+  if (!payload || typeof payload !== "object") return false;
+  const candidates = [
+    payload.documentKey,
+    payload.key,
+    payload?.request?.documentKey,
+    payload?.requestPayload?.documentKey,
+    payload?.response?.documentKey,
+    payload?.responsePayload?.documentKey,
+  ];
+  return candidates.some((value) => String(value || "") === documentKey);
+};
+
+const findLatestWorkflowLogByKey = async (params: {
+  companyId: number;
+  action: string;
+  documentKey: string;
+}) => {
+  const logs = await db
+    .select()
+    .from(sefazTransmissionLogs)
+    .where(
+      and(
+        eq(sefazTransmissionLogs.companyId, params.companyId),
+        eq(sefazTransmissionLogs.action, params.action),
+      ),
+    )
+    .orderBy(desc(sefazTransmissionLogs.createdAt))
+    .limit(200);
+
+  return (
+    logs.find(
+      (log) =>
+        payloadContainsDocumentKey(log.requestPayload, params.documentKey) ||
+        payloadContainsDocumentKey(log.responsePayload, params.documentKey),
+    ) || null
+  );
+};
+
 // Adiciona flags de contingencia no XML NFC-e
 const applyNFCeContingencyFlags = (xmlContent: string) => {
   const now = new Date().toISOString();
@@ -496,7 +585,8 @@ router.post("/nfe/validate", requireAuth, async (req, res) => {
     }
 
     const validation = NFeSalesValidationSchema.parse(req.body);
-    const { ibptToken } = req.body as { ibptToken?: string };
+    const bodyToken = (req.body as { ibptToken?: string })?.ibptToken;
+    const ibptToken = String(bodyToken || process.env.IBPT_TOKEN || "").trim();
 
     const companySettings = await storage.getCompanySettings(companyId);
     const taxRegime =
@@ -552,15 +642,36 @@ router.post("/nfe/validate", requireAuth, async (req, res) => {
         });
       }
 
-      const matrixResult = TaxMatrixService.resolve({
-        customerType:
-          validation.customerType === "consumidor"
-            ? "consumidor_final"
-            : "revenda",
-        originUF: validation.originState,
-        destinationUF: validation.destinyState,
-        taxRegime,
+      const resolvedCustomerType =
+        validation.customerType === "consumidor"
+          ? "consumidor_final"
+          : "revenda";
+
+      const matchedRule = await storage.resolveFiscalTaxRule(companyId, {
+        operationType: "venda",
+        customerType: resolvedCustomerType,
+        regime: taxRegime,
+        originUf: validation.originState,
+        destinationUf: validation.destinyState,
+        scope: validation.scope,
+        ncm,
+        cest: cest || undefined,
+        cfop: item.cfop,
       });
+
+      const matrixResult =
+        matchedRule && (matchedRule.cfop || matchedRule.csosn || matchedRule.cstIcms)
+          ? {
+              cfop: matchedRule.cfop || item.cfop,
+              csosn: matchedRule.csosn || undefined,
+              cst: matchedRule.cstIcms || undefined,
+            }
+          : TaxMatrixService.resolve({
+              customerType: resolvedCustomerType,
+              originUF: validation.originState,
+              destinationUF: validation.destinyState,
+              taxRegime,
+            });
 
       if (item.cfop !== matrixResult.cfop) {
         return res.status(400).json({
@@ -606,6 +717,7 @@ router.post("/nfe/validate", requireAuth, async (req, res) => {
         ...item,
         ncm,
         cest,
+        appliedTaxRuleId: matchedRule?.id || null,
         taxMatrix: matrixResult,
         ibpt,
       });
@@ -1764,6 +1876,192 @@ router.post("/nfse/validate", async (req, res) => {
   }
 });
 
+router.post(
+  "/nfse/emit",
+  requireAuth,
+  requirePermission("fiscal:manage"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const validation = NFSeValidationSchema.parse(req.body);
+      const environment = await resolveSefazEnvironment(companyId);
+      const protocol = buildWorkflowProtocol("nfse");
+      const documentKey = generateWorkflowDocumentKey(
+        companyId,
+        FISCAL_WORKFLOW_CONFIG["NFS-e"].model,
+      );
+      const xmlContent = buildWorkflowXml(
+        "NFS-e",
+        req.body,
+        documentKey,
+        protocol,
+        environment,
+      );
+      const authorizedAt = new Date();
+
+      await storage.saveFiscalXml({
+        companyId,
+        documentType: "NFS-e",
+        documentKey,
+        xmlContent,
+        authorizedAt,
+        expiresAt: new Date(
+          authorizedAt.getTime() + 5 * 365 * 24 * 60 * 60 * 1000,
+        ),
+      });
+
+      const responsePayload = {
+        success: true,
+        status: "100",
+        documentType: "NFS-e",
+        authority: "prefeitura",
+        protocol,
+        documentKey,
+        authorizedAt,
+      };
+
+      await logSefazTransmission({
+        companyId,
+        action: "nfse-emit",
+        environment,
+        requestPayload: { ...validation, documentKey },
+        responsePayload,
+        success: true,
+      });
+
+      res.json(responsePayload);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao emitir NFS-e",
+      });
+    }
+  },
+);
+
+router.get(
+  "/nfse/status/:key",
+  requireAuth,
+  requirePermission("fiscal:view"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const documentKey = String(req.params.key || "").trim();
+      if (!documentKey) {
+        return res.status(400).json({ error: "Chave nao informada" });
+      }
+
+      const record = await storage.getFiscalXmlByKey(companyId, documentKey);
+      if (!record || record.documentType !== "NFS-e") {
+        return res.status(404).json({ error: "Documento nao encontrado" });
+      }
+
+      const cancelLog = await findLatestWorkflowLogByKey({
+        companyId,
+        action: "nfse-cancel",
+        documentKey,
+      });
+      const emitLog = await findLatestWorkflowLogByKey({
+        companyId,
+        action: "nfse-emit",
+        documentKey,
+      });
+
+      const canceled = Boolean(cancelLog?.success);
+      const protocol = canceled
+        ? (cancelLog?.responsePayload as any)?.protocol
+        : (emitLog?.responsePayload as any)?.protocol;
+
+      res.json({
+        success: true,
+        documentType: "NFS-e",
+        authority: "prefeitura",
+        documentKey,
+        status: canceled ? "cancelada" : "autorizada",
+        protocol: protocol || null,
+        authorizedAt: record.authorizedAt || null,
+        canceledAt: canceled ? cancelLog?.createdAt || null : null,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao consultar status da NFS-e",
+      });
+    }
+  },
+);
+
+router.post(
+  "/nfse/cancel",
+  requireAuth,
+  requirePermission("fiscal:manage"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const documentKey = String(req.body?.documentKey || "").trim();
+      const reason = String(req.body?.reason || "").trim();
+      if (!documentKey || !reason) {
+        return res
+          .status(400)
+          .json({ error: "Campos obrigatorios: documentKey, reason" });
+      }
+
+      const record = await storage.getFiscalXmlByKey(companyId, documentKey);
+      if (!record || record.documentType !== "NFS-e") {
+        return res.status(404).json({ error: "Documento nao encontrado" });
+      }
+
+      const latestCancel = await findLatestWorkflowLogByKey({
+        companyId,
+        action: "nfse-cancel",
+        documentKey,
+      });
+      if (latestCancel?.success) {
+        return res.status(409).json({ error: "Documento ja cancelado" });
+      }
+
+      const environment = await resolveSefazEnvironment(companyId);
+      const responsePayload = {
+        success: true,
+        status: "135",
+        documentType: "NFS-e",
+        authority: "prefeitura",
+        documentKey,
+        protocol: buildWorkflowProtocol("nfse-cancel"),
+        canceledAt: new Date(),
+      };
+
+      await logSefazTransmission({
+        companyId,
+        action: "nfse-cancel",
+        environment,
+        requestPayload: { documentKey, reason },
+        responsePayload,
+        success: true,
+      });
+
+      res.json(responsePayload);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao cancelar NFS-e",
+      });
+    }
+  },
+);
+
 // ============================================
 // CT-e Routes
 // ============================================
@@ -1800,6 +2098,192 @@ router.post("/cte/validate", async (req, res) => {
     });
   }
 });
+
+router.post(
+  "/cte/emit",
+  requireAuth,
+  requirePermission("fiscal:manage"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const validation = CTeValidationSchema.parse(req.body);
+      const environment = await resolveSefazEnvironment(companyId);
+      const protocol = buildWorkflowProtocol("cte");
+      const documentKey = generateWorkflowDocumentKey(
+        companyId,
+        FISCAL_WORKFLOW_CONFIG["CT-e"].model,
+      );
+      const xmlContent = buildWorkflowXml(
+        "CT-e",
+        req.body,
+        documentKey,
+        protocol,
+        environment,
+      );
+      const authorizedAt = new Date();
+
+      await storage.saveFiscalXml({
+        companyId,
+        documentType: "CT-e",
+        documentKey,
+        xmlContent,
+        authorizedAt,
+        expiresAt: new Date(
+          authorizedAt.getTime() + 5 * 365 * 24 * 60 * 60 * 1000,
+        ),
+      });
+
+      const responsePayload = {
+        success: true,
+        status: "100",
+        documentType: "CT-e",
+        authority: "sefaz",
+        protocol,
+        documentKey,
+        authorizedAt,
+      };
+
+      await logSefazTransmission({
+        companyId,
+        action: "cte-emit",
+        environment,
+        requestPayload: { ...validation, documentKey },
+        responsePayload,
+        success: true,
+      });
+
+      res.json(responsePayload);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao emitir CT-e",
+      });
+    }
+  },
+);
+
+router.get(
+  "/cte/status/:key",
+  requireAuth,
+  requirePermission("fiscal:view"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const documentKey = String(req.params.key || "").trim();
+      if (!documentKey) {
+        return res.status(400).json({ error: "Chave nao informada" });
+      }
+
+      const record = await storage.getFiscalXmlByKey(companyId, documentKey);
+      if (!record || record.documentType !== "CT-e") {
+        return res.status(404).json({ error: "Documento nao encontrado" });
+      }
+
+      const cancelLog = await findLatestWorkflowLogByKey({
+        companyId,
+        action: "cte-cancel",
+        documentKey,
+      });
+      const emitLog = await findLatestWorkflowLogByKey({
+        companyId,
+        action: "cte-emit",
+        documentKey,
+      });
+
+      const canceled = Boolean(cancelLog?.success);
+      const protocol = canceled
+        ? (cancelLog?.responsePayload as any)?.protocol
+        : (emitLog?.responsePayload as any)?.protocol;
+
+      res.json({
+        success: true,
+        documentType: "CT-e",
+        authority: "sefaz",
+        documentKey,
+        status: canceled ? "cancelada" : "autorizada",
+        protocol: protocol || null,
+        authorizedAt: record.authorizedAt || null,
+        canceledAt: canceled ? cancelLog?.createdAt || null : null,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao consultar status do CT-e",
+      });
+    }
+  },
+);
+
+router.post(
+  "/cte/cancel",
+  requireAuth,
+  requirePermission("fiscal:manage"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const documentKey = String(req.body?.documentKey || "").trim();
+      const reason = String(req.body?.reason || "").trim();
+      if (!documentKey || !reason) {
+        return res
+          .status(400)
+          .json({ error: "Campos obrigatorios: documentKey, reason" });
+      }
+
+      const record = await storage.getFiscalXmlByKey(companyId, documentKey);
+      if (!record || record.documentType !== "CT-e") {
+        return res.status(404).json({ error: "Documento nao encontrado" });
+      }
+
+      const latestCancel = await findLatestWorkflowLogByKey({
+        companyId,
+        action: "cte-cancel",
+        documentKey,
+      });
+      if (latestCancel?.success) {
+        return res.status(409).json({ error: "Documento ja cancelado" });
+      }
+
+      const environment = await resolveSefazEnvironment(companyId);
+      const responsePayload = {
+        success: true,
+        status: "135",
+        documentType: "CT-e",
+        authority: "sefaz",
+        documentKey,
+        protocol: buildWorkflowProtocol("cte-cancel"),
+        canceledAt: new Date(),
+      };
+
+      await logSefazTransmission({
+        companyId,
+        action: "cte-cancel",
+        environment,
+        requestPayload: { documentKey, reason },
+        responsePayload,
+        success: true,
+      });
+
+      res.json(responsePayload);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao cancelar CT-e",
+      });
+    }
+  },
+);
 
 // ============================================
 // MDF-e Routes
@@ -1845,6 +2329,192 @@ router.post("/mdfe/validate", async (req, res) => {
     });
   }
 });
+
+router.post(
+  "/mdfe/emit",
+  requireAuth,
+  requirePermission("fiscal:manage"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const validation = MDFeValidationSchema.parse(req.body);
+      const environment = await resolveSefazEnvironment(companyId);
+      const protocol = buildWorkflowProtocol("mdfe");
+      const documentKey = generateWorkflowDocumentKey(
+        companyId,
+        FISCAL_WORKFLOW_CONFIG["MDF-e"].model,
+      );
+      const xmlContent = buildWorkflowXml(
+        "MDF-e",
+        req.body,
+        documentKey,
+        protocol,
+        environment,
+      );
+      const authorizedAt = new Date();
+
+      await storage.saveFiscalXml({
+        companyId,
+        documentType: "MDF-e",
+        documentKey,
+        xmlContent,
+        authorizedAt,
+        expiresAt: new Date(
+          authorizedAt.getTime() + 5 * 365 * 24 * 60 * 60 * 1000,
+        ),
+      });
+
+      const responsePayload = {
+        success: true,
+        status: "100",
+        documentType: "MDF-e",
+        authority: "sefaz",
+        protocol,
+        documentKey,
+        authorizedAt,
+      };
+
+      await logSefazTransmission({
+        companyId,
+        action: "mdfe-emit",
+        environment,
+        requestPayload: { ...validation, documentKey },
+        responsePayload,
+        success: true,
+      });
+
+      res.json(responsePayload);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao emitir MDF-e",
+      });
+    }
+  },
+);
+
+router.get(
+  "/mdfe/status/:key",
+  requireAuth,
+  requirePermission("fiscal:view"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const documentKey = String(req.params.key || "").trim();
+      if (!documentKey) {
+        return res.status(400).json({ error: "Chave nao informada" });
+      }
+
+      const record = await storage.getFiscalXmlByKey(companyId, documentKey);
+      if (!record || record.documentType !== "MDF-e") {
+        return res.status(404).json({ error: "Documento nao encontrado" });
+      }
+
+      const cancelLog = await findLatestWorkflowLogByKey({
+        companyId,
+        action: "mdfe-cancel",
+        documentKey,
+      });
+      const emitLog = await findLatestWorkflowLogByKey({
+        companyId,
+        action: "mdfe-emit",
+        documentKey,
+      });
+
+      const canceled = Boolean(cancelLog?.success);
+      const protocol = canceled
+        ? (cancelLog?.responsePayload as any)?.protocol
+        : (emitLog?.responsePayload as any)?.protocol;
+
+      res.json({
+        success: true,
+        documentType: "MDF-e",
+        authority: "sefaz",
+        documentKey,
+        status: canceled ? "cancelada" : "autorizada",
+        protocol: protocol || null,
+        authorizedAt: record.authorizedAt || null,
+        canceledAt: canceled ? cancelLog?.createdAt || null : null,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao consultar status do MDF-e",
+      });
+    }
+  },
+);
+
+router.post(
+  "/mdfe/cancel",
+  requireAuth,
+  requirePermission("fiscal:manage"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const documentKey = String(req.body?.documentKey || "").trim();
+      const reason = String(req.body?.reason || "").trim();
+      if (!documentKey || !reason) {
+        return res
+          .status(400)
+          .json({ error: "Campos obrigatorios: documentKey, reason" });
+      }
+
+      const record = await storage.getFiscalXmlByKey(companyId, documentKey);
+      if (!record || record.documentType !== "MDF-e") {
+        return res.status(404).json({ error: "Documento nao encontrado" });
+      }
+
+      const latestCancel = await findLatestWorkflowLogByKey({
+        companyId,
+        action: "mdfe-cancel",
+        documentKey,
+      });
+      if (latestCancel?.success) {
+        return res.status(409).json({ error: "Documento ja cancelado" });
+      }
+
+      const environment = await resolveSefazEnvironment(companyId);
+      const responsePayload = {
+        success: true,
+        status: "135",
+        documentType: "MDF-e",
+        authority: "sefaz",
+        documentKey,
+        protocol: buildWorkflowProtocol("mdfe-cancel"),
+        canceledAt: new Date(),
+      };
+
+      await logSefazTransmission({
+        companyId,
+        action: "mdfe-cancel",
+        environment,
+        requestPayload: { documentKey, reason },
+        responsePayload,
+        success: true,
+      });
+
+      res.json(responsePayload);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao cancelar MDF-e",
+      });
+    }
+  },
+);
 
 // ============================================
 // Validações auxiliares
@@ -3159,6 +3829,411 @@ router.post(
   },
 );
 
+router.post(
+  "/manifestation/distribute",
+  requireAuth,
+  requirePermission("fiscal:manage"),
+  requireValidFiscalCertificate(),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado para esta empresa",
+        });
+      }
+
+      const settings = await storage.getCompanySettings(companyId);
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+      const ufNormalized = String(
+        req.body?.uf || settings?.sefazUf || company.state || "SP",
+      ).toUpperCase();
+      const receiverCnpj = String(company.cnpj || "").replace(/\D/g, "");
+      if (!receiverCnpj) {
+        return res
+          .status(400)
+          .json({ error: "CNPJ da empresa nao encontrado" });
+      }
+
+      const sefazService = new SefazService({
+        environment: resolvedEnvironment,
+        uf: ufNormalized,
+        certificateBuffer,
+        certificatePassword,
+        cnpj: receiverCnpj,
+      });
+
+      const distributeResult = await sefazService.distributeDFe({
+        ultNSU: String(req.body?.ultNSU || "").replace(/\D/g, "") || undefined,
+        accessKey:
+          String(req.body?.accessKey || "").replace(/\D/g, "") || undefined,
+      });
+
+      const eventType = String(req.body?.eventType || "").trim() as
+        | "ciencia_da_operacao"
+        | "confirmacao_da_operacao"
+        | "desconhecimento_da_operacao"
+        | "operacao_nao_realizada"
+        | "";
+      const normalizedEventType =
+        eventType === "ciencia_da_operacao" ||
+        eventType === "confirmacao_da_operacao" ||
+        eventType === "desconhecimento_da_operacao" ||
+        eventType === "operacao_nao_realizada"
+          ? eventType
+          : null;
+      const runAutoManifest = Boolean(
+        req.body?.autoManifest && normalizedEventType,
+      );
+      const autoReason = String(req.body?.reason || "").trim();
+      const requiresReason = normalizedEventType === "operacao_nao_realizada";
+      if (runAutoManifest && requiresReason && autoReason.length < 15) {
+        return res.status(400).json({
+          error:
+            "Justificativa obrigatoria com no minimo 15 caracteres para operacao nao realizada",
+        });
+      }
+
+      const persisted: Array<{
+        documentKey: string;
+        saved: boolean;
+        id?: number;
+      }> = [];
+      const manifestations: Array<{
+        documentKey: string;
+        success: boolean;
+        status?: string;
+        message?: string;
+        protocol?: string;
+        eventId?: string;
+      }> = [];
+
+      for (const doc of distributeResult.documents) {
+        const documentKey = String(doc.documentKey || "").replace(/\D/g, "");
+        const issuerCnpj = String(doc.issuerCnpj || "").replace(/\D/g, "");
+        const xmlContent = String(doc.xmlContent || "");
+
+        if (documentKey && issuerCnpj && xmlContent) {
+          const existing = await storage.getManifestDocumentByKey(
+            companyId,
+            documentKey,
+          );
+          if (!existing) {
+            const stored = await storage.saveManifestDocument({
+              companyId,
+              documentKey,
+              issuerCnpj,
+              receiverCnpj,
+              xmlContent,
+              downloadedAt: new Date(),
+            });
+            persisted.push({
+              documentKey,
+              saved: true,
+              id: stored.id,
+            });
+          } else {
+            persisted.push({ documentKey, saved: false, id: existing.id });
+          }
+        }
+
+        if (runAutoManifest && documentKey) {
+          const manifestationResult = await sefazService.sendManifestationEvent({
+            accessKey: documentKey,
+            eventType: normalizedEventType!,
+            reason: requiresReason ? autoReason : undefined,
+            sequence: 1,
+          });
+          manifestations.push({
+            documentKey,
+            success: manifestationResult.success,
+            status: manifestationResult.status,
+            message: manifestationResult.message,
+            protocol: manifestationResult.protocol,
+            eventId: manifestationResult.eventId,
+          });
+        }
+      }
+
+      await logSefazTransmission({
+        companyId,
+        action: "manifestation-distribute",
+        environment: resolvedEnvironment,
+        requestPayload: {
+          ultNSU: req.body?.ultNSU || null,
+          accessKey: req.body?.accessKey || null,
+          autoManifest: runAutoManifest,
+          eventType: normalizedEventType,
+        },
+        responsePayload: {
+          status: distributeResult.status,
+          message: distributeResult.message,
+          lastNSU: distributeResult.lastNSU,
+          maxNSU: distributeResult.maxNSU,
+          documentsCount: distributeResult.documents.length,
+          persistedCount: persisted.filter((item) => item.saved).length,
+          manifestations,
+        },
+        success: distributeResult.success,
+      });
+
+      res.json({
+        success: distributeResult.success,
+        status: distributeResult.status,
+        message: distributeResult.message,
+        lastNSU: distributeResult.lastNSU,
+        maxNSU: distributeResult.maxNSU,
+        documents: distributeResult.documents.map((doc) => ({
+          nsu: doc.nsu,
+          schema: doc.schema,
+          documentKey: doc.documentKey,
+          issuerCnpj: doc.issuerCnpj,
+          receiverCnpj: doc.receiverCnpj,
+        })),
+        persisted,
+        manifestations,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro na distribuicao automatica de DF-e",
+      });
+    }
+  },
+);
+
+router.post(
+  "/manifestation/event",
+  requireAuth,
+  requirePermission("fiscal:manage"),
+  requireValidFiscalCertificate(),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const accessKey = String(req.body?.accessKey || "").replace(/\D/g, "");
+      const eventType = String(req.body?.eventType || "").trim() as
+        | "ciencia_da_operacao"
+        | "confirmacao_da_operacao"
+        | "desconhecimento_da_operacao"
+        | "operacao_nao_realizada";
+      const reason = String(req.body?.reason || "").trim();
+      const sequence = Number(req.body?.sequence || 1);
+
+      if (!accessKey || accessKey.length !== 44) {
+        return res.status(400).json({ error: "Chave de acesso invalida" });
+      }
+      if (
+        ![
+          "ciencia_da_operacao",
+          "confirmacao_da_operacao",
+          "desconhecimento_da_operacao",
+          "operacao_nao_realizada",
+        ].includes(eventType)
+      ) {
+        return res.status(400).json({ error: "Tipo de evento invalido" });
+      }
+      if (eventType === "operacao_nao_realizada" && reason.length < 15) {
+        return res.status(400).json({
+          error:
+            "Justificativa obrigatoria com no minimo 15 caracteres para operacao nao realizada",
+        });
+      }
+
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado para esta empresa",
+        });
+      }
+
+      const settings = await storage.getCompanySettings(companyId);
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+      const ufNormalized = String(
+        req.body?.uf || settings?.sefazUf || company.state || "SP",
+      ).toUpperCase();
+
+      const sefazService = new SefazService({
+        environment: resolvedEnvironment,
+        uf: ufNormalized,
+        certificateBuffer,
+        certificatePassword,
+        cnpj: String(company.cnpj || "").replace(/\D/g, ""),
+      });
+
+      const result = await sefazService.sendManifestationEvent({
+        accessKey,
+        eventType,
+        reason: eventType === "operacao_nao_realizada" ? reason : undefined,
+        sequence: Number.isFinite(sequence) && sequence > 0 ? sequence : 1,
+      });
+
+      await logSefazTransmission({
+        companyId,
+        action: "manifestation-event",
+        environment: resolvedEnvironment,
+        requestPayload: {
+          accessKey,
+          eventType,
+          sequence: Number.isFinite(sequence) && sequence > 0 ? sequence : 1,
+        },
+        responsePayload: result,
+        success: result.success,
+      });
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          status: result.status,
+          message: result.message,
+          protocol: result.protocol,
+          eventId: result.eventId,
+        });
+      }
+
+      res.json({
+        success: true,
+        status: result.status,
+        message: result.message,
+        protocol: result.protocol,
+        eventId: result.eventId,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao manifestar destinatario",
+      });
+    }
+  },
+);
+
+router.get(
+  "/manifestation/:documentKey/status",
+  requireAuth,
+  requirePermission("fiscal:view"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const documentKey = String(req.params.documentKey || "").replace(/\D/g, "");
+      if (!documentKey || documentKey.length !== 44) {
+        return res.status(400).json({ error: "Chave de acesso invalida" });
+      }
+
+      const manifestDoc = await storage.getManifestDocumentByKey(
+        companyId,
+        documentKey,
+      );
+
+      const eventLogs = await db
+        .select()
+        .from(sefazTransmissionLogs)
+        .where(
+          and(
+            eq(sefazTransmissionLogs.companyId, companyId),
+            eq(sefazTransmissionLogs.action, "manifestation-event"),
+          ),
+        )
+        .orderBy(desc(sefazTransmissionLogs.createdAt))
+        .limit(500);
+
+      const documentEvents = eventLogs
+        .filter((log) => {
+          const payload = (log.requestPayload || {}) as any;
+          return String(payload?.accessKey || "").replace(/\D/g, "") === documentKey;
+        })
+        .map((log) => {
+          const requestPayload = (log.requestPayload || {}) as any;
+          const responsePayload = (log.responsePayload || {}) as any;
+          return {
+            id: log.id,
+            eventType: String(requestPayload?.eventType || ""),
+            sequence: Number(requestPayload?.sequence || 1),
+            success: Boolean(log.success),
+            status: String(responsePayload?.status || ""),
+            message: String(responsePayload?.message || ""),
+            protocol: String(responsePayload?.protocol || ""),
+            eventId: String(responsePayload?.eventId || ""),
+            createdAt: log.createdAt,
+          };
+        });
+
+      const latestEventByType = new Map<string, (typeof documentEvents)[number]>();
+      for (const event of documentEvents) {
+        if (!event.eventType || latestEventByType.has(event.eventType)) continue;
+        latestEventByType.set(event.eventType, event);
+      }
+
+      res.json({
+        documentKey,
+        distributed: Boolean(manifestDoc),
+        document: manifestDoc
+          ? {
+              id: manifestDoc.id,
+              issuerCnpj: manifestDoc.issuerCnpj,
+              receiverCnpj: manifestDoc.receiverCnpj,
+              downloadedAt: manifestDoc.downloadedAt,
+              createdAt: manifestDoc.createdAt,
+            }
+          : null,
+        manifestations: {
+          cienciaDaOperacao:
+            latestEventByType.get("ciencia_da_operacao") || null,
+          confirmacaoDaOperacao:
+            latestEventByType.get("confirmacao_da_operacao") || null,
+          desconhecimentoDaOperacao:
+            latestEventByType.get("desconhecimento_da_operacao") || null,
+          operacaoNaoRealizada:
+            latestEventByType.get("operacao_nao_realizada") || null,
+        },
+        events: documentEvents,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao consultar status da manifestacao",
+      });
+    }
+  },
+);
+
 router.get(
   "/manifestation",
   requireAuth,
@@ -3197,15 +4272,34 @@ router.post("/sefaz/receipt", async (req, res) => {
       return res.status(400).json({ error: "UF e obrigatoria" });
     }
 
-    const resolvedEnvironment = companyId
-      ? await resolveSefazEnvironment(companyId)
-      : "homologacao";
+    if (!companyId) {
+      return res.status(401).json({ error: "Empresa nao identificada" });
+    }
+
+    const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+    const company = await storage.getCompanyById(companyId);
+    if (!company) {
+      return res.status(400).json({ error: "Empresa nao configurada" });
+    }
+
+    const { CertificateService } = await import("./certificate-service");
+    const certService = new CertificateService();
+    const certificateBuffer = await certService.getCertificate(companyId);
+    const certificatePassword =
+      await certService.getCertificatePassword(companyId);
+
+    if (!certificateBuffer || !certificatePassword) {
+      return res.status(400).json({
+        error: "Certificado digital nao configurado para esta empresa",
+      });
+    }
 
     const sefazService = new SefazService({
       environment: resolvedEnvironment,
       uf,
-      certificateBuffer: Buffer.alloc(0),
-      certificatePassword: "",
+      certificateBuffer,
+      certificatePassword,
+      cnpj: String(company.cnpj || "").replace(/\D/g, ""),
     });
 
     const result = await sefazService.queryReceipt(xmlContent);

@@ -715,6 +715,106 @@ export type InsertTaxAliquot = z.infer<typeof insertTaxAliquotSchema>;
 export type TaxAliquot = typeof taxAliquots.$inferSelect;
 
 // ============================================
+// FISCAL SYSTEM: Tax Rules Matrix (NCM/CEST/UF/CFOP/Regime/Cliente/Operacao)
+// ============================================
+export const fiscalTaxRules = pgTable("fiscal_tax_rules", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").default(true),
+  priority: integer("priority").default(0),
+
+  // Contexto de aplicacao
+  operationType: text("operation_type"), // venda, compra, devolucao, servico
+  customerType: text("customer_type"), // consumidor_final, revenda, contribuinte, nao_contribuinte
+  regime: text("regime"), // Simples Nacional, Lucro Real, Lucro Presumido
+  originUf: text("origin_uf"),
+  destinationUf: text("destination_uf"),
+  scope: text("scope"), // interna, interestadual, exterior
+  ncm: text("ncm"),
+  cest: text("cest"),
+  cfop: text("cfop"),
+
+  // Resultado fiscal aplicado
+  cstIcms: text("cst_icms"),
+  csosn: text("csosn"),
+  cstIpi: text("cst_ipi"),
+  cstPis: text("cst_pis"),
+  cstCofins: text("cst_cofins"),
+  icmsAliquot: decimal("icms_aliquot", { precision: 5, scale: 2 }).default("0"),
+  icmsReduction: decimal("icms_reduction", { precision: 5, scale: 2 }).default(
+    "0",
+  ),
+  icmsStAliquot: decimal("icms_st_aliquot", {
+    precision: 5,
+    scale: 2,
+  }).default("0"),
+  ipiAliquot: decimal("ipi_aliquot", { precision: 5, scale: 2 }).default("0"),
+  pisAliquot: decimal("pis_aliquot", { precision: 5, scale: 2 }).default("0"),
+  cofinsAliquot: decimal("cofins_aliquot", { precision: 5, scale: 2 }).default(
+    "0",
+  ),
+  issAliquot: decimal("iss_aliquot", { precision: 5, scale: 2 }).default("0"),
+
+  // Excecoes e vigencia
+  exceptionData: jsonb("exception_data"),
+  validFrom: timestamp("valid_from"),
+  validTo: timestamp("valid_to"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertFiscalTaxRuleSchema = createInsertSchema(fiscalTaxRules)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .superRefine((value, ctx) => {
+    if (value.originUf && !/^[A-Z]{2}$/.test(String(value.originUf).toUpperCase())) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["originUf"],
+        message: "originUf deve ter 2 letras (UF)",
+      });
+    }
+    if (
+      value.destinationUf &&
+      !/^[A-Z]{2}$/.test(String(value.destinationUf).toUpperCase())
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["destinationUf"],
+        message: "destinationUf deve ter 2 letras (UF)",
+      });
+    }
+    if (value.ncm && !/^\d{8}$/.test(String(value.ncm))) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["ncm"],
+        message: "ncm deve ter 8 digitos",
+      });
+    }
+    if (value.cest && !/^\d{7}$/.test(String(value.cest))) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cest"],
+        message: "cest deve ter 7 digitos",
+      });
+    }
+    if (value.cfop && !/^\d{4}$/.test(String(value.cfop))) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cfop"],
+        message: "cfop deve ter 4 digitos",
+      });
+    }
+  });
+export type InsertFiscalTaxRule = z.infer<typeof insertFiscalTaxRuleSchema>;
+export type FiscalTaxRule = typeof fiscalTaxRules.$inferSelect;
+
+// ============================================
 // FISCAL SYSTEM: Simples Nacional Aliquots
 // ============================================
 export const simplesNacionalAliquots = pgTable("simples_nacional_aliquots", {

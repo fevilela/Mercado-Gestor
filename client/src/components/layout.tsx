@@ -131,32 +131,8 @@ const sidebarSections: SidebarSection[] = [
     items: [
       {
         icon: FileText,
-        label: "Emitir NF-e",
-        href: "/nfe-emissao",
-        permissions: ["fiscal:view", "fiscal:manage"],
-      },
-      {
-        icon: Zap,
-        label: "Operacoes SEFAZ",
-        href: "/sefaz",
-        permissions: ["fiscal:view", "fiscal:manage"],
-      },
-      {
-        icon: FileText,
-        label: "Historico NF-e",
-        href: "/nfe-historico",
-        permissions: ["fiscal:view", "fiscal:manage"],
-      },
-      {
-        icon: FileText,
-        label: "Carta de Correcao",
-        href: "/carta-correcao",
-        permissions: ["fiscal:view", "fiscal:manage"],
-      },
-      {
-        icon: FileText,
-        label: "Documentos Fiscais",
-        href: "/fiscal-documents",
+        label: "Central Fiscal",
+        href: "/fiscal-central",
         permissions: ["fiscal:view", "fiscal:manage"],
       },
       {

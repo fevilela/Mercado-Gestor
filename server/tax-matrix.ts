@@ -23,106 +23,98 @@ interface TaxMatrixRule {
   csosn?: string;
 }
 
-const TAX_MATRIX_RULES: TaxMatrixRule[] = [
-  {
-    customerType: "consumidor_final",
-    interstate: false,
-    regime: "Simples Nacional",
-    cfop: "5103",
-    csosn: "102",
-  },
-  {
-    customerType: "consumidor_final",
-    interstate: true,
-    regime: "Simples Nacional",
-    cfop: "6103",
-    csosn: "102",
-  },
-  {
-    customerType: "revenda",
-    interstate: false,
-    regime: "Simples Nacional",
-    cfop: "5102",
-    csosn: "101",
-  },
-  {
-    customerType: "revenda",
-    interstate: true,
-    regime: "Simples Nacional",
-    cfop: "6102",
-    csosn: "101",
-  },
-  {
-    customerType: "consumidor_final",
-    interstate: false,
-    regime: "Lucro Real",
-    cfop: "5103",
+const parseRulesFromEnv = (): TaxMatrixRule[] => {
+  const raw = process.env.TAX_MATRIX_RULES_JSON;
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter((rule) => rule && typeof rule === "object")
+      .map((rule): TaxMatrixRule => {
+        const typed = rule as Record<string, unknown>;
+        const customerType: CustomerType =
+          typed.customerType === "revenda" ? "revenda" : "consumidor_final";
+        const regime: TaxRegime =
+          typed.regime === "Lucro Real" || typed.regime === "Lucro Presumido"
+            ? (typed.regime as TaxRegime)
+            : "Simples Nacional";
+
+        return {
+          customerType,
+          interstate: Boolean(typed.interstate),
+          regime,
+          cfop: String(typed.cfop || "").trim(),
+          cst: typed.cst ? String(typed.cst).trim() : undefined,
+          csosn: typed.csosn ? String(typed.csosn).trim() : undefined,
+        };
+      })
+      .filter((rule) => rule.cfop.length === 4);
+  } catch {
+    return [];
+  }
+};
+
+const resolveDefaultRule = (
+  context: TaxMatrixContext,
+  interstate: boolean,
+): TaxMatrixRule => {
+  const cfop =
+    context.customerType === "revenda"
+      ? interstate
+        ? "6102"
+        : "5102"
+      : interstate
+        ? "6103"
+        : "5103";
+
+  if (context.taxRegime === "Simples Nacional") {
+    return {
+      customerType: context.customerType,
+      interstate,
+      regime: context.taxRegime,
+      cfop,
+      csosn: context.customerType === "revenda" ? "101" : "102",
+    };
+  }
+
+  return {
+    customerType: context.customerType,
+    interstate,
+    regime: context.taxRegime,
+    cfop,
     cst: "00",
-  },
-  {
-    customerType: "consumidor_final",
-    interstate: true,
-    regime: "Lucro Real",
-    cfop: "6103",
-    cst: "00",
-  },
-  {
-    customerType: "revenda",
-    interstate: false,
-    regime: "Lucro Real",
-    cfop: "5102",
-    cst: "00",
-  },
-  {
-    customerType: "revenda",
-    interstate: true,
-    regime: "Lucro Real",
-    cfop: "6102",
-    cst: "00",
-  },
-  {
-    customerType: "consumidor_final",
-    interstate: false,
-    regime: "Lucro Presumido",
-    cfop: "5103",
-    cst: "00",
-  },
-  {
-    customerType: "consumidor_final",
-    interstate: true,
-    regime: "Lucro Presumido",
-    cfop: "6103",
-    cst: "00",
-  },
-  {
-    customerType: "revenda",
-    interstate: false,
-    regime: "Lucro Presumido",
-    cfop: "5102",
-    cst: "00",
-  },
-  {
-    customerType: "revenda",
-    interstate: true,
-    regime: "Lucro Presumido",
-    cfop: "6102",
-    cst: "00",
-  },
-];
+  };
+};
 
 export class TaxMatrixService {
+  private static runtimeRules: TaxMatrixRule[] = [];
+
+  static setRules(rules: TaxMatrixRule[]) {
+    this.runtimeRules = Array.isArray(rules) ? [...rules] : [];
+  }
+
   static resolve(context: TaxMatrixContext): TaxMatrixResult {
     const interstate =
       context.originUF.toUpperCase() !== context.destinationUF.toUpperCase();
-    const rule = TAX_MATRIX_RULES.find(
+
+    const mergedRules = [
+      ...this.runtimeRules,
+      ...parseRulesFromEnv(),
+      resolveDefaultRule(context, interstate),
+    ];
+
+    const rule = mergedRules.find(
       (item) =>
         item.customerType === context.customerType &&
         item.interstate === interstate &&
-        item.regime === context.taxRegime
+        item.regime === context.taxRegime,
     );
 
     if (!rule) {
-      throw new Error("Matriz tributária não encontrada para o contexto");
+      throw new Error("Matriz tributaria nao encontrada para o contexto");
     }
 
     return {
