@@ -11,13 +11,12 @@ interface ContingencyNFCe {
 
 type ResendHandler = (item: ContingencyNFCe) => Promise<void>;
 
-import { fileURLToPath } from "url";
-import { dirname } from "path";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const STORE_PATH = path.join(__dirname, "..", "data", "nfce-contingency.json");
+const STORE_PATH = path.join(
+  process.cwd(),
+  "server",
+  "data",
+  "nfce-contingency.json",
+);
 
 function ensureStoreFolder() {
   const folder = path.dirname(STORE_PATH);

@@ -2,8 +2,9 @@ import * as crypto from "crypto";
 import * as forge from "node-forge";
 import { SignedXml } from "xml-crypto";
 import { createRequire } from "module";
+import * as path from "path";
 
-const require = createRequire(import.meta.url);
+const require = createRequire(path.join(process.cwd(), "package.json"));
 const forgeLib: any = (forge as any).asn1 ? forge : require("node-forge");
 
 /**

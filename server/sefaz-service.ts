@@ -7,8 +7,9 @@ import * as https from "https";
 import * as zlib from "zlib";
 import { createRequire } from "module";
 import { XMLSignatureService } from "./xml-signature";
+import * as path from "path";
 
-const require = createRequire(import.meta.url);
+const require = createRequire(path.join(process.cwd(), "package.json"));
 const resolveUrlEventos = (uf: string, versao: string): any => {
   try {
     const mod = require("node-sped-nfe/dist/utils/eventos.js");
