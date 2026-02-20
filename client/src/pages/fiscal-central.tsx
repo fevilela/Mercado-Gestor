@@ -14,8 +14,23 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, MoreHorizontal } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -67,9 +82,21 @@ export default function FiscalCentralPage() {
     doc: NFeHistoryRecord | null;
     reason: string;
   }>({ open: false, doc: null, reason: "" });
-  const [nfeStatusSearch, setNfeStatusSearch] = useState("");
-  const [nfceCancelReason, setNfceCancelReason] = useState("");
-  const [nfceStatusSearch, setNfceStatusSearch] = useState("");
+  const [nfeSearch, setNfeSearch] = useState("");
+  const [nfeStatusFilter, setNfeStatusFilter] = useState("all");
+  const [nfeDateFrom, setNfeDateFrom] = useState("");
+  const [nfeDateTo, setNfeDateTo] = useState("");
+  const [selectedNfeIds, setSelectedNfeIds] = useState<number[]>([]);
+  const [nfceCancelDialog, setNfceCancelDialog] = useState<{
+    open: boolean;
+    sale: SaleRecord | null;
+    reason: string;
+  }>({ open: false, sale: null, reason: "" });
+  const [nfceSearch, setNfceSearch] = useState("");
+  const [nfceStatusFilter, setNfceStatusFilter] = useState("all");
+  const [nfceDateFrom, setNfceDateFrom] = useState("");
+  const [nfceDateTo, setNfceDateTo] = useState("");
+  const [selectedNfceIds, setSelectedNfceIds] = useState<number[]>([]);
   const [accessoryPeriod, setAccessoryPeriod] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -132,19 +159,21 @@ export default function FiscalCentralPage() {
     },
   });
 
+  const submitNfe = async (doc: NFeHistoryRecord) => {
+    const res = await fetch("/api/fiscal/sefaz/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nfeLogId: doc.id, uf: sefazUf }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || payload?.success === false) {
+      throw new Error(payload?.error || payload?.message || "Falha ao enviar NF-e");
+    }
+    return payload;
+  };
+
   const sendNfeMutation = useMutation({
-    mutationFn: async (doc: NFeHistoryRecord) => {
-      const res = await fetch("/api/fiscal/sefaz/submit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nfeLogId: doc.id, uf: sefazUf }),
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok || payload?.success === false) {
-        throw new Error(payload?.error || payload?.message || "Falha ao enviar NF-e");
-      }
-      return payload;
-    },
+    mutationFn: submitNfe,
     onSuccess: () => {
       toast({ title: "Sucesso", description: "NF-e enviada para SEFAZ." });
       queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
@@ -153,6 +182,50 @@ export default function FiscalCentralPage() {
       toast({
         title: "Erro",
         description: error instanceof Error ? error.message : "Falha ao enviar NF-e",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const sendNfeBatchMutation = useMutation({
+    mutationFn: async (docs: NFeHistoryRecord[]) => {
+      let successCount = 0;
+      const errors: string[] = [];
+
+      for (const doc of docs) {
+        try {
+          await submitNfe(doc);
+          successCount += 1;
+        } catch (error) {
+          const label = doc.nfeNumber ? `NF-e ${doc.nfeNumber}` : `Registro ${doc.id}`;
+          const message =
+            error instanceof Error ? error.message : "Falha ao enviar NF-e";
+          errors.push(`${label}: ${message}`);
+        }
+      }
+
+      return { successCount, errors, total: docs.length };
+    },
+    onSuccess: (result) => {
+      const hasErrors = result.errors.length > 0;
+      toast({
+        title: hasErrors ? "Envio em lote concluído com ressalvas" : "Sucesso",
+        description: hasErrors
+          ? `${result.successCount} de ${result.total} NF-e enviadas.`
+          : `${result.successCount} NF-e enviadas com sucesso.`,
+        variant: hasErrors ? "destructive" : "default",
+      });
+      if (hasErrors) {
+        console.error("Falhas no envio em lote de NF-e:", result.errors);
+      }
+      setSelectedNfeIds([]);
+      queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error ? error.message : "Falha ao enviar lote de NF-e",
         variant: "destructive",
       });
     },
@@ -190,21 +263,30 @@ export default function FiscalCentralPage() {
     },
   });
 
+  const submitNfce = async (saleIds: number[]) => {
+    const res = await fetch("/api/fiscal/nfce/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ saleIds }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(payload?.error || "Falha ao enviar NFC-e");
+    }
+    return payload;
+  };
+
   const sendNfceMutation = useMutation({
-    mutationFn: async (sale: SaleRecord) => {
-      const res = await fetch("/api/fiscal/nfce/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ saleIds: [sale.id] }),
+    mutationFn: submitNfce,
+    onSuccess: (_, saleIds) => {
+      toast({
+        title: "Sucesso",
+        description:
+          saleIds.length > 1
+            ? `${saleIds.length} NFC-e enviadas para SEFAZ.`
+            : "NFC-e enviada para SEFAZ.",
       });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(payload?.error || "Falha ao enviar NFC-e");
-      }
-      return payload;
-    },
-    onSuccess: () => {
-      toast({ title: "Sucesso", description: "NFC-e enviada para SEFAZ." });
+      setSelectedNfceIds([]);
       queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
     },
     onError: (error) => {
@@ -223,7 +305,7 @@ export default function FiscalCentralPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           saleId: sale.id,
-          reason: nfceCancelReason,
+          reason: nfceCancelDialog.reason,
         }),
       });
       const payload = await res.json().catch(() => ({}));
@@ -234,7 +316,7 @@ export default function FiscalCentralPage() {
     },
     onSuccess: () => {
       toast({ title: "Sucesso", description: "NFC-e cancelada." });
-      setNfceCancelReason("");
+      setNfceCancelDialog({ open: false, sale: null, reason: "" });
       queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
     },
     onError: (error) => {
@@ -398,21 +480,22 @@ export default function FiscalCentralPage() {
     [sales],
   );
 
-  const nfeStatusResult = useMemo(() => {
-    const key = nfeStatusSearch.trim();
-    if (!key) return null;
-    return orderedNfe.find((doc) => doc.documentKey === key) || null;
-  }, [nfeStatusSearch, orderedNfe]);
+  const parseDateRangeStart = (value: string) =>
+    value ? new Date(`${value}T00:00:00`).getTime() : null;
+  const parseDateRangeEnd = (value: string) =>
+    value ? new Date(`${value}T23:59:59.999`).getTime() : null;
 
-  const nfceStatusResult = useMemo(() => {
-    const query = nfceStatusSearch.trim();
-    if (!query) return null;
-    return (
-      orderedSales.find(
-        (sale) => sale.nfceKey === query || String(sale.id) === query,
-      ) || null
-    );
-  }, [nfceStatusSearch, orderedSales]);
+  const formatDateTime = (value: string) =>
+    value ? new Date(value).toLocaleString("pt-BR") : "-";
+
+  const formatCurrency = (value: string) => {
+    const numericValue = Number(value);
+    if (Number.isNaN(numericValue)) return value;
+    return numericValue.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+  };
 
   const badgeForStatus = (status: string) => {
     const normalized = String(status || "").toLowerCase();
@@ -438,6 +521,60 @@ export default function FiscalCentralPage() {
     return normalized.includes("autoriz") && Boolean(key) && Boolean(protocol);
   };
 
+  const filteredNfe = useMemo(() => {
+    const query = nfeSearch.trim().toLowerCase();
+    const dateFrom = parseDateRangeStart(nfeDateFrom);
+    const dateTo = parseDateRangeEnd(nfeDateTo);
+
+    return orderedNfe.filter((doc) => {
+      const normalizedStatus = String(doc.status || "").toLowerCase();
+      const docDate = new Date(doc.updatedAt || doc.createdAt).getTime();
+      const matchesQuery =
+        !query ||
+        String(doc.nfeNumber || "").toLowerCase().includes(query) ||
+        String(doc.nfeSeries || "").toLowerCase().includes(query) ||
+        String(doc.documentKey || "").toLowerCase().includes(query) ||
+        String(doc.protocol || "").toLowerCase().includes(query);
+      const matchesStatus =
+        nfeStatusFilter === "all" || normalizedStatus.includes(nfeStatusFilter);
+      const matchesDateFrom = dateFrom === null || docDate >= dateFrom;
+      const matchesDateTo = dateTo === null || docDate <= dateTo;
+      return matchesQuery && matchesStatus && matchesDateFrom && matchesDateTo;
+    });
+  }, [orderedNfe, nfeSearch, nfeStatusFilter, nfeDateFrom, nfeDateTo]);
+
+  const filteredNfce = useMemo(() => {
+    const query = nfceSearch.trim().toLowerCase();
+    const dateFrom = parseDateRangeStart(nfceDateFrom);
+    const dateTo = parseDateRangeEnd(nfceDateTo);
+
+    return orderedSales.filter((sale) => {
+      const normalizedStatus = String(sale.nfceStatus || "").toLowerCase();
+      const saleDate = new Date(sale.createdAt).getTime();
+      const matchesQuery =
+        !query ||
+        String(sale.id).includes(query) ||
+        String(sale.customerName || "").toLowerCase().includes(query) ||
+        String(sale.nfceKey || "").toLowerCase().includes(query) ||
+        String(sale.nfceProtocol || "").toLowerCase().includes(query);
+      const matchesStatus =
+        nfceStatusFilter === "all" || normalizedStatus.includes(nfceStatusFilter);
+      const matchesDateFrom = dateFrom === null || saleDate >= dateFrom;
+      const matchesDateTo = dateTo === null || saleDate <= dateTo;
+      return matchesQuery && matchesStatus && matchesDateFrom && matchesDateTo;
+    });
+  }, [orderedSales, nfceSearch, nfceStatusFilter, nfceDateFrom, nfceDateTo]);
+
+  const selectableNfe = filteredNfe.filter((doc) => doc.canSend);
+  const selectableNfce = filteredNfce.filter((sale) => canSendNfce(sale.nfceStatus));
+
+  const allNfeSelected =
+    selectableNfe.length > 0 &&
+    selectableNfe.every((doc) => selectedNfeIds.includes(doc.id));
+  const allNfceSelected =
+    selectableNfce.length > 0 &&
+    selectableNfce.every((sale) => selectedNfceIds.includes(sale.id));
+
   return (
     <Layout>
       <div className="space-y-6">
@@ -458,90 +595,188 @@ export default function FiscalCentralPage() {
           <TabsContent value="nfe" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Status NF-e</CardTitle>
-                <CardDescription>Consulte pelo número da chave da NF-e.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Input
-                  placeholder="Cole a chave de acesso da NF-e (44 dígitos)"
-                  value={nfeStatusSearch}
-                  onChange={(e) => setNfeStatusSearch(e.target.value)}
-                />
-                {nfeStatusSearch.trim() && (
-                  <div className="rounded-md border p-3 text-sm">
-                    {nfeStatusResult ? (
-                      <div className="space-y-1">
-                        <div>{badgeForStatus(nfeStatusResult.status)}</div>
-                        <p>NF-e: {nfeStatusResult.nfeNumber || "-"}</p>
-                        <p>Série: {nfeStatusResult.nfeSeries || "-"}</p>
-                        <p>Protocolo: {nfeStatusResult.protocol || "-"}</p>
-                      </div>
-                    ) : (
-                      <p className="text-muted-foreground">
-                        Chave não encontrada no histórico.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Emitir / Cancelar NF-e</CardTitle>
+                <CardTitle>NF-e em Tabela</CardTitle>
                 <CardDescription>
-                  Lista de NF-e geradas. Envie para SEFAZ ou cancele as autorizadas.
+                  Filtre por numero, chave, protocolo, status e data. Envie individualmente ou em lote.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  UF automática do cadastro da empresa: <strong>{sefazUf}</strong>
+                  UF automatica do cadastro da empresa: <strong>{sefazUf}</strong>
                 </p>
+                <div className="grid gap-3 md:grid-cols-4">
+                  <Input
+                    placeholder="Buscar por numero/chave/protocolo"
+                    value={nfeSearch}
+                    onChange={(e) => setNfeSearch(e.target.value)}
+                  />
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={nfeStatusFilter}
+                    onChange={(e) => setNfeStatusFilter(e.target.value)}
+                  >
+                    <option value="all">Todos os status</option>
+                    <option value="gerada">Gerada</option>
+                    <option value="processando">Processando</option>
+                    <option value="autorizada">Autorizada</option>
+                    <option value="cancelada">Cancelada</option>
+                  </select>
+                  <Input
+                    type="date"
+                    value={nfeDateFrom}
+                    onChange={(e) => setNfeDateFrom(e.target.value)}
+                  />
+                  <Input
+                    type="date"
+                    value={nfeDateTo}
+                    onChange={(e) => setNfeDateTo(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setNfeSearch("");
+                      setNfeStatusFilter("all");
+                      setNfeDateFrom("");
+                      setNfeDateTo("");
+                    }}
+                  >
+                    Limpar filtros
+                  </Button>
+                  <Button
+                    onClick={() =>
+                      sendNfeBatchMutation.mutate(
+                        selectableNfe.filter((doc) => selectedNfeIds.includes(doc.id)),
+                      )
+                    }
+                    disabled={
+                      sendNfeBatchMutation.isPending ||
+                      selectedNfeIds.length === 0
+                    }
+                  >
+                    {sendNfeBatchMutation.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Enviar selecionadas ({selectedNfeIds.length})
+                  </Button>
+                </div>
 
                 {loadingNfe ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Carregando NF-e...
                   </div>
-                ) : orderedNfe.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nenhuma NF-e gerada.</p>
+                ) : filteredNfe.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhuma NF-e encontrada para os filtros aplicados.
+                  </p>
                 ) : (
-                  orderedNfe.slice(0, 20).map((doc) => (
-                    <div
-                      key={doc.id}
-                      className="rounded-lg border p-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div className="space-y-1 text-sm">
-                        <div>{badgeForStatus(doc.status)}</div>
-                        <p>NF-e {doc.nfeNumber || "-"} | Série {doc.nfeSeries || "-"}</p>
-                        <p className="text-muted-foreground">Chave: {doc.documentKey || "-"}</p>
-                        <p className="text-muted-foreground">Protocolo: {doc.protocol || "-"}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => sendNfeMutation.mutate(doc)}
-                          disabled={!doc.canSend || sendNfeMutation.isPending}
-                        >
-                          {sendNfeMutation.isPending && (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          )}
-                          Emitir
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          onClick={() =>
-                            setNfeCancelDialog({ open: true, doc, reason: "" })
-                          }
-                          disabled={!doc.canCancel || cancelNfeMutation.isPending}
-                        >
-                          {cancelNfeMutation.isPending && (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          )}
-                          Cancelar
-                        </Button>
-                      </div>
-                    </div>
-                  ))
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-10">
+                            <Checkbox
+                              checked={allNfeSelected}
+                              onCheckedChange={(checked) => {
+                                if (checked === true) {
+                                  setSelectedNfeIds(selectableNfe.map((doc) => doc.id));
+                                  return;
+                                }
+                                setSelectedNfeIds([]);
+                              }}
+                              disabled={selectableNfe.length === 0}
+                            />
+                          </TableHead>
+                          <TableHead>Numero</TableHead>
+                          <TableHead>Serie</TableHead>
+                          <TableHead>Chave</TableHead>
+                          <TableHead>Protocolo</TableHead>
+                          <TableHead>Ambiente</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Atualizado em</TableHead>
+                          <TableHead className="text-right">Acoes</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredNfe.map((doc) => {
+                          const rowCanSend = doc.canSend;
+                          const rowCanCancel = doc.canCancel;
+                          return (
+                            <TableRow key={doc.id}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={selectedNfeIds.includes(doc.id)}
+                                  disabled={!rowCanSend}
+                                  onCheckedChange={(checked) => {
+                                    if (checked === true) {
+                                      setSelectedNfeIds((prev) => [...prev, doc.id]);
+                                    } else {
+                                      setSelectedNfeIds((prev) =>
+                                        prev.filter((id) => id !== doc.id),
+                                      );
+                                    }
+                                  }}
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">
+                                {doc.nfeNumber || "-"}
+                              </TableCell>
+                              <TableCell>{doc.nfeSeries || "-"}</TableCell>
+                              <TableCell className="max-w-[220px] truncate">
+                                {doc.documentKey || "-"}
+                              </TableCell>
+                              <TableCell className="max-w-[150px] truncate">
+                                {doc.protocol || "-"}
+                              </TableCell>
+                              <TableCell>
+                                {doc.environment === "producao"
+                                  ? "Producao"
+                                  : "Homologacao"}
+                              </TableCell>
+                              <TableCell>{badgeForStatus(doc.status)}</TableCell>
+                              <TableCell>
+                                {formatDateTime(doc.updatedAt || doc.createdAt)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon">
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuLabel>Acoes</DropdownMenuLabel>
+                                    <DropdownMenuItem
+                                      onClick={() => sendNfeMutation.mutate(doc)}
+                                      disabled={!rowCanSend || sendNfeMutation.isPending}
+                                    >
+                                      Enviar para SEFAZ
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setNfeCancelDialog({
+                                          open: true,
+                                          doc,
+                                          reason: "",
+                                        })
+                                      }
+                                      disabled={
+                                        !rowCanCancel || cancelNfeMutation.isPending
+                                      }
+                                    >
+                                      Cancelar NF-e
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -550,49 +785,69 @@ export default function FiscalCentralPage() {
           <TabsContent value="nfce" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Status NFC-e</CardTitle>
-                <CardDescription>Consulte por chave da NFC-e ou ID da venda.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Input
-                  placeholder="Cole a chave da NFC-e ou ID da venda"
-                  value={nfceStatusSearch}
-                  onChange={(e) => setNfceStatusSearch(e.target.value)}
-                />
-                {nfceStatusSearch.trim() && (
-                  <div className="rounded-md border p-3 text-sm">
-                    {nfceStatusResult ? (
-                      <div className="space-y-1">
-                        <div>{badgeForStatus(nfceStatusResult.nfceStatus)}</div>
-                        <p>Venda ID: {nfceStatusResult.id}</p>
-                        <p>Chave: {nfceStatusResult.nfceKey || "-"}</p>
-                        <p>Protocolo: {nfceStatusResult.nfceProtocol || "-"}</p>
-                      </div>
-                    ) : (
-                      <p className="text-muted-foreground">
-                        Venda/NFC-e não encontrada.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Emitir / Cancelar NFC-e</CardTitle>
+                <CardTitle>NFC-e em Tabela</CardTitle>
                 <CardDescription>
-                  Selecione a venda para enviar NFC-e ou cancelar quando autorizada.
+                  Use filtros de pesquisa, status e data. Acoes por linha ficam no menu de 3 pontos.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <div>
-                  <Label>Justificativa de cancelamento (mín. 15)</Label>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  UF automatica do cadastro da empresa: <strong>{sefazUf}</strong>
+                </p>
+                <div className="grid gap-3 md:grid-cols-4">
                   <Input
-                    value={nfceCancelReason}
-                    onChange={(e) => setNfceCancelReason(e.target.value)}
-                    placeholder="Motivo do cancelamento"
+                    placeholder="Buscar por venda, cliente, chave ou protocolo"
+                    value={nfceSearch}
+                    onChange={(e) => setNfceSearch(e.target.value)}
                   />
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={nfceStatusFilter}
+                    onChange={(e) => setNfceStatusFilter(e.target.value)}
+                  >
+                    <option value="all">Todos os status</option>
+                    <option value="pendente">Pendente</option>
+                    <option value="autorizada">Autorizada</option>
+                    <option value="cancelada">Cancelada</option>
+                  </select>
+                  <Input
+                    type="date"
+                    value={nfceDateFrom}
+                    onChange={(e) => setNfceDateFrom(e.target.value)}
+                  />
+                  <Input
+                    type="date"
+                    value={nfceDateTo}
+                    onChange={(e) => setNfceDateTo(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setNfceSearch("");
+                      setNfceStatusFilter("all");
+                      setNfceDateFrom("");
+                      setNfceDateTo("");
+                    }}
+                  >
+                    Limpar filtros
+                  </Button>
+                  <Button
+                    onClick={() =>
+                      sendNfceMutation.mutate(
+                        selectableNfce
+                          .filter((sale) => selectedNfceIds.includes(sale.id))
+                          .map((sale) => sale.id),
+                      )
+                    }
+                    disabled={sendNfceMutation.isPending || selectedNfceIds.length === 0}
+                  >
+                    {sendNfceMutation.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Enviar selecionadas ({selectedNfceIds.length})
+                  </Button>
                 </div>
 
                 {loadingNfce ? (
@@ -600,58 +855,121 @@ export default function FiscalCentralPage() {
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Carregando vendas...
                   </div>
-                ) : orderedSales.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nenhuma venda encontrada.</p>
+                ) : filteredNfce.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nenhuma venda encontrada para os filtros aplicados.
+                  </p>
                 ) : (
-                  orderedSales.slice(0, 20).map((sale) => (
-                    <div
-                      key={sale.id}
-                      className="rounded-lg border p-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div className="space-y-1 text-sm">
-                        <div>{badgeForStatus(sale.nfceStatus)}</div>
-                        <p>Venda #{sale.id} | Cliente: {sale.customerName || "Consumidor"}</p>
-                        <p className="text-muted-foreground">Chave: {sale.nfceKey || "-"}</p>
-                        <p className="text-muted-foreground">
-                          Protocolo: {sale.nfceProtocol || "-"}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => sendNfceMutation.mutate(sale)}
-                          disabled={sendNfceMutation.isPending || !canSendNfce(sale.nfceStatus)}
-                        >
-                          {sendNfceMutation.isPending && (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          )}
-                          Emitir
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          onClick={() => cancelNfceMutation.mutate(sale)}
-                          disabled={
-                            cancelNfceMutation.isPending ||
-                            !canCancelNfce(
-                              sale.nfceStatus,
-                              sale.nfceKey,
-                              sale.nfceProtocol,
-                            ) ||
-                            nfceCancelReason.trim().length < 15
-                          }
-                        >
-                          {cancelNfceMutation.isPending && (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          )}
-                          Cancelar
-                        </Button>
-                      </div>
-                    </div>
-                  ))
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-10">
+                            <Checkbox
+                              checked={allNfceSelected}
+                              onCheckedChange={(checked) => {
+                                if (checked === true) {
+                                  setSelectedNfceIds(
+                                    selectableNfce.map((sale) => sale.id),
+                                  );
+                                  return;
+                                }
+                                setSelectedNfceIds([]);
+                              }}
+                              disabled={selectableNfce.length === 0}
+                            />
+                          </TableHead>
+                          <TableHead>Venda</TableHead>
+                          <TableHead>Cliente</TableHead>
+                          <TableHead>Total</TableHead>
+                          <TableHead>Chave</TableHead>
+                          <TableHead>Protocolo</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Data/Hora</TableHead>
+                          <TableHead className="text-right">Acoes</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredNfce.map((sale) => {
+                          const rowCanSend = canSendNfce(sale.nfceStatus);
+                          const rowCanCancel = canCancelNfce(
+                            sale.nfceStatus,
+                            sale.nfceKey,
+                            sale.nfceProtocol,
+                          );
+                          return (
+                            <TableRow key={sale.id}>
+                              <TableCell>
+                                <Checkbox
+                                  checked={selectedNfceIds.includes(sale.id)}
+                                  disabled={!rowCanSend}
+                                  onCheckedChange={(checked) => {
+                                    if (checked === true) {
+                                      setSelectedNfceIds((prev) => [...prev, sale.id]);
+                                    } else {
+                                      setSelectedNfceIds((prev) =>
+                                        prev.filter((id) => id !== sale.id),
+                                      );
+                                    }
+                                  }}
+                                />
+                              </TableCell>
+                              <TableCell className="font-medium">
+                                #{sale.id}
+                              </TableCell>
+                              <TableCell>{sale.customerName || "Consumidor"}</TableCell>
+                              <TableCell>{formatCurrency(sale.total)}</TableCell>
+                              <TableCell className="max-w-[220px] truncate">
+                                {sale.nfceKey || "-"}
+                              </TableCell>
+                              <TableCell className="max-w-[150px] truncate">
+                                {sale.nfceProtocol || "-"}
+                              </TableCell>
+                              <TableCell>{badgeForStatus(sale.nfceStatus)}</TableCell>
+                              <TableCell>{formatDateTime(sale.createdAt)}</TableCell>
+                              <TableCell className="text-right">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon">
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuLabel>Acoes</DropdownMenuLabel>
+                                    <DropdownMenuItem
+                                      onClick={() => sendNfceMutation.mutate([sale.id])}
+                                      disabled={!rowCanSend || sendNfceMutation.isPending}
+                                    >
+                                      Enviar para SEFAZ
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setNfceCancelDialog({
+                                          open: true,
+                                          sale,
+                                          reason: "",
+                                        })
+                                      }
+                                      disabled={
+                                        !rowCanCancel ||
+                                        cancelNfceMutation.isPending
+                                      }
+                                    >
+                                      Cancelar NFC-e
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
           </TabsContent>
-
           <TabsContent value="accessory" className="space-y-4">
             <Card>
               <CardHeader>
@@ -833,6 +1151,55 @@ export default function FiscalCentralPage() {
               }
             >
               {cancelNfeMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Confirmar cancelamento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={nfceCancelDialog.open}
+        onOpenChange={(open) =>
+          setNfceCancelDialog((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancelar NFC-e</DialogTitle>
+            <DialogDescription>
+              Informe a justificativa de cancelamento (mínimo 15 caracteres).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Justificativa</Label>
+            <Input
+              value={nfceCancelDialog.reason}
+              onChange={(e) =>
+                setNfceCancelDialog((prev) => ({ ...prev, reason: e.target.value }))
+              }
+              placeholder="Motivo do cancelamento"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setNfceCancelDialog({ open: false, sale: null, reason: "" })}
+            >
+              Fechar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!nfceCancelDialog.sale) return;
+                cancelNfceMutation.mutate(nfceCancelDialog.sale);
+              }}
+              disabled={
+                cancelNfceMutation.isPending || nfceCancelDialog.reason.trim().length < 15
+              }
+            >
+              {cancelNfceMutation.isPending && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Confirmar cancelamento

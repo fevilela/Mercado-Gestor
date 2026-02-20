@@ -51,53 +51,53 @@ type SidebarSection = {
 
 const sidebarSections: SidebarSection[] = [
   {
-    title: "Principal",
+    title: "Operacoes",
     items: [
-      { icon: LayoutDashboard, label: "Dashboard", href: "/", permissions: [] },
+      { icon: LayoutDashboard, label: "Visao Executiva", href: "/", permissions: [] },
       {
         icon: ShoppingCart,
-        label: "PDV (Frente de Caixa)",
+        label: "Frente de Caixa (PDV)",
         href: "/pos",
         permissions: ["pos:view", "pos:sell"],
       },
       {
         icon: Store,
-        label: "Vendas & Pedidos",
+        label: "Comercial (Vendas e Pedidos)",
         href: "/sales",
         permissions: ["pos:view", "reports:view"],
       },
       {
         icon: Wallet,
-        label: "Financeiro",
+        label: "Gestao Financeira",
         href: "/finance",
         permissions: ["finance:view", "finance:manage"],
       },
       {
         icon: History,
-        label: "Historico de Caixa",
+        label: "Conferencia de Caixa",
         href: "/cash-history",
         permissions: ["pos:cash_history"],
       },
       {
         icon: BarChart3,
-        label: "Relatorios",
+        label: "Relatorios Gerenciais",
         href: "/reports",
         permissions: ["reports:view"],
       },
     ],
   },
   {
-    title: "Cadastro",
+    title: "Cadastros",
     items: [
       {
         icon: Package,
-        label: "Produtos & Estoque",
+        label: "Catalogo e Estoque",
         href: "/inventory",
         permissions: ["inventory:view", "inventory:manage"],
       },
       {
         icon: Users,
-        label: "Clientes & Fornecedores",
+        label: "Clientes e Fornecedores",
         href: "/contacts",
         permissions: [
           "customers:view",
@@ -108,30 +108,30 @@ const sidebarSections: SidebarSection[] = [
       },
       {
         icon: CreditCard,
-        label: "Formas de Pagamento",
+        label: "Meios de Pagamento",
         href: "/payment-methods",
         permissions: ["settings:payments"],
       },
       {
         icon: FileText,
-        label: "Tabelas de Referencia",
+        label: "Tabelas de Apoio",
         href: "/tables",
         permissions: ["inventory:view", "settings:view"],
       },
       {
         icon: User,
-        label: "Gestao de Usuarios",
+        label: "Usuarios e Permissoes",
         href: "/users",
         permissions: ["users:view", "users:manage"],
       },
     ],
   },
   {
-    title: "Fiscal",
+    title: "Compliance Fiscal",
     items: [
       {
         icon: FileText,
-        label: "Central Fiscal",
+        label: "Operacoes Fiscais",
         href: "/fiscal-central",
         permissions: ["fiscal:view", "fiscal:manage"],
       },
@@ -143,24 +143,24 @@ const sidebarSections: SidebarSection[] = [
       },
       {
         icon: FileText,
-        label: "Numeracao Sequencial (NSA)",
+        label: "Controle de Numeracao (NSA)",
         href: "/sequential-numbering",
         permissions: ["fiscal:view", "fiscal:manage"],
       },
       {
         icon: FileText,
-        label: "Configuracao Fiscal",
+        label: "Parametros Fiscais",
         href: "/fiscal-config",
         permissions: ["fiscal:view", "fiscal:manage"],
       },
     ],
   },
   {
-    title: "Sistema",
+    title: "Administracao",
     items: [
       {
         icon: Settings,
-        label: "Configuracoes",
+        label: "Preferencias do Sistema",
         href: "/settings",
         permissions: ["settings:view", "settings:manage"],
       },
@@ -215,7 +215,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
             M
           </div>
-          Zyvo Software
+          Zyrion
         </div>
       </div>
       <div className="flex-1 overflow-auto py-4">
@@ -265,7 +265,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </Avatar>
             <div className="flex flex-col overflow-hidden">
               <span className="truncate font-semibold text-sidebar-foreground">
-                {user?.name || "UsuÃ¡rio"}
+                {user?.name || "Usuário"}
               </span>
               <span className="truncate text-xs text-sidebar-foreground/70">
                 {user?.role?.name || "Carregando..."}
@@ -331,11 +331,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-80">
-                <DropdownMenuLabel>NotificaÃ§Ãµes</DropdownMenuLabel>
+                <DropdownMenuLabel>Notificações</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {notifications.length === 0 ? (
                   <div className="p-4 text-center text-sm text-muted-foreground">
-                    Nenhuma notificaÃ§Ã£o
+                    Nenhuma notificação
                   </div>
                 ) : (
                   notifications.slice(0, 5).map((notification) => (
@@ -359,7 +359,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       className="justify-center text-primary"
                       onClick={() => setLocation("/notifications")}
                     >
-                      Ver todas as notificaÃ§Ãµes
+                      Ver todas as notificações
                     </DropdownMenuItem>
                   </>
                 )}
@@ -394,7 +394,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   onClick={() => setLocation("/settings")}
                   data-testid="menu-settings"
                 >
-                  <Settings className="mr-2 h-4 w-4" /> ConfiguraÃ§Ãµes
+                  <Settings className="mr-2 h-4 w-4" /> Configurações
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -415,5 +415,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+
+
 
 

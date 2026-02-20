@@ -1,8 +1,8 @@
-# Zyvo Software - ERP System for Retail Markets
+# Zyrion - ERP System for Retail Markets
 
 ## Overview
 
-Zyvo Software is a comprehensive Enterprise Resource Planning (ERP) system designed specifically for retail markets and grocery stores in Brazil. The application provides complete business management including Point of Sale (PDV), inventory control, financial management, customer/supplier relationships, and full Brazilian fiscal compliance with NF-e, NFC-e, NFS-e, CT-e, and MDF-e electronic document integration.
+Zyrion is a comprehensive Enterprise Resource Planning (ERP) system designed specifically for retail markets and grocery stores in Brazil. The application provides complete business management including Point of Sale (PDV), inventory control, financial management, customer/supplier relationships, and full Brazilian fiscal compliance with NF-e, NFC-e, NFS-e, CT-e, and MDF-e electronic document integration.
 
 The system is built as a multi-tenant SaaS application where each company has isolated data, users, and configurations. It features role-based access control (RBAC) with granular permissions across all modules.
 

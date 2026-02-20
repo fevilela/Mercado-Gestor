@@ -65,7 +65,7 @@ export default function SefazTestPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || "Erro ao testar conexÃ£o");
+        setError(data.error || "Erro ao testar conexão");
         return;
       }
 
@@ -85,11 +85,11 @@ export default function SefazTestPage() {
         <Card>
           <CardHeader>
             <CardTitle data-testid="text-sefaz-test">
-              Teste de ConexÃ£o SEFAZ
+              Teste de Conexão SEFAZ
             </CardTitle>
             <CardDescription>
-              Teste a conexÃ£o com os webservices da SEFAZ em homologaÃ§Ã£o ou
-              produÃ§Ã£o
+              Teste a conexão com os webservices da SEFAZ em homologação ou
+              produção
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -135,7 +135,7 @@ export default function SefazTestPage() {
               className="w-full"
               size="lg"
             >
-              {loading ? "Testando..." : "Testar ConexÃ£o"}
+              {loading ? "Testando..." : "Testar Conexão"}
             </Button>
 
             {/* Error Message */}
@@ -155,7 +155,7 @@ export default function SefazTestPage() {
                     className="text-green-800"
                     data-testid="text-success"
                   >
-                    ConexÃ£o estabelecida com sucesso!
+                    Conexão estabelecida com sucesso!
                   </AlertDescription>
                 </Alert>
 
@@ -214,7 +214,7 @@ export default function SefazTestPage() {
                       </label>
                       <p className="text-sm" data-testid="text-certificate">
                         {result.certificateRequired ? (
-                          <Badge variant="destructive">ObrigatÃ³rio</Badge>
+                          <Badge variant="destructive">Obrigatório</Badge>
                         ) : (
                           <Badge variant="secondary">Opcional</Badge>
                         )}
@@ -225,9 +225,9 @@ export default function SefazTestPage() {
 
                 <div className="text-xs text-gray-600 bg-blue-50 p-3 rounded">
                   <p>
-                    <strong>â„¹ï¸ Dica:</strong> Em homologaÃ§Ã£o, vocÃª pode testar
-                    sem certificado digital. Em produÃ§Ã£o, um certificado e-CNPJ
-                    vÃ¡lido Ã© obrigatÃ³rio.
+                    <strong>Dica:</strong> Em homologação, você pode testar
+                    sem certificado digital. Em produção, um certificado e-CNPJ
+                    válido é obrigatório.
                   </p>
                 </div>
               </div>
@@ -236,15 +236,15 @@ export default function SefazTestPage() {
             {/* Info Section */}
             <div className="bg-blue-50 border border-blue-200 rounded p-4 space-y-2">
               <h3 className="font-semibold text-sm text-blue-900">
-                ðŸ“‹ InformaÃ§Ãµes
+                📋 Informações
               </h3>
               <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
-                <li>Teste a conexÃ£o com SEFAZ antes de emitir notas fiscais</li>
+                <li>Teste a conexão com SEFAZ antes de emitir notas fiscais</li>
                 <li>
-                  Em <strong>homologaÃ§Ã£o</strong>: use para testes sem riscos
+                  Em <strong>homologação</strong>: use para testes sem riscos
                 </li>
                 <li>
-                  Em <strong>produÃ§Ã£o</strong>: requer certificado e-CNPJ vÃ¡lido
+                  Em <strong>produção</strong>: requer certificado e-CNPJ válido
                 </li>
                 <li>Tempo de resposta normal: 100-500ms</li>
               </ul>
@@ -255,4 +255,6 @@ export default function SefazTestPage() {
     </div>
   );
 }
+
+
 
