@@ -162,6 +162,7 @@ export default function FiscalDocuments() {
   const [companyRegime] = useState("Simples Nacional");
   const [productSearch, setProductSearch] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
+  const [cfopSearch, setCfopSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
     null
   );
@@ -303,6 +304,29 @@ export default function FiscalDocuments() {
       return res.json();
     },
   });
+
+  const cfopSelectOptions = useMemo(
+    () =>
+      cfopCodes.map((cfop) => ({
+        ...cfop,
+        selectValue: `${cfop.code}::${cfop.id}`,
+      })),
+    [cfopCodes],
+  );
+
+  const selectedCfopSelectValue =
+    cfopSelectOptions.find((option) => option.code === formData.cfopCode)
+      ?.selectValue || "";
+
+  const filteredCfopSelectOptions = useMemo(() => {
+    const query = cfopSearch.trim().toLowerCase();
+    if (!query) return cfopSelectOptions;
+    return cfopSelectOptions.filter((cfop) =>
+      [cfop.code, cfop.description, cfop.type, cfop.operationType, cfop.scope]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query)),
+    );
+  }, [cfopSearch, cfopSelectOptions]);
 
   // Search products
   const { data: productResults = [] } = useQuery<Product[]>({
@@ -1304,28 +1328,45 @@ export default function FiscalDocuments() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>CFOP *</Label>
+                    <Input
+                      className="mb-2"
+                      value={cfopSearch}
+                      onChange={(e) => setCfopSearch(e.target.value)}
+                      placeholder="Digite código ou descrição do CFOP"
+                      data-testid="input-search-cfop"
+                    />
                     <Select
-                      value={formData.cfopCode}
-                      onValueChange={(val) =>
+                      value={selectedCfopSelectValue}
+                      onValueChange={(val) => {
+                        const selected = cfopSelectOptions.find(
+                          (option) => option.selectValue === val,
+                        );
+                        const code = selected?.code || "";
                         setFormData((prev) => ({
                           ...prev,
-                          cfopCode: val,
+                          cfopCode: code,
                           items: prev.items.map((item) => ({
                             ...item,
-                            cfop: val,
+                            cfop: code,
                           })),
-                        }))
-                      }
+                        }));
+                      }}
                     >
                       <SelectTrigger data-testid="select-cfop">
                         <SelectValue placeholder="Selecione um CFOP" />
                       </SelectTrigger>
                       <SelectContent>
-                        {cfopCodes.map((cfop) => (
-                          <SelectItem key={cfop.id} value={cfop.code}>
-                            {cfop.code} - {cfop.description}
-                          </SelectItem>
-                        ))}
+                        {filteredCfopSelectOptions.length === 0 ? (
+                          <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                            Nenhum CFOP encontrado
+                          </div>
+                        ) : (
+                          filteredCfopSelectOptions.map((cfop) => (
+                            <SelectItem key={cfop.id} value={cfop.selectValue}>
+                              {cfop.code} - {cfop.description}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
