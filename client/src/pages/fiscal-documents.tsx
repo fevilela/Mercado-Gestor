@@ -163,6 +163,7 @@ export default function FiscalDocuments() {
   const [productSearch, setProductSearch] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [cfopSearch, setCfopSearch] = useState("");
+  const [cfopOpen, setCfopOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
     null
   );
@@ -314,9 +315,9 @@ export default function FiscalDocuments() {
     [cfopCodes],
   );
 
-  const selectedCfopSelectValue =
-    cfopSelectOptions.find((option) => option.code === formData.cfopCode)
-      ?.selectValue || "";
+  const selectedCfopOption = cfopSelectOptions.find(
+    (option) => option.code === formData.cfopCode,
+  );
 
   const filteredCfopSelectOptions = useMemo(() => {
     const query = cfopSearch.trim().toLowerCase();
@@ -1328,47 +1329,57 @@ export default function FiscalDocuments() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>CFOP *</Label>
-                    <Input
-                      className="mb-2"
-                      value={cfopSearch}
-                      onChange={(e) => setCfopSearch(e.target.value)}
-                      placeholder="Digite código ou descrição do CFOP"
-                      data-testid="input-search-cfop"
-                    />
-                    <Select
-                      value={selectedCfopSelectValue}
-                      onValueChange={(val) => {
-                        const selected = cfopSelectOptions.find(
-                          (option) => option.selectValue === val,
-                        );
-                        const code = selected?.code || "";
-                        setFormData((prev) => ({
-                          ...prev,
-                          cfopCode: code,
-                          items: prev.items.map((item) => ({
-                            ...item,
-                            cfop: code,
-                          })),
-                        }));
-                      }}
-                    >
-                      <SelectTrigger data-testid="select-cfop">
-                        <SelectValue placeholder="Selecione um CFOP" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {filteredCfopSelectOptions.length === 0 ? (
-                          <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                            Nenhum CFOP encontrado
-                          </div>
-                        ) : (
-                          filteredCfopSelectOptions.map((cfop) => (
-                            <SelectItem key={cfop.id} value={cfop.selectValue}>
-                              {cfop.code} - {cfop.description}
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
+                    <Popover open={cfopOpen} onOpenChange={setCfopOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          className="w-full justify-between font-normal"
+                          data-testid="select-cfop"
+                        >
+                          {selectedCfopOption
+                            ? `${selectedCfopOption.code} - ${selectedCfopOption.description}`
+                            : "Selecione um CFOP"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[560px] max-w-[95vw] p-2" align="start">
+                        <Input
+                          value={cfopSearch}
+                          onChange={(e) => setCfopSearch(e.target.value)}
+                          placeholder="Pesquisar CFOP por código ou descrição"
+                          data-testid="input-search-cfop"
+                        />
+                        <div className="mt-2 max-h-72 overflow-y-auto rounded-md border">
+                          {filteredCfopSelectOptions.length === 0 ? (
+                            <div className="px-3 py-2 text-sm text-muted-foreground">
+                              Nenhum CFOP encontrado
+                            </div>
+                          ) : (
+                            filteredCfopSelectOptions.map((cfop) => (
+                              <button
+                                key={cfop.id}
+                                type="button"
+                                className="block w-full px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                                onClick={() => {
+                                  const code = cfop.code || "";
+                                  setFormData((prev) => ({
+                                    ...prev,
+                                    cfopCode: code,
+                                    items: prev.items.map((item) => ({
+                                      ...item,
+                                      cfop: code,
+                                    })),
+                                  }));
+                                  setCfopOpen(false);
+                                }}
+                              >
+                                {cfop.code} - {cfop.description}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                   <div>
                     <Label>Escopo</Label>
