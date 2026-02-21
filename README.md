@@ -84,7 +84,9 @@ Arquivo de roteamento: `client/src/App.tsx`
 Rotas publicas:
 
 - `/login`
+- `/access`
 - `/register`
+  - redireciona para `/access`
 
 Rotas protegidas (exemplos):
 
@@ -114,7 +116,17 @@ Arquivo principal: `server/auth.ts`
 
 ### 4.1 Fluxo de autenticacao
 
-- `POST /api/auth/register`: cria empresa + roles + usuario admin
+- `POST /api/auth/register`: desativado para auto cadastro
+- `POST /api/auth/manager/login`: autentica manager interno (email/senha do .env)
+- `GET /api/auth/manager/onboarding-users`: lista/pesquisa usuarios por CNPJ, nome ou email
+- `POST /api/auth/manager/companies`: manager cadastra empresa e dispara codigo por e-mail
+- `POST /api/auth/manager/resend-invite`: reenvia codigo para empresa ja cadastrada
+- `PATCH /api/auth/manager/company`: edita dados da empresa e do responsavel
+- `POST /api/auth/manager/company/set-active`: ativa/inativa empresa
+- `DELETE /api/auth/manager/company`: exclui empresa (quando sem vinculos impeditivos)
+- `POST /api/auth/complete-invite`: responsavel informa email + codigo para criar senha
+- `POST /api/auth/forgot-password/request`: envia codigo para redefinir senha com CNPJ + email
+- `POST /api/auth/forgot-password/reset`: redefine senha com email + codigo
 - `POST /api/auth/login`: autentica email/senha (bcrypt)
 - `POST /api/auth/logout`: encerra sessao
 - `GET /api/auth/me`: retorna usuario e empresa da sessao
@@ -305,6 +317,15 @@ Obrigatorias:
 Importantes:
 
 - `SESSION_SECRET`
+- `MANAGER_EMAIL` (fallback: `SMTP_USER`)
+- `MANAGER_PASSWORD`
+- `ONBOARDING_CODE_TTL_MINUTES`
+- `ONBOARDING_URL`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `SMTP_FROM`
 - `NODE_ENV`
 - `PORT`, `HOST`
 - `CERT_ENCRYPTION_KEY`

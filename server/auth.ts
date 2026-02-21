@@ -1,5 +1,6 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import { createHash, randomInt } from "crypto";
 import "./types";
 import { db } from "./db";
 import {
@@ -9,6 +10,8 @@ import {
   permissions,
   rolePermissions,
   companySettings,
+  companyOnboardingCodes,
+  passwordResetCodes,
   insertCompanySchema,
   insertUserSchema,
   type Company,
@@ -16,7 +19,7 @@ import {
   type Role,
   type Permission,
 } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull, desc, ilike, or, ne, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 const authRouter = Router();
@@ -488,7 +491,7 @@ async function getUserPermissions(userId: string): Promise<string[]> {
   return rolePerms.map((p) => `${p.module}:${p.action}`);
 }
 
-const registerCompanySchema = z.object({
+const managerCreateCompanySchema = z.object({
   cnpj: z.string().min(14).max(18),
   ie: z.string().optional(),
   razaoSocial: z.string().min(3),
@@ -501,12 +504,312 @@ const registerCompanySchema = z.object({
   zipCode: z.string().optional(),
   adminName: z.string().min(3),
   adminEmail: z.string().email(),
-  adminPassword: z.string().min(6),
 });
 
-authRouter.post("/register", async (req, res) => {
+const managerResendInviteSchema = z.object({
+  cnpj: z.string().min(14).max(18),
+  adminEmail: z.string().email(),
+});
+
+const managerUpdateCompanySchema = z.object({
+  companyId: z.number().int().positive(),
+  userId: z.string().min(1),
+  cnpj: z.string().min(14).max(18),
+  razaoSocial: z.string().min(3),
+  nomeFantasia: z.string().optional(),
+  companyEmail: z.string().email().optional().or(z.literal("")),
+  companyPhone: z.string().optional(),
+  address: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  zipCode: z.string().optional(),
+  adminName: z.string().min(3),
+  adminEmail: z.string().email(),
+});
+
+const managerSetCompanyActiveSchema = z.object({
+  companyId: z.number().int().positive(),
+  isActive: z.boolean(),
+});
+
+const managerDeleteCompanySchema = z.object({
+  companyId: z.number().int().positive(),
+});
+
+const completeInviteSchema = z.object({
+  email: z.string().email(),
+  code: z.string().regex(/^\d{6}$/),
+  password: z.string().min(6),
+});
+
+const forgotPasswordRequestSchema = z.object({
+  cnpj: z.string().min(14).max(18),
+  email: z.string().email(),
+});
+
+const forgotPasswordResetSchema = z.object({
+  email: z.string().email(),
+  code: z.string().regex(/^\d{6}$/),
+  password: z.string().min(6),
+});
+
+const managerLoginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+const dynamicImport = new Function(
+  "modulePath",
+  "return import(modulePath);",
+) as (modulePath: string) => Promise<any>;
+
+function getManagerCredentials() {
+  const managerEmail = String(
+    process.env.MANAGER_EMAIL || process.env.SMTP_USER || "",
+  ).trim();
+  const managerPassword = String(process.env.MANAGER_PASSWORD || "").trim();
+
+  return { managerEmail, managerPassword };
+}
+
+function ensureManagerSession(req: any, res: any): boolean {
+  if (!req.session?.managerAuthenticated) {
+    res.status(401).json({ error: "Manager nao autenticado" });
+    return false;
+  }
+  return true;
+}
+
+function generateOnboardingCode() {
+  return randomInt(0, 1_000_000).toString().padStart(6, "0");
+}
+
+function hashOnboardingCode(code: string) {
+  return createHash("sha256").update(code).digest("hex");
+}
+
+async function sendOnboardingCodeEmail(params: {
+  to: string;
+  userName: string;
+  companyName: string;
+  code: string;
+}) {
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
+  const smtpFrom = process.env.SMTP_FROM;
+  const onboardingUrl =
+    process.env.ONBOARDING_URL || "http://localhost:5000/access";
+
+  if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
+    return { sent: false, reason: "smtp_not_configured" as const };
+  }
+
   try {
-    const data = registerCompanySchema.parse(req.body);
+    const nodemailerModule = await dynamicImport("nodemailer");
+    const nodemailer = nodemailerModule.default || nodemailerModule;
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
+      },
+    });
+
+    await transporter.sendMail({
+      from: smtpFrom,
+      to: params.to,
+      subject: "Codigo para criar sua senha",
+      text: [
+        `Ola, ${params.userName}.`,
+        "",
+        `Voce foi convidado para acessar a empresa ${params.companyName}.`,
+        `Seu codigo para criar a senha e: ${params.code}`,
+        "",
+        `Use este link para ativar a conta: ${onboardingUrl}`,
+        "",
+        "Se voce nao reconhece este acesso, ignore este email.",
+      ].join("\n"),
+    });
+
+    return { sent: true as const };
+  } catch (error) {
+    console.error("Onboarding mail error:", error);
+    return { sent: false, reason: "smtp_send_failed" as const };
+  }
+}
+
+async function sendPasswordResetCodeEmail(params: {
+  to: string;
+  userName: string;
+  companyName: string;
+  code: string;
+}) {
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
+  const smtpFrom = process.env.SMTP_FROM;
+  const accessUrl = process.env.ONBOARDING_URL || "http://localhost:5000/access";
+
+  if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
+    return { sent: false, reason: "smtp_not_configured" as const };
+  }
+
+  try {
+    const nodemailerModule = await dynamicImport("nodemailer");
+    const nodemailer = nodemailerModule.default || nodemailerModule;
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
+      },
+    });
+
+    await transporter.sendMail({
+      from: smtpFrom,
+      to: params.to,
+      subject: "Codigo para redefinir sua senha",
+      text: [
+        `Ola, ${params.userName}.`,
+        "",
+        `Recebemos uma solicitacao para redefinir a senha da empresa ${params.companyName}.`,
+        `Seu codigo e: ${params.code}`,
+        "",
+        `Use este link: ${accessUrl}`,
+        "",
+        "Se voce nao solicitou, ignore este email.",
+      ].join("\n"),
+    });
+
+    return { sent: true as const };
+  } catch (error) {
+    console.error("Password reset mail error:", error);
+    return { sent: false, reason: "smtp_send_failed" as const };
+  }
+}
+
+authRouter.post("/register", (_req, res) => {
+  return res.status(403).json({
+    error:
+      "Auto cadastro desativado. O cadastro da empresa deve ser feito pelo manager interno.",
+  });
+});
+
+authRouter.post("/manager/login", async (req, res) => {
+  try {
+    const data = managerLoginSchema.parse(req.body);
+    const { managerEmail, managerPassword } = getManagerCredentials();
+
+    if (!managerEmail || !managerPassword) {
+      return res.status(500).json({
+        error: "Configure MANAGER_EMAIL e MANAGER_PASSWORD no .env",
+      });
+    }
+
+    if (data.email !== managerEmail || data.password !== managerPassword) {
+      return res.status(401).json({ error: "Email ou senha de manager invalidos" });
+    }
+
+    req.session.managerAuthenticated = true;
+    req.session.managerEmail = managerEmail;
+
+    res.json({ message: "Manager autenticado com sucesso", email: managerEmail });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos" });
+    }
+    res.status(500).json({ error: "Erro ao autenticar manager" });
+  }
+});
+
+authRouter.get("/manager/session", (req, res) => {
+  res.json({
+    authenticated: Boolean(req.session?.managerAuthenticated),
+    email: req.session?.managerEmail || null,
+  });
+});
+
+authRouter.get("/manager/onboarding-users", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const rawQuery = String(req.query.q || "").trim();
+    const cnpjDigits = rawQuery.replace(/\D/g, "");
+    const searchTerm = `%${rawQuery}%`;
+
+    const filters: any[] = [];
+    if (rawQuery) {
+      filters.push(ilike(users.email, searchTerm));
+      filters.push(ilike(users.name, searchTerm));
+      filters.push(ilike(companies.razaoSocial, searchTerm));
+      filters.push(ilike(companies.nomeFantasia, searchTerm));
+      if (cnpjDigits.length > 0) {
+        filters.push(ilike(companies.cnpj, `%${cnpjDigits}%`));
+      }
+    }
+
+    const queryBuilder = db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        phone: users.phone,
+        isActive: users.isActive,
+        createdAt: users.createdAt,
+        lastLogin: users.lastLogin,
+        companyId: companies.id,
+        cnpj: companies.cnpj,
+        razaoSocial: companies.razaoSocial,
+        nomeFantasia: companies.nomeFantasia,
+        companyEmail: companies.email,
+        companyPhone: companies.phone,
+        address: companies.address,
+        city: companies.city,
+        state: companies.state,
+        zipCode: companies.zipCode,
+        companyIsActive: companies.isActive,
+        roleName: roles.name,
+      })
+      .from(users)
+      .innerJoin(companies, eq(users.companyId, companies.id))
+      .leftJoin(roles, eq(users.roleId, roles.id))
+      .orderBy(desc(users.createdAt))
+      .limit(200);
+
+    const rows =
+      filters.length > 0
+        ? await queryBuilder.where(or(...filters))
+        : await queryBuilder;
+
+    res.json(rows);
+  } catch (error) {
+    console.error("Manager onboarding users error:", error);
+    res.status(500).json({ error: "Erro ao buscar usuarios para onboarding" });
+  }
+});
+
+authRouter.post("/manager/logout", (req, res) => {
+  req.session.managerAuthenticated = false;
+  req.session.managerEmail = "";
+  res.json({ message: "Sessao de manager encerrada" });
+});
+
+authRouter.post("/manager/companies", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerCreateCompanySchema.parse(req.body);
 
     const existingCompany = await db
       .select()
@@ -515,7 +818,19 @@ authRouter.post("/register", async (req, res) => {
       .limit(1);
 
     if (existingCompany.length > 0) {
-      return res.status(400).json({ error: "CNPJ já cadastrado" });
+      return res.status(400).json({ error: "CNPJ ja cadastrado" });
+    }
+
+    const existingAdminEmail = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, data.adminEmail))
+      .limit(1);
+
+    if (existingAdminEmail.length > 0) {
+      return res.status(400).json({
+        error: "Email do administrador ja cadastrado no sistema",
+      });
     }
 
     await initializePermissions();
@@ -545,21 +860,26 @@ authRouter.post("/register", async (req, res) => {
       nomeFantasia: company.nomeFantasia,
     });
 
-    const adminRole = await db
+    const [adminRole] = await db
       .select()
       .from(roles)
       .where(
-        and(eq(roles.companyId, company.id), eq(roles.name, "Administrador"))
+        and(eq(roles.companyId, company.id), eq(roles.name, "Administrador")),
       )
       .limit(1);
 
-    const hashedPassword = await bcrypt.hash(data.adminPassword, 10);
+    if (!adminRole) {
+      return res.status(500).json({ error: "Perfil Administrador nao encontrado" });
+    }
+
+    const temporaryPassword = `invite-pending-${Date.now()}-${Math.random()}`;
+    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
 
     const [adminUser] = await db
       .insert(users)
       .values({
         companyId: company.id,
-        roleId: adminRole[0].id,
+        roleId: adminRole.id,
         username: data.adminEmail.split("@")[0],
         email: data.adminEmail,
         password: hashedPassword,
@@ -567,21 +887,35 @@ authRouter.post("/register", async (req, res) => {
       })
       .returning();
 
-    const userPermissions = await getUserPermissions(adminUser.id);
+    const code = generateOnboardingCode();
+    const codeHash = hashOnboardingCode(code);
+    const expiresInMinutes = Number(
+      process.env.ONBOARDING_CODE_TTL_MINUTES || 30,
+    );
+    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
 
-    req.session.userId = adminUser.id;
-    req.session.companyId = company.id;
-    req.session.roleId = adminRole[0].id;
-    req.session.userPermissions = userPermissions;
+    await db.insert(companyOnboardingCodes).values({
+      companyId: company.id,
+      userId: adminUser.id,
+      email: data.adminEmail,
+      codeHash,
+      expiresAt,
+    });
+
+    const emailResult = await sendOnboardingCodeEmail({
+      to: data.adminEmail,
+      userName: data.adminName,
+      companyName: company.nomeFantasia || company.razaoSocial,
+      code,
+    });
 
     res.json({
-      message: "Empresa cadastrada com sucesso",
-      user: {
+      message:
+        "Empresa cadastrada. O responsavel recebeu um codigo para criar a senha.",
+      adminUser: {
         id: adminUser.id,
         name: adminUser.name,
         email: adminUser.email,
-        role: adminRole[0],
-        permissions: userPermissions,
       },
       company: {
         id: company.id,
@@ -591,15 +925,450 @@ authRouter.post("/register", async (req, res) => {
         email: company.email,
         phone: company.phone,
       },
+      onboarding: {
+        emailSent: emailResult.sent,
+        expiresAt,
+        ...(process.env.NODE_ENV !== "production" ? { code } : {}),
+        ...(emailResult.sent ? {} : { emailError: emailResult.reason }),
+      },
     });
   } catch (error) {
-    console.error("Registration error:", error);
+    console.error("Manager registration error:", error);
     if (error instanceof z.ZodError) {
-      return res
-        .status(400)
-        .json({ error: "Dados inválidos", details: error.errors });
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
     }
-    res.status(500).json({ error: "Erro ao cadastrar empresa" });
+    res.status(500).json({ error: "Erro ao cadastrar empresa pelo manager" });
+  }
+});
+
+authRouter.post("/manager/resend-invite", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerResendInviteSchema.parse(req.body);
+    const normalizedCnpj = data.cnpj.replace(/\D/g, "");
+
+    const [company] = await db
+      .select()
+      .from(companies)
+      .where(eq(companies.cnpj, normalizedCnpj))
+      .limit(1);
+
+    if (!company) {
+      return res.status(404).json({ error: "Empresa nao encontrada para o CNPJ informado" });
+    }
+
+    const [adminUser] = await db
+      .select()
+      .from(users)
+      .where(
+        and(eq(users.companyId, company.id), eq(users.email, data.adminEmail)),
+      )
+      .limit(1);
+
+    if (!adminUser) {
+      return res
+        .status(404)
+        .json({ error: "Usuario responsavel nao encontrado para esta empresa" });
+    }
+
+    const code = generateOnboardingCode();
+    const codeHash = hashOnboardingCode(code);
+    const expiresInMinutes = Number(
+      process.env.ONBOARDING_CODE_TTL_MINUTES || 30,
+    );
+    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+
+    await db.insert(companyOnboardingCodes).values({
+      companyId: company.id,
+      userId: adminUser.id,
+      email: adminUser.email,
+      codeHash,
+      expiresAt,
+    });
+
+    const emailResult = await sendOnboardingCodeEmail({
+      to: adminUser.email,
+      userName: adminUser.name,
+      companyName: company.nomeFantasia || company.razaoSocial,
+      code,
+    });
+
+    res.json({
+      message: "Codigo de ativacao reenviado",
+      onboarding: {
+        emailSent: emailResult.sent,
+        expiresAt,
+        ...(process.env.NODE_ENV !== "production" ? { code } : {}),
+        ...(emailResult.sent ? {} : { emailError: emailResult.reason }),
+      },
+    });
+  } catch (error) {
+    console.error("Manager resend invite error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao reenviar codigo de ativacao" });
+  }
+});
+
+authRouter.patch("/manager/company", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerUpdateCompanySchema.parse(req.body);
+    const normalizedCnpj = data.cnpj.replace(/\D/g, "");
+
+    const [company] = await db
+      .select()
+      .from(companies)
+      .where(eq(companies.id, data.companyId))
+      .limit(1);
+
+    if (!company) {
+      return res.status(404).json({ error: "Empresa nao encontrada" });
+    }
+
+    const existingCnpj = await db
+      .select({ id: companies.id })
+      .from(companies)
+      .where(and(eq(companies.cnpj, normalizedCnpj), ne(companies.id, data.companyId)))
+      .limit(1);
+
+    if (existingCnpj.length > 0) {
+      return res.status(400).json({ error: "CNPJ ja cadastrado em outra empresa" });
+    }
+
+    const existingAdminEmail = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.email, data.adminEmail), ne(users.id, data.userId)))
+      .limit(1);
+
+    if (existingAdminEmail.length > 0) {
+      return res.status(400).json({ error: "Email do responsavel ja usado por outro usuario" });
+    }
+
+    await db
+      .update(companies)
+      .set({
+        cnpj: normalizedCnpj,
+        razaoSocial: data.razaoSocial,
+        nomeFantasia: data.nomeFantasia || data.razaoSocial,
+        email: data.companyEmail || null,
+        phone: data.companyPhone || null,
+        address: data.address || null,
+        city: data.city || null,
+        state: data.state || null,
+        zipCode: data.zipCode || null,
+      })
+      .where(eq(companies.id, data.companyId));
+
+    await db
+      .update(users)
+      .set({
+        name: data.adminName,
+        email: data.adminEmail,
+        username: data.adminEmail.split("@")[0],
+      })
+      .where(and(eq(users.id, data.userId), eq(users.companyId, data.companyId)));
+
+    await db
+      .update(companySettings)
+      .set({
+        cnpj: normalizedCnpj,
+        razaoSocial: data.razaoSocial,
+        nomeFantasia: data.nomeFantasia || data.razaoSocial,
+      })
+      .where(eq(companySettings.companyId, data.companyId));
+
+    res.json({ message: "Empresa atualizada com sucesso" });
+  } catch (error) {
+    console.error("Manager update company error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao atualizar empresa" });
+  }
+});
+
+authRouter.post("/manager/company/set-active", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerSetCompanyActiveSchema.parse(req.body);
+
+    await db
+      .update(companies)
+      .set({ isActive: data.isActive })
+      .where(eq(companies.id, data.companyId));
+
+    await db
+      .update(users)
+      .set({ isActive: data.isActive })
+      .where(eq(users.companyId, data.companyId));
+
+    res.json({
+      message: data.isActive
+        ? "Empresa ativada com sucesso"
+        : "Empresa inativada com sucesso",
+    });
+  } catch (error) {
+    console.error("Manager set company active error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos" });
+    }
+    res.status(500).json({ error: "Erro ao atualizar status da empresa" });
+  }
+});
+
+authRouter.delete("/manager/company", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerDeleteCompanySchema.parse(req.body);
+
+    await db.transaction(async (tx) => {
+      const companyRoles = await tx
+        .select({ id: roles.id })
+        .from(roles)
+        .where(eq(roles.companyId, data.companyId));
+
+      const roleIds = companyRoles.map((role) => role.id);
+
+      await tx
+        .delete(companyOnboardingCodes)
+        .where(eq(companyOnboardingCodes.companyId, data.companyId));
+      await tx
+        .delete(passwordResetCodes)
+        .where(eq(passwordResetCodes.companyId, data.companyId));
+      await tx.delete(users).where(eq(users.companyId, data.companyId));
+
+      if (roleIds.length > 0) {
+        await tx
+          .delete(rolePermissions)
+          .where(inArray(rolePermissions.roleId, roleIds));
+      }
+
+      await tx.delete(roles).where(eq(roles.companyId, data.companyId));
+      await tx
+        .delete(companySettings)
+        .where(eq(companySettings.companyId, data.companyId));
+      await tx.delete(companies).where(eq(companies.id, data.companyId));
+    });
+
+    res.json({ message: "Empresa excluida com sucesso" });
+  } catch (error: any) {
+    console.error("Manager delete company error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos" });
+    }
+
+    const message = String(error?.message || "");
+    if (message.toLowerCase().includes("violates foreign key constraint")) {
+      return res.status(409).json({
+        error:
+          "Nao foi possivel excluir porque existem registros vinculados. Inative a empresa.",
+      });
+    }
+
+    res.status(500).json({ error: "Erro ao excluir empresa" });
+  }
+});
+
+authRouter.post("/complete-invite", async (req, res) => {
+  try {
+    const data = completeInviteSchema.parse(req.body);
+
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, data.email))
+      .limit(1);
+
+    if (!user) {
+      return res.status(400).json({ error: "Convite invalido" });
+    }
+
+    const [invite] = await db
+      .select()
+      .from(companyOnboardingCodes)
+      .where(
+        and(
+          eq(companyOnboardingCodes.userId, user.id),
+          eq(companyOnboardingCodes.email, data.email),
+          isNull(companyOnboardingCodes.usedAt),
+        ),
+      )
+      .orderBy(desc(companyOnboardingCodes.createdAt))
+      .limit(1);
+
+    if (!invite) {
+      return res.status(400).json({ error: "Codigo invalido ou ja utilizado" });
+    }
+
+    if (new Date(invite.expiresAt).getTime() < Date.now()) {
+      return res.status(400).json({ error: "Codigo expirado" });
+    }
+
+    if (hashOnboardingCode(data.code) !== invite.codeHash) {
+      return res.status(400).json({ error: "Codigo invalido" });
+    }
+
+    const hashedPassword = await bcrypt.hash(data.password, 10);
+    await db
+      .update(users)
+      .set({ password: hashedPassword })
+      .where(eq(users.id, user.id));
+
+    await db
+      .update(companyOnboardingCodes)
+      .set({ usedAt: new Date() })
+      .where(eq(companyOnboardingCodes.id, invite.id));
+
+    res.json({ message: "Senha criada com sucesso. Faca login para continuar." });
+  } catch (error) {
+    console.error("Complete invite error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos" });
+    }
+    res.status(500).json({ error: "Erro ao concluir criacao de senha" });
+  }
+});
+
+authRouter.post("/forgot-password/request", async (req, res) => {
+  try {
+    const data = forgotPasswordRequestSchema.parse(req.body);
+    const normalizedCnpj = data.cnpj.replace(/\D/g, "");
+
+    const [company] = await db
+      .select()
+      .from(companies)
+      .where(eq(companies.cnpj, normalizedCnpj))
+      .limit(1);
+
+    if (!company) {
+      return res.status(404).json({ error: "Empresa nao encontrada para o CNPJ informado" });
+    }
+
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(
+        and(eq(users.companyId, company.id), eq(users.email, data.email)),
+      )
+      .limit(1);
+
+    if (!user) {
+      return res.status(404).json({ error: "Email nao encontrado para esta empresa" });
+    }
+
+    const code = generateOnboardingCode();
+    const codeHash = hashOnboardingCode(code);
+    const expiresInMinutes = Number(
+      process.env.ONBOARDING_CODE_TTL_MINUTES || 30,
+    );
+    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+
+    await db.insert(passwordResetCodes).values({
+      companyId: company.id,
+      userId: user.id,
+      email: user.email,
+      cnpj: company.cnpj,
+      codeHash,
+      expiresAt,
+    });
+
+    const emailResult = await sendPasswordResetCodeEmail({
+      to: user.email,
+      userName: user.name,
+      companyName: company.nomeFantasia || company.razaoSocial,
+      code,
+    });
+
+    res.json({
+      message: "Codigo de redefinicao enviado",
+      passwordReset: {
+        emailSent: emailResult.sent,
+        expiresAt,
+        ...(process.env.NODE_ENV !== "production" ? { code } : {}),
+        ...(emailResult.sent ? {} : { emailError: emailResult.reason }),
+      },
+    });
+  } catch (error) {
+    console.error("Forgot password request error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao solicitar redefinicao de senha" });
+  }
+});
+
+authRouter.post("/forgot-password/reset", async (req, res) => {
+  try {
+    const data = forgotPasswordResetSchema.parse(req.body);
+
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, data.email))
+      .limit(1);
+
+    if (!user) {
+      return res.status(400).json({ error: "Solicitacao invalida" });
+    }
+
+    const [resetCode] = await db
+      .select()
+      .from(passwordResetCodes)
+      .where(
+        and(
+          eq(passwordResetCodes.userId, user.id),
+          eq(passwordResetCodes.email, data.email),
+          isNull(passwordResetCodes.usedAt),
+        ),
+      )
+      .orderBy(desc(passwordResetCodes.createdAt))
+      .limit(1);
+
+    if (!resetCode) {
+      return res.status(400).json({ error: "Codigo invalido ou ja utilizado" });
+    }
+
+    if (new Date(resetCode.expiresAt).getTime() < Date.now()) {
+      return res.status(400).json({ error: "Codigo expirado" });
+    }
+
+    if (hashOnboardingCode(data.code) !== resetCode.codeHash) {
+      return res.status(400).json({ error: "Codigo invalido" });
+    }
+
+    const hashedPassword = await bcrypt.hash(data.password, 10);
+    await db
+      .update(users)
+      .set({ password: hashedPassword })
+      .where(eq(users.id, user.id));
+
+    await db
+      .update(passwordResetCodes)
+      .set({ usedAt: new Date() })
+      .where(eq(passwordResetCodes.id, resetCode.id));
+
+    res.json({ message: "Senha redefinida com sucesso. Faca login para continuar." });
+  } catch (error) {
+    console.error("Forgot password reset error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos" });
+    }
+    res.status(500).json({ error: "Erro ao redefinir senha" });
   }
 });
 

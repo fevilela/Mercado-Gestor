@@ -13,7 +13,7 @@ import {
   CardFooter,
 } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, Lock, Mail, Loader2 } from "lucide-react";
+import { Lock, Mail, Loader2 } from "lucide-react";
 
 export default function Login() {
   const [, setLocation] = useLocation();
@@ -46,16 +46,16 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-primary flex items-center justify-center">
-            <Building2 className="h-6 w-6 text-primary-foreground" />
+          <div className="mb-2 flex justify-center">
+            <img
+              src="/images/Zyron.png"
+              alt="Zyron"
+              className="block h-20 w-auto object-contain"
+              data-testid="image-login-brand"
+            />
           </div>
-          <CardTitle className="text-2xl" data-testid="text-login-title">
-            Sistema ERP
-          </CardTitle>
-          <CardDescription>
-            Entre com suas credenciais para acessar o sistema
-          </CardDescription>
         </CardHeader>
+
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -74,6 +74,7 @@ export default function Login() {
                 />
               </div>
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="password">Senha</Label>
               <div className="relative">
@@ -91,7 +92,8 @@ export default function Login() {
               </div>
             </div>
           </CardContent>
-          <CardFooter className="flex flex-col gap-4">
+
+          <CardFooter className="flex flex-col gap-3">
             <Button
               type="submit"
               className="w-full"
@@ -107,20 +109,42 @@ export default function Login() {
                 "Entrar"
               )}
             </Button>
+
             <p className="text-sm text-muted-foreground text-center">
-              Ainda nao tem uma conta?{" "}
               <a
-                href="/register"
+                href="/forgot-password"
                 onClick={(e) => {
                   e.preventDefault();
-                  setLocation("/register");
+                  setLocation("/forgot-password");
                 }}
                 className="text-primary hover:underline"
-                data-testid="link-register"
+                data-testid="link-forgot-password"
               >
-                Cadastre sua empresa
+                Esqueci minha senha
+              </a>
+              {" | "}
+              <a
+                href="/access"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setLocation("/access");
+                }}
+                className="text-primary hover:underline"
+                data-testid="link-new-access"
+              >
+                Novo acesso
               </a>
             </p>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => setLocation("/manager-onboarding")}
+              data-testid="button-manager-onboarding"
+            >
+              Cadastro interno de empresa
+            </Button>
           </CardFooter>
         </form>
       </Card>

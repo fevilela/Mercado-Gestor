@@ -16,7 +16,6 @@
   User,
   History,
   FileText,
-  Zap,
   Shield,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
@@ -136,6 +135,12 @@ const sidebarSections: SidebarSection[] = [
         permissions: ["fiscal:view", "fiscal:manage"],
       },
       {
+        icon: FileText,
+        label: "Emissao Fiscal (NF-e/NFC-e)",
+        href: "/fiscal-documents",
+        permissions: ["fiscal:view", "fiscal:manage"],
+      },
+      {
         icon: Shield,
         label: "Certificado Digital",
         href: "/certificates",
@@ -211,11 +216,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const SidebarContent = () => (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-16 items-center px-6 border-b border-sidebar-border">
-        <div className="flex items-center gap-2 font-heading font-bold text-xl tracking-tight">
-          <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
-            M
-          </div>
-          Zyrion
+        <div className="flex w-full items-center justify-center">
+          <img
+            src="/images/Zyron-branco.png"
+            alt="Zyron"
+            className="block h-9 w-auto object-contain"
+            data-testid="image-sidebar-brand"
+          />
         </div>
       </div>
       <div className="flex-1 overflow-auto py-4">
@@ -415,7 +422,5 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-
 
 

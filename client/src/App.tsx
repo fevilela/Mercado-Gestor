@@ -17,11 +17,14 @@ import PaymentMethods from "@/pages/payment-methods";
 import ReferenceTables from "@/pages/reference-tables";
 import Login from "@/pages/login";
 import Register from "@/pages/register";
+import ForgotPassword from "@/pages/forgot-password";
+import ManagerOnboarding from "@/pages/manager-onboarding";
 import Users from "@/pages/users";
 import Profile from "@/pages/profile";
 import CashHistory from "@/pages/cash-history";
 import FiscalConfig from "@/pages/fiscal-config";
 import FiscalCentralPage from "@/pages/fiscal-central";
+import FiscalDocuments from "@/pages/fiscal-documents";
 import { CertificateConfig } from "@/pages/certificate-config";
 import SequentialNumberingConfig from "@/pages/sequential-numbering-config";
 import { Loader2 } from "lucide-react";
@@ -76,8 +79,17 @@ function Router() {
       <Route path="/login">
         <PublicRoute component={Login} />
       </Route>
-      <Route path="/register">
+      <Route path="/access">
         <PublicRoute component={Register} />
+      </Route>
+      <Route path="/forgot-password">
+        <PublicRoute component={ForgotPassword} />
+      </Route>
+      <Route path="/register">
+        <Redirect to="/access" />
+      </Route>
+      <Route path="/manager-onboarding">
+        <PublicRoute component={ManagerOnboarding} />
       </Route>
       <Route path="/">
         <ProtectedRoute component={Dashboard} />
@@ -122,13 +134,13 @@ function Router() {
         <ProtectedRoute component={FiscalConfig} />
       </Route>
       <Route path="/fiscal-documents">
-        <Redirect to="/fiscal-central" />
+        <ProtectedRoute component={FiscalDocuments} />
       </Route>
       <Route path="/fiscal-central">
         <ProtectedRoute component={FiscalCentralPage} />
       </Route>
       <Route path="/nfe-emissao">
-        <Redirect to="/fiscal-central" />
+        <Redirect to="/fiscal-documents" />
       </Route>
       <Route path="/nfe-historico">
         <Redirect to="/fiscal-central" />
@@ -164,3 +176,4 @@ function App() {
 }
 
 export default App;
+

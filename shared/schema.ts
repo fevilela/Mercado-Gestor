@@ -124,6 +124,59 @@ export type User = typeof users.$inferSelect;
 // User with role information for frontend
 export type UserWithRole = User & { role: Role; permissions: string[] };
 
+// ============================================
+// COMPANY ONBOARDING CODES: Convite para criar senha
+// ============================================
+export const companyOnboardingCodes = pgTable("company_onboarding_codes", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  email: text("email").notNull(),
+  codeHash: text("code_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCompanyOnboardingCodeSchema = createInsertSchema(
+  companyOnboardingCodes
+).omit({
+  id: true,
+  usedAt: true,
+  createdAt: true,
+});
+
+export type InsertCompanyOnboardingCode = z.infer<
+  typeof insertCompanyOnboardingCodeSchema
+>;
+export type CompanyOnboardingCode = typeof companyOnboardingCodes.$inferSelect;
+
+// ============================================
+// PASSWORD RESET CODES: Recuperacao de senha
+// ============================================
+export const passwordResetCodes = pgTable("password_reset_codes", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  email: text("email").notNull(),
+  cnpj: text("cnpj").notNull(),
+  codeHash: text("code_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPasswordResetCodeSchema = createInsertSchema(
+  passwordResetCodes,
+).omit({
+  id: true,
+  usedAt: true,
+  createdAt: true,
+});
+
+export type InsertPasswordResetCode = z.infer<typeof insertPasswordResetCodeSchema>;
+export type PasswordResetCode = typeof passwordResetCodes.$inferSelect;
+
 export const products = pgTable("products", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id"),
