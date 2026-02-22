@@ -432,6 +432,121 @@ const buildIssueDateFromKey = (
   return issueDate;
 };
 
+const NF_UF_CODE_MAP: Record<string, string> = {
+  AC: "12",
+  AL: "27",
+  AM: "13",
+  AP: "16",
+  BA: "29",
+  CE: "23",
+  DF: "53",
+  ES: "32",
+  GO: "52",
+  MA: "21",
+  MG: "31",
+  MS: "50",
+  MT: "51",
+  PA: "15",
+  PB: "25",
+  PE: "26",
+  PI: "22",
+  PR: "41",
+  RJ: "33",
+  RN: "24",
+  RO: "11",
+  RR: "14",
+  RS: "43",
+  SC: "42",
+  SE: "28",
+  SP: "35",
+  TO: "17",
+};
+
+const calcNfeMod11Dv = (value: string) => {
+  let sum = 0;
+  let weight = 2;
+  for (let i = value.length - 1; i >= 0; i -= 1) {
+    sum += Number(value[i] || "0") * weight;
+    weight = weight === 9 ? 2 : weight + 1;
+  }
+  const remainder = sum % 11;
+  return String(remainder === 0 || remainder === 1 ? 0 : 11 - remainder);
+};
+
+const validateNfceKeyAgainstXml = (xml: string) => {
+  const xmlContent = String(xml || "");
+  const idAttrMatch = xmlContent.match(/<infNFe[^>]*\sId="NFe(\d{44})"/i);
+  const keyFromId = idAttrMatch?.[1] || "";
+  if (!/^\d{44}$/.test(keyFromId)) {
+    return { ok: false, error: "Id da NFC-e ausente ou invalido (infNFe Id)" };
+  }
+
+  const cUF = extractXmlTag(xmlContent, "cUF").replace(/\D/g, "");
+  const dhEmi = extractXmlTag(xmlContent, "dhEmi");
+  const emitCnpj = extractXmlTag(xmlContent, "CNPJ").replace(/\D/g, "");
+  const mod = extractXmlTag(xmlContent, "mod").replace(/\D/g, "");
+  const serie = extractXmlTag(xmlContent, "serie").replace(/\D/g, "");
+  const nNF = extractXmlTag(xmlContent, "nNF").replace(/\D/g, "");
+  const tpEmis = extractXmlTag(xmlContent, "tpEmis").replace(/\D/g, "");
+  const cNF = extractXmlTag(xmlContent, "cNF").replace(/\D/g, "");
+  const cDV = extractXmlTag(xmlContent, "cDV").replace(/\D/g, "");
+
+  const dhMatch = dhEmi.match(/^(\d{4})-(\d{2})-/);
+  if (!dhMatch) {
+    return { ok: false, error: "dhEmi invalido para composicao da chave da NFC-e" };
+  }
+  const yy = dhMatch[1].slice(2);
+  const mm = dhMatch[2];
+  const normalizedCnpj = emitCnpj.padStart(14, "0").slice(-14);
+  const normalizedMod = mod.padStart(2, "0").slice(-2);
+  const normalizedSerie = serie.padStart(3, "0").slice(-3);
+  const normalizedNNF = nNF.padStart(9, "0").slice(-9);
+  const normalizedTpEmis = (tpEmis || "1").slice(-1);
+  const normalizedCNF = cNF.padStart(8, "0").slice(-8);
+  const base =
+    cUF.padStart(2, "0").slice(-2) +
+    yy +
+    mm +
+    normalizedCnpj +
+    normalizedMod +
+    normalizedSerie +
+    normalizedNNF +
+    normalizedTpEmis +
+    normalizedCNF;
+  const dvCalculated = calcNfeMod11Dv(base);
+  const keyCalculated = base + dvCalculated;
+
+  if (cDV && cDV.slice(-1) !== dvCalculated) {
+    return {
+      ok: false,
+      error: `cDV da NFC-e invalido no XML (xml=${cDV.slice(-1)} calculado=${dvCalculated})`,
+    };
+  }
+  if (keyFromId !== keyCalculated) {
+    return {
+      ok: false,
+      error:
+        "Chave da NFC-e inconsistente: infNFe@Id nao corresponde aos campos do XML (cUF/dhEmi/CNPJ/mod/serie/nNF/tpEmis/cNF/cDV)",
+      details: {
+        keyFromId,
+        keyCalculated,
+        cUF,
+        dhEmi,
+        emitCnpj: normalizedCnpj,
+        mod: normalizedMod,
+        serie: normalizedSerie,
+        nNF: normalizedNNF,
+        tpEmis: normalizedTpEmis,
+        cNF: normalizedCNF,
+        cDVXml: cDV.slice(-1),
+        cDVCalculated: dvCalculated,
+      },
+    };
+  }
+
+  return { ok: true, keyFromId };
+};
+
 const resolveSefazEnvironment = async (
   companyId: number,
 ): Promise<"homologacao" | "producao"> => {
@@ -1101,7 +1216,20 @@ router.post(
           );
           const existingKey = String(sale.nfceKey || "").replace(/\D/g, "");
           const parsedKey = parseNfceAccessKey(existingKey);
-          if (parsedKey) {
+          const expectedUfCode = NF_UF_CODE_MAP[String(uf || "").toUpperCase()] || "";
+          const canReuseExistingKey =
+            !!parsedKey &&
+            (!expectedUfCode || parsedKey.ufCode === expectedUfCode);
+          if (parsedKey && !canReuseExistingKey) {
+            console.warn("[NFCe] Ignorando chave existente por divergencia de UF", {
+              saleId,
+              existingKey,
+              keyUfCode: parsedKey.ufCode,
+              configuredUf: uf,
+              configuredUfCode: expectedUfCode,
+            });
+          }
+          if (parsedKey && canReuseExistingKey) {
             issueDate = buildIssueDateFromKey(
               parsedKey,
               sale.createdAt ? new Date(sale.createdAt) : new Date(),
@@ -1194,36 +1322,19 @@ router.post(
           if (municipioCodigo.length < 7) {
             throw new Error("Codigo do municipio SEFAZ invalido");
           }
-          const ufCodeMap: Record<string, string> = {
-            AC: "12",
-            AL: "27",
-            AM: "13",
-            AP: "16",
-            BA: "29",
-            CE: "23",
-            DF: "53",
-            ES: "32",
-            GO: "52",
-            MA: "21",
-            MG: "31",
-            MS: "50",
-            MT: "51",
-            PA: "15",
-            PB: "25",
-            PE: "26",
-            PI: "22",
-            PR: "41",
-            RJ: "33",
-            RN: "24",
-            RO: "11",
-            RR: "14",
-            RS: "43",
-            SC: "42",
-            SE: "28",
-            SP: "35",
-            TO: "17",
-          };
-          const ufCode = ufCodeMap[uf] || "";
+          const emitenteUfEndereco = String(
+            cadastroEndereco?.uf || company.state || "",
+          )
+            .trim()
+            .toUpperCase();
+          if (emitenteUfEndereco && emitenteUfEndereco !== String(uf).toUpperCase()) {
+            throw new Error(
+              `UF do emitente divergente da UF fiscal configurada (emitente=${emitenteUfEndereco}, fiscal=${String(
+                uf,
+              ).toUpperCase()}). Ajuste a UF da empresa ou a UF SEFAZ antes de enviar a NFC-e.`,
+            );
+          }
+          const ufCode = NF_UF_CODE_MAP[uf] || "";
           if (ufCode && !municipioCodigo.startsWith(ufCode)) {
             throw new Error(
               `Codigo do municipio SEFAZ invalido para UF ${uf} (esperado prefixo ${ufCode})`,
@@ -1343,6 +1454,15 @@ router.post(
               : "";
             throw new Error(
               `Schema NFC-e invalido: ${validation.error}${details}`,
+            );
+          }
+          const keyValidation = validateNfceKeyAgainstXml(xml);
+          if (!keyValidation.ok) {
+            const details = (keyValidation as any).details
+              ? ` | detalhes: ${JSON.stringify((keyValidation as any).details)}`
+              : "";
+            throw new Error(
+              `Chave NFC-e invalida antes do envio: ${keyValidation.error}${details}`,
             );
           }
 
