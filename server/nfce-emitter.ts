@@ -645,14 +645,14 @@ export const buildNfceQrUrl = (params: {
     params.sefazUrl.toLowerCase().includes("fazenda.mg.gov.br");
   if (isMg) {
     const versaoQr = onlyDigits(params.versaoQr || "2") || "2";
-    const mgCscId = (cscIdRaw || cscId).padStart(6, "0").slice(-6);
-    const qrFields = [params.chave, versaoQr, params.tpAmb, mgCscId];
-    const qrSeed = `${qrFields.join("|")}|${cscNormalized}`;
+    // Schema NFC-e v4.00 (QR v2 online) nao aceita cIdToken com zeros a esquerda
+    // no payload p=... (exceto "0"). Ex.: use "1", nao "000001".
+    const qrFields = [params.chave, versaoQr, params.tpAmb, cscId];
+    const qrConcat = qrFields.join("|");
     const hash = crypto
       .createHash("sha1")
-      .update(qrSeed)
-      .digest("hex")
-      .toUpperCase();
+      .update(qrConcat + cscNormalized)
+      .digest("hex");
     const payload = [...qrFields, hash].join("|");
     return `${params.sefazUrl.trim()}?p=${payload}`.trim();
   }

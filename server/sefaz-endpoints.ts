@@ -26,12 +26,12 @@ const NFCE_PORTAL_URLS_BY_UF: Record<
 > = {
   MG: {
     homologacao: {
-      qrCodeBase: "https://www.fazenda.mg.gov.br/nfce/qrcode",
-      urlChave: "https://www.fazenda.mg.gov.br/nfce/qrcode",
+      qrCodeBase: "https://hportalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml",
+      urlChave: "https://hportalsped.fazenda.mg.gov.br/portalnfce",
     },
     producao: {
-      qrCodeBase: "https://www.fazenda.mg.gov.br/nfce/qrcode",
-      urlChave: "https://www.fazenda.mg.gov.br/nfce/qrcode",
+      qrCodeBase: "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/qrcode.xhtml",
+      urlChave: "https://portalsped.fazenda.mg.gov.br/portalnfce",
     },
   },
 };
