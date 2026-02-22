@@ -23,6 +23,11 @@ function getPrinter(): any {
   if (printerInstance) return printerInstance;
 
   const robotoVfs = resolvePdfMakeVfs();
+  const hasRobotoVfs =
+    typeof robotoVfs["Roboto-Regular.ttf"] === "string" &&
+    typeof robotoVfs["Roboto-Medium.ttf"] === "string" &&
+    typeof robotoVfs["Roboto-Italic.ttf"] === "string" &&
+    typeof robotoVfs["Roboto-MediumItalic.ttf"] === "string";
   const readFont = (fileName: string) => {
     const base64 = robotoVfs[fileName];
     if (!base64 || typeof base64 !== "string") {
@@ -31,14 +36,25 @@ function getPrinter(): any {
     return Buffer.from(base64, "base64");
   };
 
-  const fonts = {
-    Roboto: {
-      normal: readFont("Roboto-Regular.ttf"),
-      bold: readFont("Roboto-Medium.ttf"),
-      italics: readFont("Roboto-Italic.ttf"),
-      bolditalics: readFont("Roboto-MediumItalic.ttf"),
-    },
-  };
+  const fonts = hasRobotoVfs
+    ? {
+        Roboto: {
+          normal: readFont("Roboto-Regular.ttf"),
+          bold: readFont("Roboto-Medium.ttf"),
+          italics: readFont("Roboto-Italic.ttf"),
+          bolditalics: readFont("Roboto-MediumItalic.ttf"),
+        },
+      }
+    : {
+        // Fallback para ambientes onde pdfmake/build/vfs_fonts nao expoe Roboto
+        // (ex.: bundle server-side em algumas builds). PdfKit possui essas fontes base.
+        Roboto: {
+          normal: "Helvetica",
+          bold: "Helvetica-Bold",
+          italics: "Helvetica-Oblique",
+          bolditalics: "Helvetica-BoldOblique",
+        },
+      };
 
   printerInstance = new PdfPrinter(fonts);
   return printerInstance;
