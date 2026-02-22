@@ -170,15 +170,23 @@ export const generateNfceKey = (params: {
 
 export const mapPaymentCode = (code?: string | null, type?: string | null) => {
   if (code && code.trim()) return code.trim();
-  switch (type) {
+  const normalizedType = normalizeText(type).toLowerCase();
+  switch (normalizedType) {
     case "pix":
       return "17";
     case "credito":
+    case "cartao credito":
+    case "cartao de credito":
       return "03";
     case "debito":
+    case "cartao debito":
+    case "cartao de debito":
       return "04";
     case "dinheiro":
+    case "cash":
       return "01";
+    case "boleto":
+      return "15";
     default:
       return "99";
   }
@@ -320,6 +328,9 @@ export const buildNfceXml = (params: {
 
   const tpEmis = params.tpEmis || "1";
 
+  const xPagXml =
+    params.pagamento.codigo === "99" ? "<xPag>OUTROS</xPag>" : "";
+
   return `<?xml version="1.0" encoding="UTF-8"?><NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${params.key}" versao="4.00"><ide><cUF>${cUF}</cUF><cNF>${params.cNF}</cNF><natOp>Venda</natOp><mod>65</mod><serie>${serie}</serie><nNF>${nNF}</nNF><dhEmi>${dhEmi}</dhEmi><tpNF>1</tpNF><idDest>${idDest}</idDest><cMunFG>${municipioCodigo}</cMunFG><tpImp>4</tpImp><tpEmis>${tpEmis}</tpEmis><cDV>${params.key.slice(-1)}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>1</finNFe><indFinal>1</indFinal><indPres>1</indPres><indIntermed>0</indIntermed><procEmi>0</procEmi><verProc>1.0.0</verProc></ide><emit><CNPJ>${onlyDigits(
     params.emitente.cnpj,
   ).padStart(14, "0")}</CNPJ><xNome>${sanitizeXml(
@@ -342,7 +353,7 @@ export const buildNfceXml = (params: {
     totalTributos,
   )}</vTotTrib></ICMSTot></total><transp><modFrete>9</modFrete></transp><pag><detPag><tPag>${
     params.pagamento.codigo
-  }</tPag><vPag>${formatNumber(
+  }</tPag>${xPagXml}<vPag>${formatNumber(
     params.pagamento.valor,
   )}</vPag></detPag>${
     vTrocoValue > 0 ? `<vTroco>${formatNumber(vTrocoValue)}</vTroco>` : ""
@@ -628,27 +639,21 @@ export const buildNfceQrUrl = (params: {
 }) => {
   const cscIdRaw = onlyDigits(params.cscId);
   const cscId = cscIdRaw.replace(/^0+/, "") || "0";
-  const cscNormalized = String(params.csc || "")
-    .trim()
-    .replace(/\s+/g, "")
-    .toLowerCase();
+  const cscNormalized = String(params.csc || "").trim().replace(/\s+/g, "");
   const isMg =
     params.uf?.toUpperCase() === "MG" ||
     params.sefazUrl.toLowerCase().includes("fazenda.mg.gov.br");
   if (isMg) {
     const versaoQr = onlyDigits(params.versaoQr || "2") || "2";
+    const mgCscId = (cscIdRaw || cscId).padStart(6, "0").slice(-6);
+    const qrFields = [params.chave, versaoQr, params.tpAmb, mgCscId];
+    const qrSeed = `${qrFields.join("|")}|${cscNormalized}`;
     const hash = crypto
       .createHash("sha1")
-      .update(`${params.chave}${cscId}${cscNormalized}`)
+      .update(qrSeed)
       .digest("hex")
       .toUpperCase();
-    const payload = [
-      params.chave,
-      versaoQr,
-      params.tpAmb,
-      cscId,
-      hash,
-    ].join("|");
+    const payload = [...qrFields, hash].join("|");
     return `${params.sefazUrl.trim()}?p=${payload}`.trim();
   }
 

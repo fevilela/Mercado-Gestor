@@ -7,25 +7,12 @@ import * as https from "https";
 import * as zlib from "zlib";
 import { createRequire } from "module";
 import { XMLSignatureService } from "./xml-signature";
+import {
+  resolveNfceWsEndpoints,
+  resolveSefazEventEndpoints,
+} from "./sefaz-endpoints";
 
 const require = createRequire(path.join(process.cwd(), "package.json"));
-const resolveUrlEventos = (uf: string, versao: string): any => {
-  try {
-    const mod = require("node-sped-nfe/dist/utils/eventos.js");
-    return typeof mod?.urlEventos === "function"
-      ? mod.urlEventos(uf, versao)
-      : null;
-  } catch {
-    try {
-      const mod = require("node-sped-nfe/dist/utils/eventos");
-      return typeof mod?.urlEventos === "function"
-        ? mod.urlEventos(uf, versao)
-        : null;
-    } catch {
-      return null;
-    }
-  }
-};
 
 export interface SefazConfig {
   environment: "homologacao" | "producao";
@@ -870,6 +857,67 @@ export class SefazService {
       }
 
       if (accessKey && accessKey.length === 44) {
+        if (mod === "65") {
+          const nfceWs = resolveNfceWsEndpoints(
+            this.config.uf,
+            this.config.environment,
+          );
+          if (nfceWs?.NFeConsultaProtocolo) {
+            const cert = (await this.buildTools(mod).getCertificado()) as {
+              key?: string;
+              cert?: string;
+              ca?: string[];
+            };
+            const tpAmb = this.config.environment === "producao" ? "1" : "2";
+            const body =
+              `<?xml version="1.0" encoding="utf-8"?>` +
+              `<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:nfe="http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4">` +
+              `<soap:Body><nfe:nfeDadosMsg>` +
+              `<consSitNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">` +
+              `<tpAmb>${tpAmb}</tpAmb><xServ>CONSULTAR</xServ><chNFe>${accessKey}</chNFe>` +
+              `</consSitNFe></nfe:nfeDadosMsg></soap:Body></soap:Envelope>`;
+            const responseXml = await new Promise<string>((resolve, reject) => {
+              const req = https.request(
+                nfceWs.NFeConsultaProtocolo,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/soap+xml; charset=utf-8",
+                    "Content-Length": Buffer.byteLength(body),
+                  },
+                  rejectUnauthorized: false,
+                  key: cert?.key,
+                  cert: cert?.cert,
+                  ca: cert?.ca,
+                },
+                (res) => {
+                  let data = "";
+                  res.on("data", (chunk) => {
+                    data += String(chunk);
+                  });
+                  res.on("end", () => resolve(data));
+                },
+              );
+              req.setTimeout((this.config.timeout ?? 60) * 1000, () => {
+                req.destroy(new Error("Timeout ao consultar NFC-e por chave"));
+              });
+              req.on("error", reject);
+              req.write(body);
+              req.end();
+            });
+            const parsed = resolveFinalStatus(String(responseXml || ""));
+            const status = parsed.status || "0";
+            return {
+              success: ["100", "150", "135", "136", "155"].includes(status),
+              protocol: parsed.protocol || "",
+              timestamp: new Date(),
+              status,
+              message: parsed.message || "Consulta de chave NFC-e realizada",
+              key: parsed.key || accessKey,
+              rawResponse: String(responseXml || ""),
+            };
+          }
+        }
         const tools = this.buildTools(mod);
         const response = await tools.consultarNFe(accessKey);
         const parsed = resolveFinalStatus(String(response || ""));
@@ -905,10 +953,15 @@ export class SefazService {
         ca?: string[];
       };
 
-      const endpoints = resolveUrlEventos(this.config.uf, "4.00") as any;
+      const nfceWs =
+        mod === "65"
+          ? resolveNfceWsEndpoints(this.config.uf, this.config.environment)
+          : null;
+      const endpoints = resolveSefazEventEndpoints(this.config.uf, "4.00") as any;
       const envKey =
         this.config.environment === "producao" ? "producao" : "homologacao";
       const ws =
+        nfceWs?.NFeRetAutorizacao ||
         endpoints?.[`mod${mod}`]?.[envKey]?.NFeRetAutorizacao ||
         endpoints?.[envKey]?.NFeRetAutorizacao;
 

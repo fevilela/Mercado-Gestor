@@ -41,6 +41,7 @@ import * as fs from "fs";
 import * as crypto from "crypto";
 import * as path from "path";
 import { generateDanfeNFCeThermal, generateDanfeNFeA4 } from "./danfe";
+import { resolveNfcePortalUrls } from "./sefaz-endpoints";
 
 const CEST_REGEX = /^\d{7}$/;
 const isCestRequired = (ncm?: string) => Boolean(ncm);
@@ -1496,10 +1497,12 @@ router.post(
             extractXmlTag(xml, "dhEmi") || formatNfceDateTime(issueDate);
           const vNF =
             extractXmlTag(xml, "vNF") || Number(sale.total).toFixed(2);
-          const qrBase =
-            uf === "MG" && qrBaseUrl.endsWith("/portalnfce/sistema/qrcode")
-              ? `${qrBaseUrl}.xhtml`
-              : qrBaseUrl;
+          const portalUrls = resolveNfcePortalUrls({
+            uf,
+            environment: resolvedEnvironment,
+            configuredQrCodeBase: qrBaseUrl,
+          });
+          const qrBase = portalUrls.qrCodeBase;
           const qrUrl = buildNfceQrUrl({
             sefazUrl: qrBase,
             uf,
@@ -1522,15 +1525,7 @@ router.post(
               qrUrl,
             });
           }
-          const resolvedUfUpper = String(uf || "").toUpperCase();
-          const urlChave =
-            resolvedUfUpper === "MG"
-              ? resolvedEnvironment === "producao"
-                ? "https://portalsped.fazenda.mg.gov.br/portalnfce"
-                : "https://hportalsped.fazenda.mg.gov.br/portalnfce"
-              : resolvedEnvironment === "producao"
-                ? "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml"
-                : "https://hnfce.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml";
+          const urlChave = portalUrls.urlChave;
           const qrCodeValue = String(qrUrl || "").replace(/\s+/g, "");
           const urlChaveValue = String(urlChave || "").trim();
           if (!qrCodeValue) {

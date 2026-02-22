@@ -62,6 +62,7 @@ interface SaleRecord {
   nfceStatus: string;
   nfceProtocol: string | null;
   nfceKey: string | null;
+  nfceError?: string | null;
   createdAt: string;
 }
 
@@ -954,7 +955,8 @@ export default function FiscalCentralPage() {
         String(sale.id).includes(query) ||
         String(sale.customerName || "").toLowerCase().includes(query) ||
         String(sale.nfceKey || "").toLowerCase().includes(query) ||
-        String(sale.nfceProtocol || "").toLowerCase().includes(query);
+        String(sale.nfceProtocol || "").toLowerCase().includes(query) ||
+        String(sale.nfceError || "").toLowerCase().includes(query);
       const matchesStatus =
         nfceStatusFilter === "all" || normalizedStatus.includes(nfceStatusFilter);
       const matchesDateFrom = dateFrom === null || saleDate >= dateFrom;
@@ -1313,6 +1315,7 @@ export default function FiscalCentralPage() {
                           <TableHead>Chave</TableHead>
                           <TableHead>Protocolo</TableHead>
                           <TableHead>Status</TableHead>
+                          <TableHead>Rejeicao / Retorno</TableHead>
                           <TableHead>Data/Hora</TableHead>
                           <TableHead className="text-right">Acoes</TableHead>
                         </TableRow>
@@ -1354,6 +1357,12 @@ export default function FiscalCentralPage() {
                                 {sale.nfceProtocol || "-"}
                               </TableCell>
                               <TableCell>{badgeForStatus(sale.nfceStatus)}</TableCell>
+                              <TableCell
+                                className="max-w-[360px] truncate text-muted-foreground"
+                                title={sale.nfceError || ""}
+                              >
+                                {sale.nfceError || "-"}
+                              </TableCell>
                               <TableCell>{formatDateTime(sale.createdAt)}</TableCell>
                               <TableCell className="text-right">
                                 <DropdownMenu>
