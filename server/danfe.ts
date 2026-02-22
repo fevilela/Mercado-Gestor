@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import crypto from "node:crypto";
 import PdfPrinter from "pdfmake";
 import vfsFonts from "pdfmake/build/vfs_fonts.js";
 import QRCode from "qrcode";
