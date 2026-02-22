@@ -6,17 +6,43 @@ import { parseStringPromise } from "xml2js";
 
 type XmlNode = Record<string, any>;
 
-const robotoVfs = (vfsFonts as any).pdfMake?.vfs ?? {};
-const fonts = {
-  Roboto: {
-    normal: Buffer.from(robotoVfs["Roboto-Regular.ttf"], "base64"),
-    bold: Buffer.from(robotoVfs["Roboto-Medium.ttf"], "base64"),
-    italics: Buffer.from(robotoVfs["Roboto-Italic.ttf"], "base64"),
-    bolditalics: Buffer.from(robotoVfs["Roboto-MediumItalic.ttf"], "base64"),
-  },
-};
+let printerInstance: any = null;
 
-const printer = new PdfPrinter(fonts);
+function resolvePdfMakeVfs(): Record<string, string> {
+  const mod = vfsFonts as any;
+  return (
+    mod?.pdfMake?.vfs ||
+    mod?.default?.pdfMake?.vfs ||
+    mod?.vfs ||
+    mod?.default?.vfs ||
+    {}
+  );
+}
+
+function getPrinter(): any {
+  if (printerInstance) return printerInstance;
+
+  const robotoVfs = resolvePdfMakeVfs();
+  const readFont = (fileName: string) => {
+    const base64 = robotoVfs[fileName];
+    if (!base64 || typeof base64 !== "string") {
+      throw new Error(`Fonte do pdfmake nao encontrada: ${fileName}`);
+    }
+    return Buffer.from(base64, "base64");
+  };
+
+  const fonts = {
+    Roboto: {
+      normal: readFont("Roboto-Regular.ttf"),
+      bold: readFont("Roboto-Medium.ttf"),
+      italics: readFont("Roboto-Italic.ttf"),
+      bolditalics: readFont("Roboto-MediumItalic.ttf"),
+    },
+  };
+
+  printerInstance = new PdfPrinter(fonts);
+  return printerInstance;
+}
 
 function toArray<T>(value: T | T[] | undefined): T[] {
   if (!value) return [];
@@ -66,7 +92,7 @@ async function parseNFe(xmlContent: string) {
 
 function createPdf(docDefinition: any): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const pdf = printer.createPdfKitDocument(docDefinition);
+    const pdf = getPrinter().createPdfKitDocument(docDefinition);
     const chunks: Buffer[] = [];
     pdf.on("data", (chunk: Buffer) => chunks.push(chunk));
     pdf.on("end", () => resolve(Buffer.concat(chunks)));
