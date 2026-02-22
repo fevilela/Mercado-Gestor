@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Layout from "@/components/layout";
 import {
@@ -69,8 +69,34 @@ interface Customer {
   id: number;
   name: string;
   cpfCnpj?: string;
+  email?: string | null;
+  address?: string | null;
   personType?: string;
   isIcmsContributor?: boolean;
+}
+
+interface Supplier {
+  id: number;
+  name: string;
+  email?: string | null;
+  cnpj?: string | null;
+  address?: string | null;
+}
+
+interface AppSettings {
+  cnpj?: string;
+  ie?: string;
+  razaoSocial?: string;
+}
+
+interface RecipientLookupOption {
+  id: string;
+  entityId: number;
+  kind: "customer" | "supplier";
+  name: string;
+  document: string;
+  email: string;
+  address: string;
 }
 
 interface CfopCode {
@@ -152,12 +178,107 @@ interface NfceSale {
   createdAt: string;
 }
 
+interface NfePaymentDraft {
+  id: string;
+  form: string;
+  term: string;
+  value: string;
+  dueDate: string;
+  cardBrand: string;
+  acquirerCnpj: string;
+  authorizationCode: string;
+}
+
+interface SearchableSelectOption {
+  value: string;
+  label: string;
+}
+
+const normalizeSearchText = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+function SearchablePopoverSelect({
+  value,
+  onValueChange,
+  options,
+  placeholder,
+  searchPlaceholder = "Pesquisar...",
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  options: SearchableSelectOption[];
+  placeholder: string;
+  searchPlaceholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const normalizedQuery = normalizeSearchText(query);
+  const filtered = normalizedQuery
+    ? options.filter((option) =>
+        normalizeSearchText(`${option.label} ${option.value}`).includes(
+          normalizedQuery
+        )
+      )
+    : options;
+
+  const selected = options.find((option) => option.value === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className="w-full justify-between font-normal">
+          <span className="truncate text-left">
+            {selected?.label || placeholder}
+          </span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[360px] max-w-[95vw] p-2" align="start">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={searchPlaceholder}
+        />
+        <div className="mt-2 max-h-56 overflow-y-auto rounded-md border">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-muted-foreground">
+              Nenhuma opcao encontrada
+            </div>
+          ) : (
+            filtered.map((option, index) => (
+              <button
+                key={`${option.value}-${index}`}
+                type="button"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  onValueChange(option.value);
+                  setOpen(false);
+                  setQuery("");
+                }}
+              >
+                {option.label}
+              </button>
+            ))
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export default function FiscalDocuments() {
   const [activeTab, setActiveTab] = useState("nfe");
   const queryClient = useQueryClient();
-  const [companyName] = useState("Sua Empresa LTDA");
-  const [companyCnpj] = useState("00.000.000/0000-00");
-  const [companyIe] = useState("000.000.000.000");
+  const [recipientNameSearch, setRecipientNameSearch] = useState("");
+  const [showRecipientSuggestions, setShowRecipientSuggestions] = useState(false);
+  const [selectedRecipient, setSelectedRecipient] = useState<RecipientLookupOption | null>(null);
+  const fallbackCompanyName = "Sua Empresa LTDA";
+  const fallbackCompanyCnpj = "00.000.000/0000-00";
+  const fallbackCompanyIe = "000.000.000.000";
   const [companyIm] = useState("00000000");
   const [companyRegime] = useState("Simples Nacional");
   const [productSearch, setProductSearch] = useState("");
@@ -216,47 +337,125 @@ export default function FiscalDocuments() {
     inutilizeEnd: "",
     inutilizeReason: "",
   });
+  const now = new Date();
+  const currentDate = now.toISOString().slice(0, 10);
+  const currentTime = now.toTimeString().slice(0, 5);
+  const [nfeWorkspaceTab, setNfeWorkspaceTab] = useState("identificacao");
+  const [selectedNfeItemIndex, setSelectedNfeItemIndex] = useState(0);
+  const [productSearchRowIndex, setProductSearchRowIndex] = useState<number | null>(0);
+  const [nfeIdentification, setNfeIdentification] = useState({
+    naturezaOperacao: "Venda de mercadoria",
+    tipoOperacao: "saida",
+    finalidade: "normal",
+    consumidorFinal: "sim",
+    presenca: "presencial",
+    dataEmissao: currentDate,
+    horaEmissao: currentTime,
+    dataSaida: currentDate,
+    horaSaida: currentTime,
+  });
+  const [nfeDestExtra, setNfeDestExtra] = useState({
+    ie: "",
+    ieIndicator: "contribuinte",
+    email: "",
+    address: "",
+  });
+  const [nfeTransport, setNfeTransport] = useState({
+    freightMode: "0",
+    carrierName: "",
+    carrierDocument: "",
+    plate: "",
+    plateUf: "",
+    rntc: "",
+    grossWeight: "",
+    netWeight: "",
+  });
+  const [nfePayments, setNfePayments] = useState<NfePaymentDraft[]>([
+    {
+      id: "1",
+      form: "01",
+      term: "avista",
+      value: "0.00",
+      dueDate: currentDate,
+      cardBrand: "",
+      acquirerCnpj: "",
+      authorizationCode: "",
+    },
+  ]);
+  const [nfeAdditionalFields, setNfeAdditionalFields] = useState({
+    fisco: "",
+    contribuinte: "",
+  });
+  const [productPickerDialogOpen, setProductPickerDialogOpen] = useState(false);
+  const [nfeResponsibleTech, setNfeResponsibleTech] = useState({
+    cnpj: "",
+    name: "",
+    email: "",
+    phone: "",
+  });
+  const autoTaxRecalcTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const nfeTipoOperacaoOptions: SearchableSelectOption[] = [
+    { value: "entrada", label: "Entrada" },
+    { value: "saida", label: "Saida" },
+  ];
+  const nfeFinalidadeOptions: SearchableSelectOption[] = [
+    { value: "normal", label: "Normal" },
+    { value: "complementar", label: "Complementar" },
+    { value: "ajuste", label: "Ajuste" },
+    { value: "devolucao", label: "Devolucao" },
+  ];
+  const nfeConsumidorFinalOptions: SearchableSelectOption[] = [
+    { value: "sim", label: "Sim" },
+    { value: "nao", label: "Nao" },
+  ];
+  const nfePresencaOptions: SearchableSelectOption[] = [
+    { value: "presencial", label: "Operacao presencial" },
+    { value: "internet", label: "Internet" },
+    { value: "telefone", label: "Telefone" },
+    { value: "nao_se_aplica", label: "Nao se aplica" },
+  ];
+  const nfePaymentFormOptions: SearchableSelectOption[] = [
+    { value: "03", label: "Credito" },
+    { value: "04", label: "Debito" },
+    { value: "01", label: "Dinheiro" },
+    { value: "17", label: "Pix" },
+  ];
+  const nfePaymentTermOptions: SearchableSelectOption[] = [
+    { value: "avista", label: "A vista" },
+    { value: "30", label: "30 dias" },
+    { value: "60_90", label: "60/90 dias" },
+  ];
+  const nfeFreightModeOptions: SearchableSelectOption[] = [
+    { value: "0", label: "0 - Emitente" },
+    { value: "1", label: "1 - Destinatario" },
+    { value: "9", label: "9 - Sem frete" },
+  ];
+  const { data: settings } = useQuery<AppSettings | null>({
+    queryKey: ["/api/settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings");
+      if (!res.ok) return null;
+      return res.json();
+    },
+  });
+  const companyName = String(settings?.razaoSocial || fallbackCompanyName);
+  const companyCnpj = String(settings?.cnpj || fallbackCompanyCnpj);
+  const companyIe = String(settings?.ie || fallbackCompanyIe);
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    customerId: string;
+    customerCPFCNPJ: string;
+    cfopCode: string;
+    scope: "interna" | "interestadual" | "exterior";
+    items: FormItem[];
+  }>({
     customerId: "",
     customerCPFCNPJ: "",
     cfopCode: "",
     scope: "interna" as "interna" | "interestadual" | "exterior",
-    items: [
-      {
-        productId: 0,
-        productName: "",
-        description: "",
-        quantity: "1",
-        unitPrice: "0",
-        ncm: "",
-        csosn: "101",
-        cstIcms: "00",
-        cstIpi: "00",
-        cstPisCofins: "00",
-        cfop: "",
-        origin: "nacional",
-        serviceCode: "",
-        cest: "",
-        discountValue: "0",
-        bcIcmsValue: "0",
-        icmsAliquot: "18",
-        icmsReduction: "0",
-        ipiAliquot: "0",
-        pisAliquot: "0",
-        cofinsAliquot: "0",
-        issAliquot: "0",
-        irrfAliquot: "0",
-        icmsValue: "0",
-        ipiValue: "0",
-        pisValue: "0",
-        cofinsValue: "0",
-        issValue: "0",
-        irrfValue: "0",
-        icmsStValue: "0",
-        totalTaxes: "0",
-      } as FormItem,
-    ],
+    items: [],
   });
 
   const [nfseIssueDate, setNfseIssueDate] = useState(() =>
@@ -295,6 +494,94 @@ export default function FiscalDocuments() {
   };
 
   const round2 = (value: number) => Number(value.toFixed(2));
+  const addDaysToDateString = (baseDate: string, days: number) => {
+    const safeBase = /^\d{4}-\d{2}-\d{2}$/.test(baseDate) ? baseDate : currentDate;
+    const [year, month, day] = safeBase.split("-").map(Number);
+    const date = new Date(year, (month || 1) - 1, day || 1);
+    date.setDate(date.getDate() + days);
+    return date.toISOString().slice(0, 10);
+  };
+
+  const buildAutoHeaderTotals = (
+    items: FormItem[],
+    currentHeader: HeaderTaxTotals,
+    explicitTaxTotals?: Partial<{
+      icmsTotal: number;
+      ipiTotal: number;
+      pisTotal: number;
+      cofinsTotal: number;
+      issTotal: number;
+      irrfTotal: number;
+    }>
+  ): HeaderTaxTotals => {
+    const productsTotal = round2(
+      items.reduce(
+        (acc, item) => acc + toAmount(item.quantity) * toAmount(item.unitPrice),
+        0
+      )
+    );
+    const discountTotal = round2(
+      items.reduce((acc, item) => acc + toAmount(item.discountValue), 0)
+    );
+    const bcIcmsTotal = round2(
+      items.reduce((acc, item) => acc + toAmount(item.bcIcmsValue), 0)
+    );
+    const icmsStTotal = round2(
+      items.reduce((acc, item) => acc + toAmount(item.icmsStValue), 0)
+    );
+    const icmsTotal = round2(
+      explicitTaxTotals?.icmsTotal ??
+        items.reduce((acc, item) => acc + toAmount(item.icmsValue), 0)
+    );
+    const ipiTotal = round2(
+      explicitTaxTotals?.ipiTotal ??
+        items.reduce((acc, item) => acc + toAmount(item.ipiValue), 0)
+    );
+    const pisTotal = round2(
+      explicitTaxTotals?.pisTotal ??
+        items.reduce((acc, item) => acc + toAmount(item.pisValue), 0)
+    );
+    const cofinsTotal = round2(
+      explicitTaxTotals?.cofinsTotal ??
+        items.reduce((acc, item) => acc + toAmount(item.cofinsValue), 0)
+    );
+    const issTotal = round2(
+      explicitTaxTotals?.issTotal ??
+        items.reduce((acc, item) => acc + toAmount(item.issValue), 0)
+    );
+    const irrfTotal = round2(
+      explicitTaxTotals?.irrfTotal ??
+        items.reduce((acc, item) => acc + toAmount(item.irrfValue), 0)
+    );
+
+    const noteTotal = round2(
+      productsTotal -
+        discountTotal +
+        toAmount(currentHeader.otherExpensesTotal) +
+        icmsTotal +
+        icmsStTotal +
+        ipiTotal +
+        pisTotal +
+        cofinsTotal +
+        issTotal +
+        irrfTotal
+    );
+
+    return {
+      ...currentHeader,
+      productsTotal: productsTotal.toFixed(2),
+      discountTotal: discountTotal.toFixed(2),
+      noteTotal: noteTotal.toFixed(2),
+      bcIcmsTotal: bcIcmsTotal.toFixed(2),
+      icmsTotal: icmsTotal.toFixed(2),
+      icmsStTotal: icmsStTotal.toFixed(2),
+      ipiTotal: ipiTotal.toFixed(2),
+      pisTotal: pisTotal.toFixed(2),
+      cofinsTotal: cofinsTotal.toFixed(2),
+      issTotal: issTotal.toFixed(2),
+      irrfTotal: irrfTotal.toFixed(2),
+    };
+  };
 
   // Fetch CFOP codes
   const { data: cfopCodes = [] } = useQuery<CfopCode[]>({
@@ -433,59 +720,16 @@ export default function FiscalDocuments() {
           };
         }),
       }));
-      setHeaderTaxes((prev) => {
-        const previousHeaderTotal =
-          toAmount(prev.productsTotal) +
-          toAmount(prev.discountTotal) +
-          toAmount(prev.otherExpensesTotal) +
-          toAmount(prev.noteTotal) +
-          toAmount(prev.bcIcmsTotal) +
-          toAmount(prev.icmsTotal) +
-          toAmount(prev.icmsStTotal) +
-          toAmount(prev.ipiTotal) +
-          toAmount(prev.pisTotal) +
-          toAmount(prev.cofinsTotal) +
-          toAmount(prev.issTotal) +
-          toAmount(prev.irrfTotal);
-        if (previousHeaderTotal > 0) return prev;
-        const productsTotal = round2(
-          formData.items.reduce(
-            (acc, item) => acc + toAmount(item.quantity) * toAmount(item.unitPrice),
-            0
-          )
-        );
-        const discountTotal = round2(
-          formData.items.reduce((acc, item) => acc + toAmount(item.discountValue), 0)
-        );
-        const icmsStTotal = round2(
-          formData.items.reduce((acc, item) => acc + toAmount(item.icmsStValue), 0)
-        );
-        const bcIcmsTotal = round2(
-          formData.items.reduce((acc, item) => acc + toAmount(item.bcIcmsValue), 0)
-        );
-        const taxGrand = round2(
-          toAmount(totals.totalTaxes) + icmsStTotal
-        );
-        return {
-          productsTotal: productsTotal.toFixed(2),
-          discountTotal: discountTotal.toFixed(2),
-          otherExpensesTotal: prev.otherExpensesTotal,
-          noteTotal: round2(
-            productsTotal -
-              discountTotal +
-              toAmount(prev.otherExpensesTotal) +
-              taxGrand
-          ).toFixed(2),
-          bcIcmsTotal: bcIcmsTotal.toFixed(2),
-          icmsTotal: round2(toAmount(totals.icmsTotal)).toFixed(2),
-          icmsStTotal: icmsStTotal.toFixed(2),
-          ipiTotal: round2(toAmount(totals.ipiTotal)).toFixed(2),
-          pisTotal: round2(toAmount(totals.pisTotal)).toFixed(2),
-          cofinsTotal: round2(toAmount(totals.cofinsTotal)).toFixed(2),
-          issTotal: round2(toAmount(totals.issTotal)).toFixed(2),
-          irrfTotal: round2(toAmount(totals.irrfTotal)).toFixed(2),
-        };
-      });
+      setHeaderTaxes((prev) =>
+        buildAutoHeaderTotals(formData.items, prev, {
+          icmsTotal: round2(toAmount(totals.icmsTotal)),
+          ipiTotal: round2(toAmount(totals.ipiTotal)),
+          pisTotal: round2(toAmount(totals.pisTotal)),
+          cofinsTotal: round2(toAmount(totals.cofinsTotal)),
+          issTotal: round2(toAmount(totals.issTotal)),
+          irrfTotal: round2(toAmount(totals.irrfTotal)),
+        })
+      );
       setIsNoteClosed(false);
       toast.success("Impostos calculados!");
       console.log("Cálculo de impostos:", data);
@@ -772,11 +1016,66 @@ export default function FiscalDocuments() {
     setIsNoteClosed(false);
   };
 
+  const handleAddProductFromPicker = (product: Product) => {
+    setFormData((prev) => {
+      const newIndex = prev.items.length;
+      const newItems = [
+        ...prev.items,
+        {
+          productId: product.id,
+          productName: product.name,
+          description: product.name,
+          quantity: "1",
+          unitPrice: product.price,
+          ncm: product.ncm || "",
+          csosn: product.csosnCode || "101",
+          cstIcms: product.cstIcms || "00",
+          cstIpi: product.cstIpi || "00",
+          cstPisCofins: product.cstPisCofins || "00",
+          cfop: prev.cfopCode || "",
+          origin: product.origin || "nacional",
+          serviceCode: product.serviceCode || "",
+          cest: product.cest || "",
+          discountValue: "0",
+          bcIcmsValue: "0",
+          icmsAliquot: "18",
+          icmsReduction: "0",
+          ipiAliquot: "0",
+          pisAliquot: "0",
+          cofinsAliquot: "0",
+          issAliquot: "0",
+          irrfAliquot: "0",
+          icmsValue: "0",
+          ipiValue: "0",
+          pisValue: "0",
+          cofinsValue: "0",
+          issValue: "0",
+          irrfValue: "0",
+          icmsStValue: "0",
+          totalTaxes: "0",
+        } as FormItem,
+      ];
+      setHeaderTaxes((headerPrev) => buildAutoHeaderTotals(newItems, headerPrev));
+      setSelectedNfeItemIndex(newIndex);
+      setEditingTaxItemIndex(newIndex);
+      queueAutoTaxRecalculation(newItems, prev.cfopCode);
+      return { ...prev, items: newItems };
+    });
+    setIsNoteClosed(false);
+    setNfeWorkspaceTab("produtos");
+    setProductPickerDialogOpen(false);
+    setProductSearch("");
+    toast.success(`Produto ${product.name} adicionado com tributacao do cadastro.`);
+  };
+
   const handleRemoveItem = (index: number) => {
+    const updatedItems = formData.items.filter((_, i) => i !== index);
     setFormData({
       ...formData,
-      items: formData.items.filter((_, i) => i !== index),
+      items: updatedItems,
     });
+    setHeaderTaxes((prev) => buildAutoHeaderTotals(updatedItems, prev));
+    queueAutoTaxRecalculation(updatedItems, formData.cfopCode);
     setIsNoteClosed(false);
   };
 
@@ -784,6 +1083,26 @@ export default function FiscalDocuments() {
     const newItems = [...formData.items];
     newItems[index] = { ...newItems[index], [field]: value };
     setFormData({ ...formData, items: newItems });
+    setHeaderTaxes((prev) => buildAutoHeaderTotals(newItems, prev));
+    const recalcFields = new Set([
+      "quantity",
+      "unitPrice",
+      "discountValue",
+      "bcIcmsValue",
+      "icmsAliquot",
+      "icmsReduction",
+      "ipiAliquot",
+      "pisAliquot",
+      "cofinsAliquot",
+      "issAliquot",
+      "irrfAliquot",
+      "cfop",
+      "cstIcms",
+      "cstIpi",
+    ]);
+    if (recalcFields.has(field)) {
+      queueAutoTaxRecalculation(newItems, formData.cfopCode);
+    }
     setIsNoteClosed(false);
   };
 
@@ -936,6 +1255,8 @@ export default function FiscalDocuments() {
     return {
       fieldMismatch,
       blockingMismatches,
+      expected,
+      header,
       canClose: blockingMismatches.length === 0,
     };
   }, [headerTaxes, totalsFromItems, taxTotalsFromItems, noteExpectedFromHeader]);
@@ -943,6 +1264,34 @@ export default function FiscalDocuments() {
   const headerFieldClass = (
     field: keyof typeof headerValidation.fieldMismatch
   ) => (headerValidation.fieldMismatch[field] ? "border-red-500 text-red-600" : "");
+
+  const headerFieldLabels: Record<keyof typeof headerValidation.fieldMismatch, string> = {
+    productsTotal: "V. total produtos",
+    discountTotal: "V. desconto total",
+    bcIcmsTotal: "BC ICMS total",
+    icmsTotal: "ICMS total",
+    icmsStTotal: "ICMS ST total",
+    ipiTotal: "IPI total",
+    pisTotal: "PIS total",
+    cofinsTotal: "COFINS total",
+    issTotal: "ISS total",
+    irrfTotal: "IRRF total",
+    noteTotal: "V. total nota",
+  };
+
+  const headerFieldMismatchReason = (
+    field: keyof typeof headerValidation.fieldMismatch
+  ) => {
+    if (!headerValidation.fieldMismatch[field]) return null;
+    const expectedValue =
+      field === "noteTotal"
+        ? noteExpectedFromHeader
+        : (headerValidation.expected[field as keyof typeof headerValidation.expected] as number);
+    const informedValue = headerValidation.header[field];
+    return `${headerFieldLabels[field]} divergente. Esperado: R$ ${expectedValue.toFixed(
+      2
+    )} | Informado: R$ ${informedValue.toFixed(2)}`;
+  };
 
   const headerTaxGrandTotal = useMemo(
     () =>
@@ -958,11 +1307,11 @@ export default function FiscalDocuments() {
     [headerTaxes]
   );
 
-  const buildTaxPayload = () => ({
-    items: formData.items.map((item) => ({
+  const buildTaxPayloadFromItems = (items: FormItem[], cfopCode: string) => ({
+    items: items.map((item) => ({
       productId: item.productId,
       description: item.description,
-      cfop: item.cfop || formData.cfopCode,
+      cfop: item.cfop || cfopCode,
       cstIcms: item.cstIcms,
       cstIpi: item.cstIpi,
       quantity: Math.max(0, Number(item.quantity || 0)),
@@ -980,7 +1329,25 @@ export default function FiscalDocuments() {
     })),
   });
 
-  const closeNFeNote = async () => {
+  const buildTaxPayload = () => buildTaxPayloadFromItems(formData.items, formData.cfopCode);
+
+  const queueAutoTaxRecalculation = (items: FormItem[], cfopCode: string) => {
+    if (autoTaxRecalcTimeoutRef.current) {
+      clearTimeout(autoTaxRecalcTimeoutRef.current);
+    }
+    const hasCalculableItems = items.some((item) => item.productId > 0);
+    if (!hasCalculableItems) return;
+    autoTaxRecalcTimeoutRef.current = setTimeout(() => {
+      calculateTaxesMutation.mutate(buildTaxPayloadFromItems(items, cfopCode));
+      autoTaxRecalcTimeoutRef.current = null;
+    }, 450);
+  };
+
+  const closeNFeNote = async (redirectToFiscalCentral = false) => {
+    if (isNoteClosed) {
+      toast.info("Nota ja fechada. Edite algum campo para recalcular e fechar novamente.");
+      return;
+    }
     if (!formData.customerId) {
       toast.error("Selecione um cliente para fechar a nota");
       return;
@@ -1087,11 +1454,54 @@ export default function FiscalDocuments() {
       }
 
       setIsNoteClosed(true);
+      let receivableCreated = false;
+      try {
+        const receivableAmount = expectedByHeader.noteTotal;
+        const dueDateBase =
+          nfePayments.find((payment) => Number(toAmount(payment.value)) > 0)?.dueDate ||
+          nfePayments[0]?.dueDate ||
+          nfeIdentification.dataEmissao ||
+          new Date().toISOString().slice(0, 10);
+        const dueDateIso = `${dueDateBase}T00:00:00.000Z`;
+        await fetch("/api/receivables", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            description: `NF-e - ${selectedCustomer?.name || "Cliente"} (${nfeIdentification.naturezaOperacao})`,
+            customerId: formData.customerId ? Number(formData.customerId) : null,
+            customerName: selectedCustomer?.name || null,
+            category: "Vendas",
+            amount: receivableAmount.toFixed(2),
+            dueDate: dueDateIso,
+            status: "Pendente",
+            notes: "Gerado automaticamente ao fechar NF-e. Se ja recebido, realizar baixa manual.",
+          }),
+        }).then(async (res) => {
+          if (!res.ok) {
+            const err = await res.text().catch(() => "");
+            throw new Error(err || "Falha ao criar conta a receber");
+          }
+        });
+        receivableCreated = true;
+      } catch (receivableError) {
+        toast.error(
+          receivableError instanceof Error
+            ? `Nota fechada, mas falhou ao criar conta a receber: ${receivableError.message}`
+            : "Nota fechada, mas falhou ao criar conta a receber"
+        );
+      }
       toast.success(
-        `Nota fechada com sucesso. Total de tributos: R$ ${round2(
-          toAmount(totals.totalTaxes) + totalsFromItems.icmsStTotal
-        ).toFixed(2)}`
+        receivableCreated
+          ? `Nota fechada e conta a receber criada com sucesso. Tributos: R$ ${round2(
+              toAmount(totals.totalTaxes) + totalsFromItems.icmsStTotal
+            ).toFixed(2)}`
+          : `Nota fechada com sucesso, mas sem conta a receber. Tributos: R$ ${round2(
+              toAmount(totals.totalTaxes) + totalsFromItems.icmsStTotal
+            ).toFixed(2)}`
       );
+      if (redirectToFiscalCentral) {
+        window.location.assign("/fiscal-central");
+      }
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -1196,6 +1606,58 @@ export default function FiscalDocuments() {
     calculateTaxesMutation.mutate(buildTaxPayload());
   };
 
+  const selectedNfeItem =
+    formData.items.length > 0
+      ? formData.items[Math.min(selectedNfeItemIndex, formData.items.length - 1)]
+      : null;
+
+  const addNfePayment = () => {
+    setNfePayments((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        form: "01",
+        term: "avista",
+        value: "0.00",
+        dueDate: currentDate,
+        cardBrand: "",
+        acquirerCnpj: "",
+        authorizationCode: "",
+      },
+    ]);
+  };
+
+  const updateNfePayment = (
+    id: string,
+    field: keyof NfePaymentDraft,
+    value: string
+  ) => {
+    setNfePayments((prev) =>
+      prev.map((payment) =>
+        payment.id === id
+          ? {
+              ...payment,
+              [field]: value,
+              ...(field === "term"
+                ? {
+                    dueDate:
+                      value === "30"
+                        ? addDaysToDateString(nfeIdentification.dataEmissao, 30)
+                        : value === "60_90"
+                          ? addDaysToDateString(nfeIdentification.dataEmissao, 60)
+                          : nfeIdentification.dataEmissao || currentDate,
+                  }
+                : {}),
+            }
+          : payment
+      )
+    );
+  };
+
+  const removeNfePayment = (id: string) => {
+    setNfePayments((prev) => (prev.length > 1 ? prev.filter((p) => p.id !== id) : prev));
+  };
+
   const nfceSales = useMemo(() => {
     return sales.map((sale) => ({
       ...sale,
@@ -1256,454 +1718,415 @@ export default function FiscalDocuments() {
           <TabsContent value="nfe" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Emitir NF-e</CardTitle>
+                <CardTitle>Modelo Visual - Emissao de NFe</CardTitle>
                 <CardDescription>
-                  Nota Fiscal Eletrônica com tributação completa
+                  Layout em abas para ERP (fluxo de preenchimento + validacao + emissao)
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <Alert>
-                  <Check className="h-4 w-4" />
-                  <AlertDescription>
-                    Tributação automática com CSOSN, CST ICMS, IPI, PIS/COFINS
-                    conforme produto
-                  </AlertDescription>
-                </Alert>
+              <CardContent className="max-h-[75vh] space-y-4 overflow-y-auto pr-2">
+                <Tabs value={nfeWorkspaceTab} onValueChange={setNfeWorkspaceTab}>
+                  <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-3 lg:grid-cols-9">
+                    <TabsTrigger value="identificacao">Identificacao</TabsTrigger>
+                    <TabsTrigger value="emitente">Emitente</TabsTrigger>
+                    <TabsTrigger value="destinatario">Destinatario</TabsTrigger>
+                    <TabsTrigger value="produtos">Produtos</TabsTrigger>
+                    <TabsTrigger value="totais">Totais</TabsTrigger>
+                    <TabsTrigger value="transporte">Transporte</TabsTrigger>
+                    <TabsTrigger value="pagamento">Pagamento</TabsTrigger>
+                    <TabsTrigger value="informacoes">Info</TabsTrigger>
+                    <TabsTrigger value="resptec">Resp. Tec.</TabsTrigger>
+                  </TabsList>
 
-                {/* Cliente Selection */}
-                <div>
-                  <Label>Cliente *</Label>
-                  <Popover
-                    open={customerSearchOpen}
-                    onOpenChange={setCustomerSearchOpen}
-                  >
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="w-full justify-start text-left"
-                        data-testid="button-select-customer"
-                      >
-                        {selectedCustomer
-                          ? selectedCustomer.name
-                          : "Selecione um cliente"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-full p-0" align="start">
-                      <div className="p-4 space-y-2">
-                        <Input
-                          placeholder="Buscar cliente..."
-                          value={customerSearch}
-                          onChange={(e) => setCustomerSearch(e.target.value)}
-                          data-testid="input-customer-search"
+                  <TabsContent value="identificacao" className="mt-4 space-y-4">
+                    <div>
+                      <Label>Natureza da Operacao</Label>
+                      <SearchablePopoverSelect
+                        value={nfeIdentification.naturezaOperacao}
+                        onValueChange={(value) =>
+                          setNfeIdentification((p) => ({ ...p, naturezaOperacao: value }))
+                        }
+                        placeholder="Selecione um CFOP"
+                        searchPlaceholder="Pesquisar CFOP..."
+                        options={
+                          cfopCodes.length > 0
+                            ? cfopCodes.map((cfop) => ({
+                                value: `${cfop.code} - ${cfop.description}`,
+                                label: `${cfop.code} - ${cfop.description}`,
+                              }))
+                            : [{ value: "sem_cfop", label: "Nenhum CFOP cadastrado" }]
+                        }
+                      />
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <div>
+                        <Label>Tipo Operacao</Label>
+                        <SearchablePopoverSelect
+                          value={nfeIdentification.tipoOperacao}
+                          onValueChange={(value) =>
+                            setNfeIdentification((p) => ({ ...p, tipoOperacao: value }))
+                          }
+                          options={nfeTipoOperacaoOptions}
+                          placeholder="Selecione"
                         />
-                        <div className="max-h-48 overflow-y-auto space-y-1">
-                          {customerResults.length > 0 ? (
-                            customerResults.map((customer) => (
-                              <button
-                                key={customer.id}
-                                onClick={() => handleSelectCustomer(customer)}
-                                className="w-full text-left px-3 py-2 hover:bg-accent rounded-md text-sm"
-                                data-testid={`option-customer-${customer.id}`}
-                              >
-                                <div className="font-medium">
-                                  {customer.name}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  {customer.cpfCnpj}
-                                </div>
-                              </button>
-                            ))
-                          ) : customerSearch.trim() ? (
-                            <div className="text-sm text-muted-foreground p-2">
-                              Nenhum cliente encontrado
-                            </div>
-                          ) : null}
-                        </div>
                       </div>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>CFOP *</Label>
-                    <Popover open={cfopOpen} onOpenChange={setCfopOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          className="w-full justify-between font-normal"
-                          data-testid="select-cfop"
-                        >
-                          {selectedCfopOption
-                            ? `${selectedCfopOption.code} - ${selectedCfopOption.description}`
-                            : "Selecione um CFOP"}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-[560px] max-w-[95vw] p-2" align="start">
-                        <Input
-                          value={cfopSearch}
-                          onChange={(e) => setCfopSearch(e.target.value)}
-                          placeholder="Pesquisar CFOP por código ou descrição"
-                          data-testid="input-search-cfop"
+                      <div>
+                        <Label>Finalidade</Label>
+                        <SearchablePopoverSelect
+                          value={nfeIdentification.finalidade}
+                          onValueChange={(value) =>
+                            setNfeIdentification((p) => ({ ...p, finalidade: value }))
+                          }
+                          options={nfeFinalidadeOptions}
+                          placeholder="Selecione"
                         />
-                        <div className="mt-2 max-h-72 overflow-y-auto rounded-md border">
-                          {filteredCfopSelectOptions.length === 0 ? (
-                            <div className="px-3 py-2 text-sm text-muted-foreground">
-                              Nenhum CFOP encontrado
-                            </div>
-                          ) : (
-                            filteredCfopSelectOptions.map((cfop) => (
-                              <button
-                                key={cfop.id}
+                      </div>
+                      <div>
+                        <Label>Consumidor Final</Label>
+                        <SearchablePopoverSelect
+                          value={nfeIdentification.consumidorFinal}
+                          onValueChange={(value) =>
+                            setNfeIdentification((p) => ({ ...p, consumidorFinal: value }))
+                          }
+                          options={nfeConsumidorFinalOptions}
+                          placeholder="Selecione"
+                        />
+                      </div>
+                      <div>
+                        <Label>Presenca</Label>
+                        <SearchablePopoverSelect
+                          value={nfeIdentification.presenca}
+                          onValueChange={(value) =>
+                            setNfeIdentification((p) => ({ ...p, presenca: value }))
+                          }
+                          options={nfePresencaOptions}
+                          placeholder="Selecione"
+                        />
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="emitente" className="mt-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div><Label>CNPJ (empresa logada)</Label><Input value={companyCnpj} disabled /></div>
+                      <div><Label>Razao Social (empresa logada)</Label><Input value={companyName} disabled /></div>
+                      <div><Label>IE</Label><Input value={companyIe} disabled /></div>
+                      <div><Label>Regime</Label><Input value={companyRegime} disabled /></div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="destinatario" className="mt-4 space-y-4">
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="md:col-span-2"><Label>CPF/CNPJ</Label><Input value={formData.customerCPFCNPJ} onChange={(e) => setFormData((p) => ({ ...p, customerCPFCNPJ: e.target.value }))} /></div>
+                      <div className="flex items-end"><Button className="w-full" variant="outline" onClick={() => setCustomerSearchOpen(true)}>Buscar Cliente</Button></div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div><Label>Nome / Razao Social</Label><Input value={selectedCustomer?.name || ""} readOnly /></div>
+                      <div><Label>Email</Label><Input value={nfeDestExtra.email} onChange={(e) => setNfeDestExtra((p) => ({ ...p, email: e.target.value }))} /></div>
+                      <div><Label>IE</Label><Input value={nfeDestExtra.ie} onChange={(e) => setNfeDestExtra((p) => ({ ...p, ie: e.target.value }))} /></div>
+                      <div><Label>Indicador IE</Label><Input value={nfeDestExtra.ieIndicator} onChange={(e) => setNfeDestExtra((p) => ({ ...p, ieIndicator: e.target.value }))} /></div>
+                      <div className="md:col-span-2"><Label>Endereco Completo</Label><Input value={nfeDestExtra.address} onChange={(e) => setNfeDestExtra((p) => ({ ...p, address: e.target.value }))} /></div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="produtos" className="mt-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">Produtos / Itens (Aba principal)</p>
+                        <p className="text-xs text-muted-foreground">Clique no item para abrir painel lateral e duplo clique para tributacao avancada.</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setProductPickerDialogOpen(true);
+                          setProductSearch("");
+                        }}
+                      >
+                        <Plus className="mr-1 h-4 w-4" />Adicionar Produto
+                      </Button>
+                    </div>
+                    <div className="grid gap-4 lg:grid-cols-[1.4fr_0.9fr]">
+                      <div className="rounded-md border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Codigo</TableHead>
+                              <TableHead>Descricao</TableHead>
+                              <TableHead>NCM</TableHead>
+                              <TableHead>CFOP</TableHead>
+                              <TableHead>Qtd</TableHead>
+                              <TableHead>V.Unit</TableHead>
+                              <TableHead>Total</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {formData.items.map((item, index) => (
+                              <TableRow key={index} onClick={() => setSelectedNfeItemIndex(index)} onDoubleClick={() => setEditingTaxItemIndex(index)} className={index === selectedNfeItemIndex ? "bg-muted/40" : ""}>
+                                <TableCell>{item.productId || "-"}</TableCell>
+                                <TableCell>{item.productName || "Produto nao selecionado"}</TableCell>
+                                <TableCell>{item.ncm || "-"}</TableCell>
+                                <TableCell>{item.cfop || formData.cfopCode || "-"}</TableCell>
+                                <TableCell>{item.quantity}</TableCell>
+                                <TableCell>R$ {toAmount(item.unitPrice).toFixed(2)}</TableCell>
+                                <TableCell>R$ {(toAmount(item.quantity) * toAmount(item.unitPrice)).toFixed(2)}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                      <Card className="h-fit">
+                        <CardHeader>
+                          <CardTitle className="text-base">Painel Lateral</CardTitle>
+                          <CardDescription>Dados do item e tributacao aplicavel</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-2 text-sm">
+                          {selectedNfeItem ? (
+                            <>
+                              <div><span className="font-medium">Descricao:</span> {selectedNfeItem.description || selectedNfeItem.productName || "-"}</div>
+                              <div><span className="font-medium">NCM:</span> {selectedNfeItem.ncm || "-"}</div>
+                              <div className="grid gap-3 md:grid-cols-2">
+                                <div>
+                                  <Label>Quantidade</Label>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    value={selectedNfeItem.quantity}
+                                    onChange={(e) =>
+                                      handleItemChange(selectedNfeItemIndex, "quantity", e.target.value)
+                                    }
+                                  />
+                                </div>
+                                <div>
+                                  <Label>Valor unitario</Label>
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={selectedNfeItem.unitPrice}
+                                    onChange={(e) =>
+                                      handleItemChange(selectedNfeItemIndex, "unitPrice", e.target.value)
+                                    }
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <Label>CFOP</Label>
+                                <SearchablePopoverSelect
+                                  value={selectedNfeItem.cfop || formData.cfopCode || ""}
+                                  onValueChange={(value) =>
+                                    handleItemChange(selectedNfeItemIndex, "cfop", value)
+                                  }
+                                  placeholder="Selecione um CFOP"
+                                  searchPlaceholder="Pesquisar CFOP..."
+                                  options={cfopSelectOptions.map((cfop) => ({
+                                    value: cfop.code,
+                                    label: `${cfop.code} - ${cfop.description}`,
+                                  }))}
+                                />
+                              </div>
+                              <div className="rounded-md border p-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-muted-foreground">Total do item</span>
+                                  <span className="font-semibold">
+                                    R$ {(toAmount(selectedNfeItem.quantity) * toAmount(selectedNfeItem.unitPrice)).toFixed(2)}
+                                  </span>
+                                </div>
+                              </div>
+                              <div><span className="font-medium">ICMS:</span> CST {selectedNfeItem.cstIcms} / CSOSN {selectedNfeItem.csosn}</div>
+                              <div><span className="font-medium">IPI:</span> CST {selectedNfeItem.cstIpi}</div>
+                              <div><span className="font-medium">PIS/COFINS:</span> CST {selectedNfeItem.cstPisCofins}</div>
+                              <Button type="button" variant="secondary" className="w-full" onClick={() => setEditingTaxItemIndex(selectedNfeItemIndex)}>
+                                Abrir tributacao avancada
+                              </Button>
+                              <Button
                                 type="button"
-                                className="block w-full px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                                variant="destructive"
+                                className="w-full"
                                 onClick={() => {
-                                  const code = cfop.code || "";
-                                  setFormData((prev) => ({
-                                    ...prev,
-                                    cfopCode: code,
-                                    items: prev.items.map((item) => ({
-                                      ...item,
-                                      cfop: code,
-                                    })),
-                                  }));
-                                  setCfopOpen(false);
+                                  handleRemoveItem(selectedNfeItemIndex);
+                                  setSelectedNfeItemIndex((prev) => Math.max(0, prev - 1));
                                 }}
                               >
-                                {cfop.code} - {cfop.description}
-                              </button>
-                            ))
+                                Excluir produto selecionado
+                              </Button>
+                            </>
+                          ) : (
+                            <p className="text-muted-foreground">Nenhum item selecionado.</p>
                           )}
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                  <div>
-                    <Label>Escopo</Label>
-                    <Select
-                      value={formData.scope}
-                      onValueChange={(val) =>
-                        setFormData({
-                          ...formData,
-                          scope: val as
-                            | "interna"
-                            | "interestadual"
-                            | "exterior",
-                        })
-                      }
-                    >
-                      <SelectTrigger data-testid="select-scope">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="interna">Interna</SelectItem>
-                        <SelectItem value="interestadual">
-                          Interestadual
-                        </SelectItem>
-                        <SelectItem value="exterior">Exterior</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </TabsContent>
 
-                {/* Items */}
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <Label className="text-base font-semibold">
-                      Itens da NF-e *
-                    </Label>
-                    <Button
-                      onClick={handleAddItem}
-                      size="sm"
-                      variant="outline"
-                      data-testid="button-add-item"
-                    >
-                      <Plus className="h-4 w-4 mr-1" /> Adicionar
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Dê duplo clique no item para editar tributação de item e
-                    cabeçalho.
-                  </p>
+                  <TabsContent value="totais" className="mt-4">
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                      <div><Label>Base ICMS</Label><Input value={`R$ ${toAmount(headerTaxes.bcIcmsTotal).toFixed(2)}`} disabled /></div>
+                      <div><Label>Valor ICMS</Label><Input value={`R$ ${toAmount(headerTaxes.icmsTotal).toFixed(2)}`} disabled /></div>
+                      <div><Label>Valor Produtos</Label><Input value={`R$ ${toAmount(headerTaxes.productsTotal).toFixed(2)}`} disabled /></div>
+                      <div><Label>Desconto</Label><Input value={`R$ ${toAmount(headerTaxes.discountTotal).toFixed(2)}`} disabled /></div>
+                      <div><Label>Outras despesas</Label><Input value={headerTaxes.otherExpensesTotal} onChange={(e) => setHeaderTaxes((p) => ({ ...p, otherExpensesTotal: e.target.value }))} /></div>
+                      <div><Label>VALOR TOTAL NFe</Label><Input value={`R$ ${toAmount(headerTaxes.noteTotal).toFixed(2)}`} disabled /></div>
+                    </div>
+                  </TabsContent>
 
-                  {formData.items.map((item, index) => (
-                    <Card
-                      key={index}
-                      className="p-4 space-y-3 cursor-pointer"
-                      onDoubleClick={() => setEditingTaxItemIndex(index)}
-                    >
-                      <div>
-                        <Label className="text-sm">Produto *</Label>
-                        <Popover
-                          open={productSearchOpen && index === 0}
-                          onOpenChange={setProductSearchOpen}
-                        >
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className="w-full justify-start text-left"
-                              data-testid={`button-select-product-${index}`}
-                            >
-                              {item.productName || "Buscar produto..."}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-full p-0" align="start">
-                            <div className="p-4 space-y-2">
-                              <Input
-                                placeholder="Buscar por nome, EAN..."
-                                value={productSearch}
-                                onChange={(e) =>
-                                  setProductSearch(e.target.value)
-                                }
-                                data-testid={`input-product-search-${index}`}
-                              />
-                              <div className="max-h-48 overflow-y-auto space-y-1">
-                                {productResults.length > 0 ? (
-                                  productResults.map((product) => (
-                                    <button
-                                      key={product.id}
-                                      onClick={() =>
-                                        handleSelectProduct(product, index)
-                                      }
-                                      className="w-full text-left px-3 py-2 hover:bg-accent rounded-md text-sm"
-                                      data-testid={`option-product-${product.id}`}
-                                    >
-                                      <div className="font-medium">
-                                        {product.name}
-                                      </div>
-                                      <div className="text-xs text-muted-foreground">
-                                        R${" "}
-                                        {parseFloat(
-                                          String(product.price)
-                                        ).toFixed(2)}{" "}
-                                        • NCM: {product.ncm || "N/A"}
-                                      </div>
-                                      <div className="text-xs text-muted-foreground">
-                                        CSOSN: {product.csosnCode || "N/A"} •
-                                        Origem: {product.origin || "N/A"}
-                                      </div>
-                                    </button>
-                                  ))
-                                ) : productSearch.trim() ? (
-                                  <div className="text-sm text-muted-foreground p-2">
-                                    Nenhum produto encontrado
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-                      </div>
+                  <TabsContent value="transporte" className="mt-4"><div className="grid gap-4 md:grid-cols-3"><div><Label>Modalidade Frete</Label><SearchablePopoverSelect value={nfeTransport.freightMode} onValueChange={(value) => setNfeTransport((p) => ({ ...p, freightMode: value }))} options={nfeFreightModeOptions} placeholder="Selecione" searchPlaceholder="Pesquisar modalidade..." /></div><div className="md:col-span-2"><Label>Transportadora</Label><Input value={nfeTransport.carrierName} onChange={(e) => setNfeTransport((p) => ({ ...p, carrierName: e.target.value }))} /></div><div><Label>CNPJ/CPF</Label><Input value={nfeTransport.carrierDocument} onChange={(e) => setNfeTransport((p) => ({ ...p, carrierDocument: e.target.value }))} /></div><div><Label>Placa / UF</Label><Input value={`${nfeTransport.plate}${nfeTransport.plateUf ? ` - ${nfeTransport.plateUf}` : ""}`} readOnly /></div><div><Label>Pesos</Label><Input value={`${nfeTransport.grossWeight || "0"} / ${nfeTransport.netWeight || "0"}`} readOnly /></div></div></TabsContent>
 
-                      {/* Informações do Produto */}
-                      {item.productId > 0 && (
-                        <div className="bg-blue-50 p-3 rounded-md space-y-2">
-                          <div className="grid grid-cols-3 gap-2 text-xs">
-                            <div>
-                              <span className="font-semibold">NCM:</span>{" "}
-                              {item.ncm || "N/A"}
-                            </div>
-                            <div>
-                              <span className="font-semibold">CSOSN:</span>{" "}
-                              {item.csosn}
-                            </div>
-                            <div>
-                              <span className="font-semibold">Origem:</span>{" "}
-                              {item.origin}
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2 text-xs">
-                            <div>
-                              <span className="font-semibold">CST ICMS:</span>{" "}
-                              {item.cstIcms}
-                            </div>
-                            <div>
-                              <span className="font-semibold">CST IPI:</span>{" "}
-                              {item.cstIpi}
-                            </div>
-                            <div>
-                              <span className="font-semibold">
-                                CST PIS/COFINS:
-                              </span>{" "}
-                              {item.cstPisCofins}
-                            </div>
-                          </div>
-                          {item.cest && (
-                            <div className="text-xs">
-                              <span className="font-semibold">CEST:</span>{" "}
-                              {item.cest}
-                            </div>
-                          )}
-                          {item.serviceCode && (
-                            <div className="text-xs">
-                              <span className="font-semibold">
-                                Código de Serviço:
-                              </span>{" "}
-                              {item.serviceCode}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-4 gap-2">
+                  <TabsContent value="pagamento" className="mt-4 space-y-4">
+                    <div className="flex items-center justify-between"><p className="text-sm font-medium">Pagamentos</p><Button size="sm" variant="outline" type="button" onClick={addNfePayment}><Plus className="mr-1 h-4 w-4" />Adicionar</Button></div>
+                    {nfePayments.map((payment) => (
+                      <div key={payment.id} className="grid gap-4 rounded-md border p-3 md:grid-cols-4">
                         <div>
-                          <Label className="text-sm">Qtd</Label>
-                          <Input
-                            placeholder="1"
-                            type="number"
-                            value={item.quantity}
-                            onChange={(e) =>
-                              handleItemChange(
-                                index,
-                                "quantity",
-                                e.target.value
-                              )
-                            }
-                            data-testid={`input-quantity-${index}`}
+                          <Label>Forma</Label>
+                          <SearchablePopoverSelect
+                            value={payment.form}
+                            onValueChange={(value) => updateNfePayment(payment.id, "form", value)}
+                            options={nfePaymentFormOptions}
+                            placeholder="Selecione"
+                            searchPlaceholder="Pesquisar forma..."
                           />
                         </div>
                         <div>
-                          <Label className="text-sm">Preço Unit.</Label>
-                          <Input
-                            placeholder="0.00"
-                            type="number"
-                            step="0.01"
-                            value={item.unitPrice}
-                            onChange={(e) =>
-                              handleItemChange(
-                                index,
-                                "unitPrice",
-                                e.target.value
-                              )
-                            }
-                            data-testid={`input-price-${index}`}
+                          <Label>Condicao</Label>
+                          <SearchablePopoverSelect
+                            value={payment.term}
+                            onValueChange={(value) => updateNfePayment(payment.id, "term", value)}
+                            options={nfePaymentTermOptions}
+                            placeholder="Selecione"
+                            searchPlaceholder="Pesquisar condicao..."
                           />
                         </div>
                         <div>
-                          <Label className="text-sm">CSOSN</Label>
-                          <Input
-                            placeholder="101"
-                            value={item.csosn}
-                            data-testid={`input-csosn-${index}`}
-                            disabled
-                            className="bg-gray-100"
-                          />
+                          <Label>Valor</Label>
+                          <Input value={payment.value} onChange={(e) => updateNfePayment(payment.id, "value", e.target.value)} />
                         </div>
                         <div>
-                          <Label className="text-sm">&nbsp;</Label>
-                          <Button
-                            onClick={() => handleRemoveItem(index)}
-                            variant="destructive"
-                            size="sm"
-                            className="w-full"
-                            data-testid={`button-remove-item-${index}`}
-                          >
-                            Remover
-                          </Button>
+                          <Label>Vencimento</Label>
+                          <Input type="date" value={payment.dueDate} onChange={(e) => updateNfePayment(payment.id, "dueDate", e.target.value)} />
+                        </div>
+                        <div className="md:col-span-4 flex justify-end">
+                          <Button type="button" variant="ghost" onClick={() => removeNfePayment(payment.id)}>Remover</Button>
                         </div>
                       </div>
-                    </Card>
-                  ))}
-                </div>
+                    ))}
+                  </TabsContent>
 
-                {/* Total */}
-                <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="text-right md:text-left">
-                      <div className="text-sm text-muted-foreground">
-                        Total de produtos
-                      </div>
-                      <div
-                        className="text-2xl font-bold"
-                        data-testid="text-total"
+                  <TabsContent value="informacoes" className="mt-4 space-y-4">
+                    <div><Label>Informacoes Complementares ao Fisco</Label><Textarea rows={4} value={nfeAdditionalFields.fisco} onChange={(e) => setNfeAdditionalFields((p) => ({ ...p, fisco: e.target.value }))} /></div>
+                    <div><Label>Informacoes ao Contribuinte</Label><Textarea rows={4} value={nfeAdditionalFields.contribuinte} onChange={(e) => setNfeAdditionalFields((p) => ({ ...p, contribuinte: e.target.value }))} /></div>
+                  </TabsContent>
+
+                  <TabsContent value="resptec" className="mt-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div><Label>CNPJ</Label><Input value={nfeResponsibleTech.cnpj} onChange={(e) => setNfeResponsibleTech((p) => ({ ...p, cnpj: e.target.value }))} /></div>
+                      <div><Label>Nome</Label><Input value={nfeResponsibleTech.name} onChange={(e) => setNfeResponsibleTech((p) => ({ ...p, name: e.target.value }))} /></div>
+                      <div><Label>Email</Label><Input value={nfeResponsibleTech.email} onChange={(e) => setNfeResponsibleTech((p) => ({ ...p, email: e.target.value }))} /></div>
+                      <div><Label>Telefone</Label><Input value={nfeResponsibleTech.phone} onChange={(e) => setNfeResponsibleTech((p) => ({ ...p, phone: e.target.value }))} /></div>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+
+                <div className="rounded-lg border bg-muted/20 p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Fluxo ideal: Identificacao, Destinatario, Produtos, Totais, Pagamento, Emitir</p>
+                      <p className="text-sm font-semibold">Valor Total: R$ {toAmount(headerTaxes.noteTotal).toFixed(2)}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          toast.info("Rascunho salvo. Redirecionando para Central Fiscal...");
+                          window.location.assign("/fiscal-central");
+                        }}
                       >
-                        R$ {totalValue.toFixed(2)}
-                      </div>
-                    </div>
-                    <div className="text-right md:text-left">
-                      <div className="text-sm text-muted-foreground">
-                        Total de tributos (itens)
-                      </div>
-                      <div className="text-2xl font-bold">
-                        R$ {taxTotalsFromItems.totalTaxes.toFixed(2)}
-                      </div>
-                    </div>
-                    <div className="text-right md:text-left">
-                      <div className="text-sm text-muted-foreground">
-                        Total de tributos (cabeçalho)
-                      </div>
-                      <div className="text-2xl font-bold">
-                        R$ {headerTaxGrandTotal.toFixed(2)}
-                      </div>
+                        Salvar Rascunho
+                      </Button>
+                      <Button type="button" onClick={handleValidateNFe}>Validar Nota</Button>
+                      <Button
+                        type="button"
+                        onClick={() => closeNFeNote(true)}
+                        disabled={!headerValidation.canClose}
+                      >
+                        Emitir NFe
+                      </Button>
                     </div>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Situação da nota:{" "}
-                    <span className={isNoteClosed ? "text-emerald-600" : "text-amber-600"}>
-                      {isNoteClosed ? "Fechada" : "Aberta"}
-                    </span>
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Cabeçalho: Produtos R$ {toAmount(headerTaxes.productsTotal).toFixed(2)} |
-                    Desconto R$ {toAmount(headerTaxes.discountTotal).toFixed(2)} |
-                    Outras despesas R$ {toAmount(headerTaxes.otherExpensesTotal).toFixed(2)} |
-                    Total Nota R$ {toAmount(headerTaxes.noteTotal).toFixed(2)}
-                  </p>
-                  {!headerValidation.canClose && (
-                    <p className="text-xs text-red-600">
-                      Existem divergências nos totais da capa da nota. Corrija os campos em vermelho.
-                    </p>
-                  )}
-                  {lastTaxCalculation?.totals?.baseValue !== undefined && (
-                    <p className="text-xs text-muted-foreground">
-                      Base de cálculo atual: R${" "}
-                      {round2(toAmount(lastTaxCalculation.totals.baseValue)).toFixed(2)}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex gap-2 pt-4">
-                  <Button
-                    onClick={handleValidateNFe}
-                    disabled={validateNFeMutation.isPending}
-                    data-testid="button-validate-nfe"
-                  >
-                    {validateNFeMutation.isPending && (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    )}
-                    Validar NF-e
-                  </Button>
-                  <Button
-                    onClick={handleCalculateTaxes}
-                    variant="secondary"
-                    disabled={calculateTaxesMutation.isPending}
-                    data-testid="button-calculate-taxes"
-                  >
-                    {calculateTaxesMutation.isPending && (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    )}
-                    Calcular Impostos
-                  </Button>
-                  <Button
-                    onClick={closeNFeNote}
-                    variant="default"
-                    disabled={calculateTaxesMutation.isPending || !headerValidation.canClose}
-                    data-testid="button-close-nfe"
-                  >
-                    Fechar nota
-                  </Button>
                 </div>
               </CardContent>
             </Card>
-
             <Dialog
-              open={editingTaxItemIndex !== null}
+              open={productPickerDialogOpen}
+              onOpenChange={(open) => {
+                setProductPickerDialogOpen(open);
+                if (!open) setProductSearch("");
+              }}
+            >
+              <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Adicionar Produto</DialogTitle>
+                  <DialogDescription>
+                    Pesquise e selecione um produto. Ele sera adicionado com a tributacao do cadastro.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <Input
+                    autoFocus
+                    placeholder="Buscar por nome, codigo, EAN..."
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                  />
+                  <div className="max-h-[50vh] overflow-y-auto rounded-md border">
+                    {productSearch.trim().length < 2 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        Digite pelo menos 2 caracteres para pesquisar.
+                      </div>
+                    ) : productResults.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        Nenhum produto encontrado.
+                      </div>
+                    ) : (
+                      productResults.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          className="block w-full border-b px-3 py-3 text-left last:border-b-0 hover:bg-accent"
+                          onClick={() => handleAddProductFromPicker(product)}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="font-medium">{product.name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                ID {product.id} | NCM {product.ncm || "N/A"} | CEST {product.cest || "N/A"}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                CSOSN {product.csosnCode || "101"} | CST ICMS {product.cstIcms || "00"} | Origem {product.origin || "nacional"}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="font-semibold">
+                                R$ {toAmount(product.price).toFixed(2)}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                Clique para adicionar
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={editingTaxItemIndex !== null}
               onOpenChange={(open) => {
                 if (!open) setEditingTaxItemIndex(null);
               }}
             >
-              <DialogContent className="max-w-3xl">
+              <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Tributação do Item e Cabeçalho</DialogTitle>
                   <DialogDescription>
@@ -1719,13 +2142,50 @@ export default function FiscalDocuments() {
                         {formData.items[editingTaxItemIndex].productName ||
                           "Item sem produto"}
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        Qtd: {formData.items[editingTaxItemIndex].quantity} |
-                        Unit: R${" "}
-                        {toAmount(
-                          formData.items[editingTaxItemIndex].unitPrice
-                        ).toFixed(2)}
-                      </p>
+                      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                        <div>
+                          <Label>Quantidade</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={formData.items[editingTaxItemIndex].quantity}
+                            onChange={(e) =>
+                              handleItemChange(
+                                editingTaxItemIndex,
+                                "quantity",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </div>
+                        <div>
+                          <Label>Valor unitario (R$)</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={formData.items[editingTaxItemIndex].unitPrice}
+                            onChange={(e) =>
+                              handleItemChange(
+                                editingTaxItemIndex,
+                                "unitPrice",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </div>
+                        <div className="flex items-end rounded-md border px-3 py-2 text-sm">
+                          <span className="text-muted-foreground mr-2">Total:</span>
+                          <span className="font-semibold">
+                            R${" "}
+                            {(
+                              toAmount(formData.items[editingTaxItemIndex].quantity) *
+                              toAmount(formData.items[editingTaxItemIndex].unitPrice)
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
 
                     <div className="rounded-md border p-3 space-y-3">
@@ -1733,15 +2193,17 @@ export default function FiscalDocuments() {
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div>
                         <Label>CFOP item</Label>
-                        <Input
-                          value={formData.items[editingTaxItemIndex].cfop}
-                          onChange={(e) =>
-                            handleItemChange(
-                              editingTaxItemIndex,
-                              "cfop",
-                              e.target.value
-                            )
+                        <SearchablePopoverSelect
+                          value={formData.items[editingTaxItemIndex].cfop || formData.cfopCode || ""}
+                          onValueChange={(value) =>
+                            handleItemChange(editingTaxItemIndex, "cfop", value)
                           }
+                          placeholder="Selecione um CFOP"
+                          searchPlaceholder="Pesquisar CFOP..."
+                          options={cfopSelectOptions.map((cfop) => ({
+                            value: cfop.code,
+                            label: `${cfop.code} - ${cfop.description}`,
+                          }))}
                         />
                       </div>
                       <div>
@@ -2257,6 +2719,18 @@ export default function FiscalDocuments() {
                           />
                         </div>
                       </div>
+                      {headerValidation.blockingMismatches.length > 0 && (
+                        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm">
+                          <p className="mb-2 font-medium text-red-700">
+                            Motivo dos campos em vermelho
+                          </p>
+                          <div className="space-y-1 text-red-700">
+                            {headerValidation.blockingMismatches.map((field) => (
+                              <p key={field}>• {headerFieldMismatchReason(field as keyof typeof headerValidation.fieldMismatch)}</p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <Button
                         type="button"
                         variant="secondary"
@@ -2274,241 +2748,6 @@ export default function FiscalDocuments() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Operacoes SEFAZ (NF-e)</CardTitle>
-                <CardDescription>
-                  Envio, cancelamento, carta de correcao e inutilizacao
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <Alert>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    Necessario certificado digital configurado para a empresa.
-                  </AlertDescription>
-                </Alert>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>UF</Label>
-                    <Input
-                      value={nfeOps.uf}
-                      onChange={(e) => updateNfeOps("uf", e.target.value)}
-                      data-testid="input-nfe-uf"
-                    />
-                  </div>
-                  <div>
-                    <Label>Ambiente</Label>
-                    <Input
-                      value="Configuracao da empresa"
-                      disabled
-                      data-testid="input-nfe-environment"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>XML NF-e</Label>
-                  <Textarea
-                    value={nfeOps.xmlContent}
-                    onChange={(e) => updateNfeOps("xmlContent", e.target.value)}
-                    rows={6}
-                    data-testid="input-nfe-xml"
-                  />
-                  <Button
-                    onClick={() => {
-                      if (!nfeOps.xmlContent.trim()) {
-                        toast.error("Informe o XML da NF-e");
-                        return;
-                      }
-                      submitNfeMutation.mutate(nfeOps);
-                    }}
-                    disabled={submitNfeMutation.isPending}
-                    data-testid="button-submit-nfe"
-                  >
-                    {submitNfeMutation.isPending && (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    )}
-                    Enviar NF-e
-                  </Button>
-                </div>
-
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <Label>Chave de acesso</Label>
-                    <Input
-                      value={nfeOps.cancelAccessKey}
-                      onChange={(e) =>
-                        updateNfeOps("cancelAccessKey", e.target.value)
-                      }
-                      data-testid="input-nfe-cancel-key"
-                    />
-                  </div>
-                  <div>
-                    <Label>Protocolo (nProt)</Label>
-                    <Input
-                      value={nfeOps.cancelProtocol}
-                      onChange={(e) =>
-                        updateNfeOps("cancelProtocol", e.target.value)
-                      }
-                      data-testid="input-nfe-cancel-protocol"
-                    />
-                  </div>
-                  <div>
-                    <Label>Justificativa</Label>
-                    <Input
-                      value={nfeOps.cancelReason}
-                      onChange={(e) =>
-                        updateNfeOps("cancelReason", e.target.value)
-                      }
-                      data-testid="input-nfe-cancel-reason"
-                    />
-                  </div>
-                </div>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    if (
-                      nfeOps.cancelReason.trim().length < 15 ||
-                      nfeOps.cancelAccessKey.trim().length !== 44
-                    ) {
-                      toast.error(
-                        "Informe chave (44 digitos) e justificativa (min 15)"
-                      );
-                      return;
-                    }
-                    cancelNfeMutation.mutate(nfeOps);
-                  }}
-                  disabled={cancelNfeMutation.isPending}
-                  data-testid="button-cancel-nfe"
-                >
-                  {cancelNfeMutation.isPending && (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  )}
-                  Cancelar NF-e
-                </Button>
-
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <Label>Chave de acesso (CC-e)</Label>
-                    <Input
-                      value={nfeOps.cceAccessKey}
-                      onChange={(e) =>
-                        updateNfeOps("cceAccessKey", e.target.value)
-                      }
-                      data-testid="input-nfe-cce-key"
-                    />
-                  </div>
-                  <div>
-                    <Label>Sequencia</Label>
-                    <Input
-                      value={nfeOps.cceSequence}
-                      onChange={(e) =>
-                        updateNfeOps("cceSequence", e.target.value)
-                      }
-                      data-testid="input-nfe-cce-seq"
-                    />
-                  </div>
-                  <div>
-                    <Label>Texto da correcao</Label>
-                    <Input
-                      value={nfeOps.cceText}
-                      onChange={(e) => updateNfeOps("cceText", e.target.value)}
-                      data-testid="input-nfe-cce-text"
-                    />
-                  </div>
-                </div>
-                <Button
-                  onClick={() => {
-                    if (
-                      nfeOps.cceAccessKey.trim().length !== 44 ||
-                      nfeOps.cceText.trim().length < 15
-                    ) {
-                      toast.error(
-                        "Informe chave (44 digitos) e texto (min 15)"
-                      );
-                      return;
-                    }
-                    cceNfeMutation.mutate(nfeOps);
-                  }}
-                  disabled={cceNfeMutation.isPending}
-                  data-testid="button-cce-nfe"
-                >
-                  {cceNfeMutation.isPending && (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  )}
-                  Enviar CC-e
-                </Button>
-
-                <div className="grid grid-cols-4 gap-4">
-                  <div>
-                    <Label>Serie</Label>
-                    <Input
-                      value={nfeOps.inutilizeSeries}
-                      onChange={(e) =>
-                        updateNfeOps("inutilizeSeries", e.target.value)
-                      }
-                      data-testid="input-nfe-inut-serie"
-                    />
-                  </div>
-                  <div>
-                    <Label>Numero inicial</Label>
-                    <Input
-                      value={nfeOps.inutilizeStart}
-                      onChange={(e) =>
-                        updateNfeOps("inutilizeStart", e.target.value)
-                      }
-                      data-testid="input-nfe-inut-start"
-                    />
-                  </div>
-                  <div>
-                    <Label>Numero final</Label>
-                    <Input
-                      value={nfeOps.inutilizeEnd}
-                      onChange={(e) =>
-                        updateNfeOps("inutilizeEnd", e.target.value)
-                      }
-                      data-testid="input-nfe-inut-end"
-                    />
-                  </div>
-                  <div>
-                    <Label>Justificativa</Label>
-                    <Input
-                      value={nfeOps.inutilizeReason}
-                      onChange={(e) =>
-                        updateNfeOps("inutilizeReason", e.target.value)
-                      }
-                      data-testid="input-nfe-inut-reason"
-                    />
-                  </div>
-                </div>
-                <Button
-                  onClick={() => {
-                    if (
-                      !nfeOps.inutilizeSeries.trim() ||
-                      !nfeOps.inutilizeStart.trim() ||
-                      !nfeOps.inutilizeEnd.trim() ||
-                      nfeOps.inutilizeReason.trim().length < 15
-                    ) {
-                      toast.error(
-                        "Preencha serie, intervalo e justificativa (min 15)"
-                      );
-                      return;
-                    }
-                    inutilizeNfeMutation.mutate(nfeOps);
-                  }}
-                  disabled={inutilizeNfeMutation.isPending}
-                  data-testid="button-inutilize-nfe"
-                >
-                  {inutilizeNfeMutation.isPending && (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  )}
-                  Inutilizar numeracao
-                </Button>
-              </CardContent>
-            </Card>
           </TabsContent>
 
           {/* NFC-e */}
@@ -3113,4 +3352,6 @@ export default function FiscalDocuments() {
     </Layout>
   );
 }
+
+
 

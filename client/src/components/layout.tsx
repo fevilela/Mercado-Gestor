@@ -12,6 +12,8 @@
   Search,
   Bell,
   Menu,
+  X,
+  Home,
   ChevronDown,
   ChevronRight,
   User,
@@ -97,7 +99,7 @@ const sidebarSections: SidebarSection[] = [
       },
       {
         icon: Users,
-        label: "Clientes e Fornecedores",
+        label: "Clientes / Fornecedores / Transportadoras",
         href: "/contacts",
         permissions: [
           "customers:view",
@@ -137,7 +139,7 @@ const sidebarSections: SidebarSection[] = [
       },
       {
         icon: FileText,
-        label: "Emissao Fiscal (NF-e/NFC-e)",
+        label: "Emissao Fiscal (NF-e)",
         href: "/fiscal-documents",
         permissions: ["fiscal:view", "fiscal:manage"],
       },
@@ -186,8 +188,17 @@ interface Notification {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const SIDEBAR_STATE_KEY = "arqis_sidebar_collapsed_sections";
+  const SIDEBAR_VISIBILITY_KEY = "arqis_sidebar_visible";
   const [location, setLocation] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState<boolean>(() => {
+    try {
+      const raw = window.localStorage.getItem(SIDEBAR_VISIBILITY_KEY);
+      return raw === null ? true : raw === "true";
+    } catch {
+      return true;
+    }
+  });
   const [collapsedSections, setCollapsedSections] = useState<
     Record<string, boolean>
   >(() => {
@@ -217,6 +228,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       // ignore localStorage write errors
     }
   }, [collapsedSections]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_VISIBILITY_KEY,
+        String(isDesktopSidebarOpen),
+      );
+    } catch {
+      // ignore localStorage write errors
+    }
+  }, [isDesktopSidebarOpen]);
 
   const { data: notifications = [] } = useQuery<Notification[]>({
     queryKey: ["/api/notifications"],
@@ -271,15 +293,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-16 items-center px-6 border-b border-sidebar-border">
         <div className="flex w-full items-center justify-center">
-          <img
-            src="/images/Arqis-branco.png"
-            alt="Arqis"
-            className="block h-9 w-auto object-contain"
-            data-testid="image-sidebar-brand"
-          />
+          <Link href="/">
+            <img
+              src="/images/Arqis-branco.png"
+              alt="Arqis"
+              className="block h-9 w-auto cursor-pointer object-contain"
+              data-testid="image-sidebar-brand"
+            />
+          </Link>
         </div>
       </div>
-      <div className="flex-1 overflow-auto py-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden py-4">
                 <nav className="grid gap-3 px-2">
           {sidebarSections.map((section) => {
             const visibleItems = section.items.filter((item) => {
@@ -294,7 +318,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <button
                   type="button"
                   onClick={() => toggleSection(section.title)}
-                  className="flex w-full items-center justify-between px-3 pb-1 text-left text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 hover:text-sidebar-foreground"
+                  className="flex w-full items-center justify-between px-3 pb-1 text-left text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/60 hover:text-sidebar-foreground"
                   data-testid={`button-toggle-section-${section.title.toLowerCase().replace(/\s+/g, "-")}`}
                 >
                   <span>{section.title}</span>
@@ -311,14 +335,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       <Link
                         key={item.href}
                         href={item.href}
-                        className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
+                        className={`flex items-start gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
                           isActive
                             ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
                             : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                         }`}
                       >
-                        <item.icon className="h-4 w-4" />
-                        {item.label}
+                        <item.icon className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span className="min-w-0 whitespace-normal break-words leading-snug">
+                          {item.label}
+                        </span>
                       </Link>
                     );
                   })}
@@ -331,7 +357,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <Link href="/profile">
           <div className="flex items-center gap-3 rounded-lg bg-sidebar-accent/50 p-3 text-sm cursor-pointer hover:bg-sidebar-accent transition-colors">
             <Avatar className="h-9 w-9 border border-sidebar-border">
-              <AvatarFallback>
+              <AvatarFallback className="bg-sidebar-primary/20 text-sidebar-foreground font-semibold tracking-wide">
                 {user ? getInitials(user.name) : "?"}
               </AvatarFallback>
             </Avatar>
@@ -352,12 +378,55 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background flex">
       {/* Desktop Sidebar */}
-      <aside className="hidden w-64 border-r border-border bg-sidebar md:block fixed inset-y-0 z-50">
+      <aside
+        className={`hidden border-r border-border bg-sidebar md:block fixed inset-y-0 z-50 transition-transform duration-200 ${
+          isDesktopSidebarOpen ? "w-64 translate-x-0" : "w-64 -translate-x-full"
+        }`}
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          className="absolute right-2 top-2 z-[60] hidden md:inline-flex text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          onClick={() => setIsDesktopSidebarOpen(false)}
+          data-testid="button-close-desktop-sidebar"
+          title="Fechar menu"
+        >
+          <X className="h-4 w-4" />
+        </Button>
         <SidebarContent />
       </aside>
 
+      {!isDesktopSidebarOpen && (
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="fixed left-2 top-2 z-50 hidden md:inline-flex bg-transparent shadow-none hover:bg-transparent"
+            onClick={() => setLocation("/")}
+            data-testid="button-home-desktop-sidebar-collapsed"
+            title="Ir para Dashboard"
+          >
+            <Home className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="fixed left-12 top-2 z-50 hidden md:inline-flex bg-transparent shadow-none hover:bg-transparent"
+            onClick={() => setIsDesktopSidebarOpen(true)}
+            data-testid="button-open-desktop-sidebar"
+            title="Abrir menu"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+        </>
+      )}
+
       {/* Main Content */}
-      <main className="flex-1 md:ml-64 flex flex-col min-h-screen">
+      <main
+        className={`flex-1 flex flex-col min-h-screen transition-[margin] duration-200 ${
+          isDesktopSidebarOpen ? "md:ml-64" : "md:ml-0"
+        }`}
+      >
         {/* Top Header */}
         <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b border-border bg-background/80 px-6 backdrop-blur-sm shadow-sm">
           <Sheet open={isMobileOpen} onOpenChange={setIsMobileOpen}>
@@ -372,14 +441,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </Sheet>
 
           <div className="flex-1 flex items-center gap-4">
-            <div className="relative w-full max-w-sm hidden sm:block">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="Buscar produtos, pedidos, clientes..."
-                className="w-full bg-background pl-9 md:w-[300px] lg:w-[400px]"
-              />
-            </div>
           </div>
 
           <div className="flex items-center gap-2">

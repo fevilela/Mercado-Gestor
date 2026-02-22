@@ -6,6 +6,7 @@ import {
   kitItems,
   customers,
   suppliers,
+  transporters,
   sales,
   saleItems,
   companySettings,
@@ -40,6 +41,7 @@ import {
   type InsertProduct,
   type InsertCustomer,
   type InsertSupplier,
+  type InsertTransporter,
   type InsertSale,
   type InsertSaleItem,
   type InsertCompanySettings,
@@ -305,6 +307,38 @@ export const storage = {
     await db
       .delete(suppliers)
       .where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyId)));
+  },
+
+  async getAllTransporters(companyId: number) {
+    return await db
+      .select()
+      .from(transporters)
+      .where(eq(transporters.companyId, companyId))
+      .orderBy(desc(transporters.createdAt));
+  },
+
+  async createTransporter(data: InsertTransporter) {
+    const [transporter] = await db.insert(transporters).values(data).returning();
+    return transporter;
+  },
+
+  async updateTransporter(
+    id: number,
+    companyId: number,
+    data: Partial<InsertTransporter>
+  ) {
+    const [transporter] = await db
+      .update(transporters)
+      .set(data)
+      .where(and(eq(transporters.id, id), eq(transporters.companyId, companyId)))
+      .returning();
+    return transporter;
+  },
+
+  async deleteTransporter(id: number, companyId: number) {
+    await db
+      .delete(transporters)
+      .where(and(eq(transporters.id, id), eq(transporters.companyId, companyId)));
   },
 
   async getAllSales(companyId: number) {

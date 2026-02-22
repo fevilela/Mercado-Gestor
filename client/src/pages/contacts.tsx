@@ -86,18 +86,39 @@ interface Supplier {
   createdAt: string;
 }
 
+interface Transporter {
+  id: number;
+  name: string;
+  contact: string | null;
+  phone: string | null;
+  email: string | null;
+  cnpjCpf: string | null;
+  ie: string | null;
+  rntc: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
 export default function Contacts() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [supplierSearchQuery, setSupplierSearchQuery] = useState("");
+  const [transporterSearchQuery, setTransporterSearchQuery] = useState("");
 
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
   const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
+  const [isTransporterDialogOpen, setIsTransporterDialogOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [editingTransporter, setEditingTransporter] = useState<Transporter | null>(null);
   const [deleteCustomerId, setDeleteCustomerId] = useState<number | null>(null);
   const [deleteSupplierId, setDeleteSupplierId] = useState<number | null>(null);
+  const [deleteTransporterId, setDeleteTransporterId] = useState<number | null>(null);
 
   const [customerForm, setCustomerForm] = useState({
     name: "",
@@ -123,6 +144,20 @@ export default function Contacts() {
     zipCode: "",
     paymentTerms: "",
   });
+  const [transporterForm, setTransporterForm] = useState({
+    name: "",
+    contact: "",
+    phone: "",
+    email: "",
+    cnpjCpf: "",
+    ie: "",
+    rntc: "",
+    address: "",
+    city: "",
+    state: "",
+    zipCode: "",
+    notes: "",
+  });
 
   const { data: customers = [], isLoading: isLoadingCustomers } = useQuery<
     Customer[]
@@ -142,6 +177,16 @@ export default function Contacts() {
     queryFn: async () => {
       const res = await fetch("/api/suppliers");
       if (!res.ok) throw new Error("Failed to fetch suppliers");
+      return res.json();
+    },
+  });
+  const { data: transporters = [], isLoading: isLoadingTransporters } = useQuery<
+    Transporter[]
+  >({
+    queryKey: ["/api/transporters"],
+    queryFn: async () => {
+      const res = await fetch("/api/transporters");
+      if (!res.ok) throw new Error("Failed to fetch transporters");
       return res.json();
     },
   });
@@ -274,6 +319,70 @@ export default function Contacts() {
     },
   });
 
+  const createTransporterMutation = useMutation({
+    mutationFn: async (data: typeof transporterForm) => {
+      const res = await fetch("/api/transporters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create transporter");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transporters"] });
+      setIsTransporterDialogOpen(false);
+      resetTransporterForm();
+      toast({ title: "Transportadora criada com sucesso!" });
+    },
+    onError: () => {
+      toast({ title: "Erro ao criar transportadora", variant: "destructive" });
+    },
+  });
+
+  const updateTransporterMutation = useMutation({
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: number;
+      data: typeof transporterForm;
+    }) => {
+      const res = await fetch(`/api/transporters/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update transporter");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transporters"] });
+      setIsTransporterDialogOpen(false);
+      setEditingTransporter(null);
+      resetTransporterForm();
+      toast({ title: "Transportadora atualizada com sucesso!" });
+    },
+    onError: () => {
+      toast({ title: "Erro ao atualizar transportadora", variant: "destructive" });
+    },
+  });
+
+  const deleteTransporterMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/transporters/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete transporter");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/transporters"] });
+      setDeleteTransporterId(null);
+      toast({ title: "Transportadora excluida com sucesso!" });
+    },
+    onError: () => {
+      toast({ title: "Erro ao excluir transportadora", variant: "destructive" });
+    },
+  });
+
   const resetCustomerForm = () => {
     setCustomerForm({
       name: "",
@@ -300,6 +409,23 @@ export default function Contacts() {
       state: "",
       zipCode: "",
       paymentTerms: "",
+    });
+  };
+
+  const resetTransporterForm = () => {
+    setTransporterForm({
+      name: "",
+      contact: "",
+      phone: "",
+      email: "",
+      cnpjCpf: "",
+      ie: "",
+      rntc: "",
+      address: "",
+      city: "",
+      state: "",
+      zipCode: "",
+      notes: "",
     });
   };
 
@@ -336,6 +462,25 @@ export default function Contacts() {
     setIsSupplierDialogOpen(true);
   };
 
+  const openEditTransporter = (transporter: Transporter) => {
+    setEditingTransporter(transporter);
+    setTransporterForm({
+      name: transporter.name,
+      contact: transporter.contact || "",
+      phone: transporter.phone || "",
+      email: transporter.email || "",
+      cnpjCpf: transporter.cnpjCpf || "",
+      ie: transporter.ie || "",
+      rntc: transporter.rntc || "",
+      address: transporter.address || "",
+      city: transporter.city || "",
+      state: transporter.state || "",
+      zipCode: transporter.zipCode || "",
+      notes: transporter.notes || "",
+    });
+    setIsTransporterDialogOpen(true);
+  };
+
   const handleCustomerSubmit = () => {
     if (!customerForm.name.trim()) {
       toast({ title: "Nome é obrigatório", variant: "destructive" });
@@ -366,6 +511,21 @@ export default function Contacts() {
     }
   };
 
+  const handleTransporterSubmit = () => {
+    if (!transporterForm.name.trim()) {
+      toast({ title: "Nome e obrigatorio", variant: "destructive" });
+      return;
+    }
+    if (editingTransporter) {
+      updateTransporterMutation.mutate({
+        id: editingTransporter.id,
+        data: transporterForm,
+      });
+    } else {
+      createTransporterMutation.mutate(transporterForm);
+    }
+  };
+
   const filteredCustomers = customers.filter(
     (c) =>
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -380,6 +540,16 @@ export default function Contacts() {
         s.contact.toLowerCase().includes(supplierSearchQuery.toLowerCase())) ||
       (s.email &&
         s.email.toLowerCase().includes(supplierSearchQuery.toLowerCase()))
+  );
+  const filteredTransporters = transporters.filter(
+    (t) =>
+      t.name.toLowerCase().includes(transporterSearchQuery.toLowerCase()) ||
+      (t.contact &&
+        t.contact.toLowerCase().includes(transporterSearchQuery.toLowerCase())) ||
+      (t.email &&
+        t.email.toLowerCase().includes(transporterSearchQuery.toLowerCase())) ||
+      (t.cnpjCpf && t.cnpjCpf.includes(transporterSearchQuery)) ||
+      (t.rntc && t.rntc.includes(transporterSearchQuery))
   );
 
   return (
@@ -403,6 +573,9 @@ export default function Contacts() {
             </TabsTrigger>
             <TabsTrigger value="suppliers">
               Fornecedores ({suppliers.length})
+            </TabsTrigger>
+            <TabsTrigger value="transporters">
+              Transportadoras ({transporters.length})
             </TabsTrigger>
           </TabsList>
 
@@ -581,6 +754,94 @@ export default function Contacts() {
                           <p className="text-xs text-muted-foreground">
                             CNPJ: {supplier.cnpj}
                           </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="transporters" className="space-y-4">
+            <div className="flex justify-between items-center bg-card p-4 rounded-lg border border-border">
+              <div className="relative w-full max-w-sm">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar transportadoras..."
+                  className="pl-9"
+                  value={transporterSearchQuery}
+                  onChange={(e) => setTransporterSearchQuery(e.target.value)}
+                />
+              </div>
+              <Button
+                onClick={() => {
+                  setEditingTransporter(null);
+                  resetTransporterForm();
+                  setIsTransporterDialogOpen(true);
+                }}
+              >
+                <Plus className="mr-2 h-4 w-4" /> Nova Transportadora
+              </Button>
+            </div>
+
+            {isLoadingTransporters ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : filteredTransporters.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                {transporterSearchQuery
+                  ? "Nenhuma transportadora encontrada para esta busca."
+                  : "Nenhuma transportadora cadastrada ainda."}
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {filteredTransporters.map((transporter) => (
+                  <Card key={transporter.id}>
+                    <CardHeader className="flex flex-row items-start gap-4">
+                      <div className="flex-1">
+                        <CardTitle className="text-base">{transporter.name}</CardTitle>
+                        {transporter.contact && (
+                          <CardDescription>Contato: {transporter.contact}</CardDescription>
+                        )}
+                      </div>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => openEditTransporter(transporter)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => setDeleteTransporterId(transporter.id)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      {transporter.phone && (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Phone className="h-4 w-4" /> {transporter.phone}
+                        </div>
+                      )}
+                      {transporter.email && (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Mail className="h-4 w-4" /> {transporter.email}
+                        </div>
+                      )}
+                      {transporter.address && (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <MapPin className="h-4 w-4" /> {transporter.address}
+                        </div>
+                      )}
+                      {(transporter.cnpjCpf || transporter.rntc) && (
+                        <div className="pt-2 border-t border-border mt-2 space-y-1">
+                          {transporter.cnpjCpf && (
+                            <p className="text-xs text-muted-foreground">CNPJ/CPF: {transporter.cnpjCpf}</p>
+                          )}
+                          {transporter.ie && (
+                            <p className="text-xs text-muted-foreground">IE: {transporter.ie}</p>
+                          )}
+                          {transporter.rntc && (
+                            <p className="text-xs text-muted-foreground">RNTC: {transporter.rntc}</p>
+                          )}
                         </div>
                       )}
                     </CardContent>
@@ -924,6 +1185,150 @@ export default function Contacts() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={isTransporterDialogOpen}
+        onOpenChange={(open) => {
+          setIsTransporterDialogOpen(open);
+          if (!open) {
+            setEditingTransporter(null);
+            resetTransporterForm();
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editingTransporter ? "Editar Transportadora" : "Nova Transportadora"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingTransporter
+                ? "Atualize os dados da transportadora."
+                : "Preencha os dados da nova transportadora."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="transporterName">Razao social / Nome *</Label>
+              <Input
+                id="transporterName"
+                value={transporterForm.name}
+                onChange={(e) => setTransporterForm({ ...transporterForm, name: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="transporterContact">Contato</Label>
+                <Input
+                  id="transporterContact"
+                  value={transporterForm.contact}
+                  onChange={(e) => setTransporterForm({ ...transporterForm, contact: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="transporterPhone">Telefone</Label>
+                <Input
+                  id="transporterPhone"
+                  value={transporterForm.phone}
+                  onChange={(e) => setTransporterForm({ ...transporterForm, phone: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="transporterEmail">E-mail</Label>
+              <Input
+                id="transporterEmail"
+                type="email"
+                value={transporterForm.email}
+                onChange={(e) => setTransporterForm({ ...transporterForm, email: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="transporterDoc">CNPJ/CPF</Label>
+                <Input
+                  id="transporterDoc"
+                  value={transporterForm.cnpjCpf}
+                  onChange={(e) => setTransporterForm({ ...transporterForm, cnpjCpf: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="transporterIe">IE</Label>
+                <Input
+                  id="transporterIe"
+                  value={transporterForm.ie}
+                  onChange={(e) => setTransporterForm({ ...transporterForm, ie: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="transporterRntc">RNTC</Label>
+                <Input
+                  id="transporterRntc"
+                  value={transporterForm.rntc}
+                  onChange={(e) => setTransporterForm({ ...transporterForm, rntc: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="transporterAddress">Endereco</Label>
+              <Input
+                id="transporterAddress"
+                value={transporterForm.address}
+                onChange={(e) => setTransporterForm({ ...transporterForm, address: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="transporterCity">Cidade</Label>
+                <Input
+                  id="transporterCity"
+                  value={transporterForm.city}
+                  onChange={(e) => setTransporterForm({ ...transporterForm, city: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="transporterState">UF</Label>
+                <Input
+                  id="transporterState"
+                  value={transporterForm.state}
+                  maxLength={2}
+                  onChange={(e) => setTransporterForm({ ...transporterForm, state: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="transporterZip">CEP</Label>
+                <Input
+                  id="transporterZip"
+                  value={transporterForm.zipCode}
+                  onChange={(e) => setTransporterForm({ ...transporterForm, zipCode: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="transporterNotes">Observacoes</Label>
+              <Input
+                id="transporterNotes"
+                value={transporterForm.notes}
+                onChange={(e) => setTransporterForm({ ...transporterForm, notes: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsTransporterDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleTransporterSubmit}
+              disabled={createTransporterMutation.isPending || updateTransporterMutation.isPending}
+            >
+              {(createTransporterMutation.isPending || updateTransporterMutation.isPending) && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              {editingTransporter ? "Salvar" : "Criar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog
         open={deleteCustomerId !== null}
         onOpenChange={(open) => !open && setDeleteCustomerId(null)}
@@ -969,6 +1374,31 @@ export default function Contacts() {
               onClick={() =>
                 deleteSupplierId &&
                 deleteSupplierMutation.mutate(deleteSupplierId)
+              }
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={deleteTransporterId !== null}
+        onOpenChange={(open) => !open && setDeleteTransporterId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Transportadora</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir esta transportadora? Esta acao nao pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                deleteTransporterId && deleteTransporterMutation.mutate(deleteTransporterId)
               }
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

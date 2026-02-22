@@ -10,6 +10,7 @@ import {
   referenceTables,
   customers,
   suppliers,
+  transporters,
   digitalCertificates,
   sefazTransmissionLogs,
 } from "@shared/schema";
@@ -17,6 +18,7 @@ import {
   insertProductSchema,
   insertCustomerSchema,
   insertSupplierSchema,
+  insertTransporterSchema,
   insertSaleSchema,
   insertSaleItemSchema,
   insertCompanySettingsSchema,
@@ -856,6 +858,84 @@ export async function registerRoutes(
         res.status(204).send();
       } catch (error) {
         res.status(500).json({ error: "Failed to delete supplier" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/transporters",
+    requireAuth,
+    requirePermission("suppliers:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) return res.status(401).json({ error: "NÃ£o autenticado" });
+        const transportersList = await storage.getAllTransporters(companyId);
+        res.json(transportersList);
+      } catch (error) {
+        console.error("Failed to fetch transporters:", error);
+        res.status(500).json({ error: "Failed to fetch transporters" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/transporters",
+    requireAuth,
+    requirePermission("suppliers:create"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) return res.status(401).json({ error: "NÃ£o autenticado" });
+        const validated = insertTransporterSchema.parse(req.body);
+        const transporter = await storage.createTransporter({ ...validated, companyId });
+        res.status(201).json(transporter);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to create transporter" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/transporters/:id",
+    requireAuth,
+    requirePermission("suppliers:edit"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) return res.status(401).json({ error: "NÃ£o autenticado" });
+        const id = parseInt(req.params.id);
+        const validated = insertTransporterSchema.partial().parse(req.body);
+        const transporter = await storage.updateTransporter(id, companyId, validated);
+        if (!transporter) {
+          return res.status(404).json({ error: "Transporter not found" });
+        }
+        res.json(transporter);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res.status(400).json({ error: error.errors });
+        }
+        res.status(500).json({ error: "Failed to update transporter" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/transporters/:id",
+    requireAuth,
+    requirePermission("suppliers:delete"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) return res.status(401).json({ error: "NÃ£o autenticado" });
+        const id = parseInt(req.params.id);
+        await storage.deleteTransporter(id, companyId);
+        res.status(204).send();
+      } catch (error) {
+        res.status(500).json({ error: "Failed to delete transporter" });
       }
     }
   );

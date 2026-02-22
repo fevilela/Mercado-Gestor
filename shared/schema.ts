@@ -349,6 +349,31 @@ export const insertSupplierSchema = createInsertSchema(suppliers).omit({
 export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
 export type Supplier = typeof suppliers.$inferSelect;
 
+export const transporters = pgTable("transporters", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  name: text("name").notNull(),
+  contact: text("contact"),
+  phone: text("phone"),
+  email: text("email"),
+  cnpjCpf: text("cnpj_cpf"),
+  ie: text("ie"),
+  rntc: text("rntc"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  zipCode: text("zip_code"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertTransporterSchema = createInsertSchema(transporters).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertTransporter = z.infer<typeof insertTransporterSchema>;
+export type Transporter = typeof transporters.$inferSelect;
+
 export const sales = pgTable("sales", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id"),
