@@ -1522,10 +1522,15 @@ router.post(
               qrUrl,
             });
           }
+          const resolvedUfUpper = String(uf || "").toUpperCase();
           const urlChave =
-            resolvedEnvironment === "producao"
-              ? "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml"
-              : "https://hnfce.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml";
+            resolvedUfUpper === "MG"
+              ? resolvedEnvironment === "producao"
+                ? "https://portalsped.fazenda.mg.gov.br/portalnfce"
+                : "https://hportalsped.fazenda.mg.gov.br/portalnfce"
+              : resolvedEnvironment === "producao"
+                ? "https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml"
+                : "https://hnfce.fazenda.mg.gov.br/portalnfce/sistema/consultaNFCe.xhtml";
           const qrCodeValue = String(qrUrl || "").replace(/\s+/g, "");
           const urlChaveValue = String(urlChave || "").trim();
           if (!qrCodeValue) {
