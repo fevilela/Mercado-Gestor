@@ -1230,10 +1230,22 @@ router.post(
             });
           }
           if (parsedKey && canReuseExistingKey) {
-            issueDate = buildIssueDateFromKey(
-              parsedKey,
-              sale.createdAt ? new Date(sale.createdAt) : new Date(),
-            );
+            const now = new Date();
+            const nowYear = now.getFullYear();
+            const nowMonth = now.getMonth() + 1;
+            const keyYear = Number(parsedKey.year);
+            const keyMonth = Number(parsedKey.month);
+            // Reenvio de NFC-e pendente: se a chave for do mesmo ano/mes atual,
+            // usa a hora atual para evitar rejeicao por dhEmi atrasada.
+            // Se o ano/mes da chave for diferente, mantemos a data compatível
+            // com a chave para nao criar divergencia no Id.
+            issueDate =
+              keyYear === nowYear && keyMonth === nowMonth
+                ? now
+                : buildIssueDateFromKey(
+                    parsedKey,
+                    sale.createdAt ? new Date(sale.createdAt) : now,
+                  );
             nfceKeyUsed = existingKey;
             nfceCnfUsed = parsedKey.cNF;
             tpEmisUsed = parsedKey.tpEmis || "1";

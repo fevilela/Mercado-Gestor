@@ -320,14 +320,40 @@ export default function FiscalCentralPage() {
 
   const sendNfceMutation = useMutation({
     mutationFn: submitNfce,
-    onSuccess: (_, saleIds) => {
-      toast({
-        title: "Sucesso",
-        description:
-          saleIds.length > 1
-            ? `${saleIds.length} NFC-e enviadas para SEFAZ.`
-            : "NFC-e enviada para SEFAZ.",
-      });
+    onSuccess: (payload, saleIds) => {
+      const results = Array.isArray(payload?.results) ? payload.results : [];
+      const authorizedCount = results.filter(
+        (item: any) => item?.success && String(item?.status || "") === "100",
+      ).length;
+      const failedCount = results.filter((item: any) => item?.success === false).length;
+      const pendingTransmissionCount = Math.max(
+        0,
+        results.length - authorizedCount - failedCount,
+      );
+
+      if (authorizedCount === 0 && (failedCount > 0 || results.length > 0)) {
+        toast({
+          title: "Envio nao autorizado",
+          description:
+            failedCount > 1
+              ? `${failedCount} NFC-e nao foram autorizadas. Verifique os erros na Central Fiscal (status continua pendente).`
+              : "NFC-e nao foi autorizada. Verifique o erro na Central Fiscal (status continua pendente).",
+          variant: "destructive",
+        });
+      } else if (failedCount > 0 || pendingTransmissionCount > 0) {
+        toast({
+          title: "Resultado parcial",
+          description: `${authorizedCount} autorizada(s), ${failedCount} com erro e ${pendingTransmissionCount} em processamento.`,
+        });
+      } else {
+        toast({
+          title: "Sucesso",
+          description:
+            authorizedCount > 1
+              ? `${authorizedCount} NFC-e autorizadas pela SEFAZ.`
+              : "NFC-e autorizada pela SEFAZ.",
+        });
+      }
       setSelectedNfceIds([]);
       queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
     },
