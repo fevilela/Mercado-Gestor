@@ -252,13 +252,28 @@ export default function Settings() {
   const [fiscalReadiness, setFiscalReadiness] =
     useState<FiscalReadiness | null>(null);
   const [loadingFiscalReadiness, setLoadingFiscalReadiness] = useState(false);
+  const [isManagerSession, setIsManagerSession] = useState(false);
 
   useEffect(() => {
     fetchSettings();
     fetchTerminals();
     fetchSimplesAliquots();
     fetchFiscalReadiness();
+    fetchManagerSession();
   }, []);
+
+  const fetchManagerSession = async () => {
+    try {
+      const response = await fetch("/api/auth/manager/session", {
+        credentials: "include",
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      setIsManagerSession(Boolean(data?.authenticated));
+    } catch (error) {
+      console.error("Failed to fetch manager session:", error);
+    }
+  };
 
   useEffect(() => {
     if (stoneStatus === "connected") {
@@ -865,12 +880,16 @@ export default function Settings() {
           </p>
         </div>
 
-        <Tabs defaultValue="payments" className="space-y-4">
+        <Tabs defaultValue="company" className="space-y-4">
           <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="company">Dados da Empresa</TabsTrigger>
             <TabsTrigger value="fiscal">Fiscal & Tributário</TabsTrigger>
-            <TabsTrigger value="payments">Pagamentos & TEF</TabsTrigger>
-            <TabsTrigger value="equipment">Equipamentos</TabsTrigger>
+            {isManagerSession && (
+              <TabsTrigger value="payments">Pagamentos & TEF</TabsTrigger>
+            )}
+            {isManagerSession && (
+              <TabsTrigger value="equipment">Equipamentos</TabsTrigger>
+            )}
             <TabsTrigger value="terminals">Terminais PDV</TabsTrigger>
             <TabsTrigger value="users">Usuários</TabsTrigger>
           </TabsList>
@@ -1052,77 +1071,6 @@ export default function Settings() {
                     "Salvar Alterações"
                   )}
                 </Button>
-                <div className="space-y-4 pt-4 border-t">
-                  <h3 className="text-lg font-medium">
-                    Documentos Fiscais Eletrônicos
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NF-e (Modelo 55)</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Vendas e Operações Interestaduais
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfeEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfeEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NFC-e (Modelo 65)</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Venda ao Consumidor Final
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfceEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfceEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NFS-e</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Prestação de Serviços
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfseEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfseEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>CT-e / MDF-e</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Transporte e Manifesto
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Switch
-                          checked={settings.cteEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("cteEnabled", checked)
-                          }
-                        />
-                        <Switch
-                          checked={settings.mdfeEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("mdfeEnabled", checked)
-                          }
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -1252,6 +1200,42 @@ export default function Settings() {
                       updateSetting("fiscalEnabled", checked)
                     }
                   />
+                </div>
+                <Separator />
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium">
+                    Documentos Fiscais Eletrônicos
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NF-e (Modelo 55)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Vendas e Operações Interestaduais
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfeEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfeEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between p-3 border rounded-lg">
+                      <div className="space-y-0.5">
+                        <Label>NFC-e (Modelo 65)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Venda ao Consumidor Final
+                        </p>
+                      </div>
+                      <Switch
+                        checked={settings.nfceEnabled}
+                        onCheckedChange={(checked) =>
+                          updateSetting("nfceEnabled", checked)
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
                 <Separator />
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1564,604 +1548,323 @@ export default function Settings() {
                     )}
                   </Button>
                 </div>
-                <div className="space-y-4 pt-4 border-t">
-                  <h3 className="text-lg font-medium">
-                    Documentos Fiscais Eletrônicos
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NF-e (Modelo 55)</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Vendas e Operações Interestaduais
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfeEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfeEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NFC-e (Modelo 65)</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Venda ao Consumidor Final
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfceEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfceEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NFS-e</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Prestação de Serviços
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfseEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfseEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>CT-e / MDF-e</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Transporte e Manifesto
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Switch
-                          checked={settings.cteEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("cteEnabled", checked)
-                          }
-                        />
-                        <Switch
-                          checked={settings.mdfeEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("mdfeEnabled", checked)
-                          }
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="payments">
-            <div className="grid gap-4 md:grid-cols-2">
-              <Card>
-                <CardHeader className="flex flex-row items-center gap-4 space-y-0">
-                  <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                    <CreditCard className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <CardTitle>Integração Stone</CardTitle>
-                    <CardDescription>
-                      Configuração de Maquininha (TEF/POS)
-                    </CardDescription>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between space-x-2">
-                    <Label>Ativar Integração</Label>
-                    <Switch
-                      checked={settings.stoneEnabled || false}
-                      onCheckedChange={(checked) =>
-                        updateSetting("stoneEnabled", checked)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Client ID</Label>
-                    <Input
-                      placeholder="client_id"
-                      value={settings.stoneClientId || ""}
-                      onChange={(e) =>
-                        updateSetting("stoneClientId", e.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Client Secret</Label>
-                    <Input
-                      type="password"
-                      placeholder="client_secret"
-                      value={settings.stoneClientSecret || ""}
-                      onChange={(e) =>
-                        updateSetting("stoneClientSecret", e.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>ID do Terminal (POS)</Label>
-                    <Input
-                      placeholder="terminal_id"
-                      value={settings.stoneTerminalId || ""}
-                      onChange={(e) =>
-                        updateSetting("stoneTerminalId", e.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Ambiente</Label>
-                    <Select
-                      value={settings.stoneEnvironment || "producao"}
-                      onValueChange={(value) =>
-                        updateSetting("stoneEnvironment", value)
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="homologacao">
-                          Homologacao
-                        </SelectItem>
-                        <SelectItem value="producao">Producao</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {stoneStatus === "connected" ? (
-                    <div className="rounded-md bg-emerald-100 p-3 flex items-center gap-3 text-emerald-700">
-                      <CheckCircle2 className="h-5 w-5" />
-                      <div className="text-sm font-medium">
-                        Conectado: Stone
-                      </div>
+          {isManagerSession && (
+            <TabsContent value="payments">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card>
+                  <CardHeader className="flex flex-row items-center gap-4 space-y-0">
+                    <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                      <CreditCard className="h-5 w-5" />
                     </div>
-                  ) : (
-                    <Button
-                      className="w-full bg-emerald-600 hover:bg-emerald-700"
-                      onClick={handleConnectStone}
-                      disabled={stoneStatus === "connecting"}
-                    >
-                      {stoneStatus === "connecting" ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Conectando...
-                        </>
-                      ) : (
-                        "Testar Conexão Stone"
-                      )}
-                    </Button>
-                  )}
-                  <Button
-                    onClick={handleSaveSettings}
-                    disabled={saving}
-                    className="w-full"
-                  >
-                    {saving ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Salvando...
-                      </>
-                    ) : (
-                      "Salvar Alterações"
-                    )}
-                  </Button>
-                  <div className="space-y-4 pt-4 border-t">
-                    <h3 className="text-lg font-medium">
-                      Documentos Fiscais Eletrônicos
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NF-e (Modelo 55)</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Vendas e Operações Interestaduais
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfeEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfeEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NFC-e (Modelo 65)</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Venda ao Consumidor Final
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfceEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfceEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NFS-e</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Prestação de Serviços
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfseEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfseEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>CT-e / MDF-e</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Transporte e Manifesto
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Switch
-                            checked={settings.cteEnabled}
-                            onCheckedChange={(checked) =>
-                              updateSetting("cteEnabled", checked)
-                            }
-                          />
-                          <Switch
-                            checked={settings.mdfeEnabled}
-                            onCheckedChange={(checked) =>
-                              updateSetting("mdfeEnabled", checked)
-                            }
-                          />
-                        </div>
-                      </div>
+                    <div>
+                      <CardTitle>Integração Stone</CardTitle>
+                      <CardDescription>
+                        Configuração de Maquininha (TEF/POS)
+                      </CardDescription>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center gap-4 space-y-0">
-                  <div className="h-10 w-10 rounded-full bg-sky-100 flex items-center justify-center text-sky-600">
-                    <Smartphone className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <CardTitle>Mercado Pago</CardTitle>
-                    <CardDescription>Point Smart & QR Code</CardDescription>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between space-x-2">
-                    <Label>Ativar Integração</Label>
-                    <Switch
-                      checked={settings.mpEnabled || false}
-                      onCheckedChange={(checked) =>
-                        updateSetting("mpEnabled", checked)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Access Token (Integração)</Label>
-                    <Input
-                      type="password"
-                      placeholder="APP_USR-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                      value={settings.mpAccessToken || ""}
-                      onChange={(e) =>
-                        updateSetting("mpAccessToken", e.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Identificador Point</Label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">
-                          Store ID
-                        </Label>
-                        <Input
-                          placeholder="STORE123"
-                          value={mpTerminalRef.storeId}
-                          className={
-                            settings.mpEnabled &&
-                            !mpDirectTerminalId &&
-                            !mpTerminalRef.storeId
-                              ? "border-red-500 focus-visible:ring-red-500"
-                              : ""
-                          }
-                          onChange={(e) =>
-                            updateMpTerminalRef({ storeId: e.target.value })
-                          }
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">
-                          POS ID
-                        </Label>
-                        <Input
-                          placeholder="POS456"
-                          value={mpTerminalRef.posId}
-                          className={
-                            settings.mpEnabled &&
-                            !mpDirectTerminalId &&
-                            !mpTerminalRef.posId
-                              ? "border-red-500 focus-visible:ring-red-500"
-                              : ""
-                          }
-                          onChange={(e) =>
-                            updateMpTerminalRef({ posId: e.target.value })
-                          }
-                        />
-                      </div>
-                    </div>
-                                        <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">
-                        Terminal ID (opcional)
-                      </Label>
-                      <Input
-                        placeholder="GERTEC_MP35P__8701012146360616"
-                        value={mpDirectTerminalId}
-                        className={
-                          settings.mpEnabled &&
-                          !mpStorePosValid &&
-                          !mpDirectTerminalId
-                            ? "border-red-500 focus-visible:ring-red-500"
-                            : ""
-                        }
-                        onChange={(e) =>
-                          updateMpTerminalDirect(e.target.value)
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between space-x-2">
+                      <Label>Ativar Integração</Label>
+                      <Switch
+                        checked={settings.stoneEnabled || false}
+                        onCheckedChange={(checked) =>
+                          updateSetting("stoneEnabled", checked)
                         }
                       />
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Preencha <span className="font-mono">store_id|pos_id</span>{" "}
-                      ou informe o <span className="font-mono">terminal_id</span>{" "}
-                      diretamente.
-                    </p>
-                    {settings.mpEnabled && !mpTerminalValid && (
-                      <p className="text-xs text-red-600">
-                        Informe Store ID + POS ID ou Terminal ID para salvar.
-                      </p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Timeout de pagamento (segundos)</Label>
-                    <Input
-                      type="number"
-                      min={10}
-                      max={300}
-                      step={1}
-                      value={Number(settings.paymentTimeoutSeconds || 30)}
-                      onChange={(e) => {
-                        const raw = Number(e.target.value);
-                        const normalized = Number.isFinite(raw)
-                          ? Math.min(300, Math.max(10, Math.round(raw)))
-                          : 30;
-                        updateSetting("paymentTimeoutSeconds", normalized);
-                      }}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Tempo maximo para aprovar o pagamento no terminal antes de cancelar automaticamente.
-                    </p>
-                  </div>
-
-                  {mpStatus === "connected" ? (
-                    <div className="rounded-md bg-sky-100 p-3 flex items-center gap-3 text-sky-700">
-                      <CheckCircle2 className="h-5 w-5" />
-                      <div className="text-sm font-medium">
-                        Vinculado: Point Smart
-                      </div>
+                    <div className="space-y-2">
+                      <Label>Client ID</Label>
+                      <Input
+                        placeholder="client_id"
+                        value={settings.stoneClientId || ""}
+                        onChange={(e) =>
+                          updateSetting("stoneClientId", e.target.value)
+                        }
+                      />
                     </div>
-                  ) : (
+                    <div className="space-y-2">
+                      <Label>Client Secret</Label>
+                      <Input
+                        type="password"
+                        placeholder="client_secret"
+                        value={settings.stoneClientSecret || ""}
+                        onChange={(e) =>
+                          updateSetting("stoneClientSecret", e.target.value)
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>ID do Terminal (POS)</Label>
+                      <Input
+                        placeholder="terminal_id"
+                        value={settings.stoneTerminalId || ""}
+                        onChange={(e) =>
+                          updateSetting("stoneTerminalId", e.target.value)
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Ambiente</Label>
+                      <Select
+                        value={settings.stoneEnvironment || "producao"}
+                        onValueChange={(value) =>
+                          updateSetting("stoneEnvironment", value)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="homologacao">
+                            Homologacao
+                          </SelectItem>
+                          <SelectItem value="producao">Producao</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {stoneStatus === "connected" ? (
+                      <div className="rounded-md bg-emerald-100 p-3 flex items-center gap-3 text-emerald-700">
+                        <CheckCircle2 className="h-5 w-5" />
+                        <div className="text-sm font-medium">
+                          Conectado: Stone
+                        </div>
+                      </div>
+                    ) : (
+                      <Button
+                        className="w-full bg-emerald-600 hover:bg-emerald-700"
+                        onClick={handleConnectStone}
+                        disabled={stoneStatus === "connecting"}
+                      >
+                        {stoneStatus === "connecting" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Conectando...
+                          </>
+                        ) : (
+                          "Testar Conexão Stone"
+                        )}
+                      </Button>
+                    )}
                     <Button
-                      className="w-full bg-sky-500 hover:bg-sky-600"
-                      onClick={handleConnectMP}
-                      disabled={mpStatus === "connecting"}
+                      onClick={handleSaveSettings}
+                      disabled={saving}
+                      className="w-full"
                     >
-                      {mpStatus === "connecting" ? (
+                      {saving ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Verificando...
+                          Salvando...
                         </>
                       ) : (
-                        "Vincular Maquininha"
+                        "Salvar Alterações"
                       )}
                     </Button>
-                  )}
-                  <Button
-                    onClick={handleSaveSettings}
-                    disabled={saving || (settings.mpEnabled && !mpTerminalValid)}
-                    className="w-full"
-                  >
-                    {saving ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Salvando...
-                      </>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="flex flex-row items-center gap-4 space-y-0">
+                    <div className="h-10 w-10 rounded-full bg-sky-100 flex items-center justify-center text-sky-600">
+                      <Smartphone className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <CardTitle>Mercado Pago</CardTitle>
+                      <CardDescription>Point Smart & QR Code</CardDescription>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between space-x-2">
+                      <Label>Ativar Integração</Label>
+                      <Switch
+                        checked={settings.mpEnabled || false}
+                        onCheckedChange={(checked) =>
+                          updateSetting("mpEnabled", checked)
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Access Token (Integração)</Label>
+                      <Input
+                        type="password"
+                        placeholder="APP_USR-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                        value={settings.mpAccessToken || ""}
+                        onChange={(e) =>
+                          updateSetting("mpAccessToken", e.target.value)
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Identificador Point</Label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">
+                            Store ID
+                          </Label>
+                          <Input
+                            placeholder="STORE123"
+                            value={mpTerminalRef.storeId}
+                            className={
+                              settings.mpEnabled &&
+                              !mpDirectTerminalId &&
+                              !mpTerminalRef.storeId
+                                ? "border-red-500 focus-visible:ring-red-500"
+                                : ""
+                            }
+                            onChange={(e) =>
+                              updateMpTerminalRef({ storeId: e.target.value })
+                            }
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">
+                            POS ID
+                          </Label>
+                          <Input
+                            placeholder="POS456"
+                            value={mpTerminalRef.posId}
+                            className={
+                              settings.mpEnabled &&
+                              !mpDirectTerminalId &&
+                              !mpTerminalRef.posId
+                                ? "border-red-500 focus-visible:ring-red-500"
+                                : ""
+                            }
+                            onChange={(e) =>
+                              updateMpTerminalRef({ posId: e.target.value })
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">
+                          Terminal ID (opcional)
+                        </Label>
+                        <Input
+                          placeholder="GERTEC_MP35P__8701012146360616"
+                          value={mpDirectTerminalId}
+                          className={
+                            settings.mpEnabled &&
+                            !mpStorePosValid &&
+                            !mpDirectTerminalId
+                              ? "border-red-500 focus-visible:ring-red-500"
+                              : ""
+                          }
+                          onChange={(e) =>
+                            updateMpTerminalDirect(e.target.value)
+                          }
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Preencha <span className="font-mono">store_id|pos_id</span>{" "}
+                        ou informe o <span className="font-mono">terminal_id</span>{" "}
+                        diretamente.
+                      </p>
+                      {settings.mpEnabled && !mpTerminalValid && (
+                        <p className="text-xs text-red-600">
+                          Informe Store ID + POS ID ou Terminal ID para salvar.
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Timeout de pagamento (segundos)</Label>
+                      <Input
+                        type="number"
+                        min={10}
+                        max={300}
+                        step={1}
+                        value={Number(settings.paymentTimeoutSeconds || 30)}
+                        onChange={(e) => {
+                          const raw = Number(e.target.value);
+                          const normalized = Number.isFinite(raw)
+                            ? Math.min(300, Math.max(10, Math.round(raw)))
+                            : 30;
+                          updateSetting("paymentTimeoutSeconds", normalized);
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Tempo maximo para aprovar o pagamento no terminal antes de cancelar automaticamente.
+                      </p>
+                    </div>
+
+                    {mpStatus === "connected" ? (
+                      <div className="rounded-md bg-sky-100 p-3 flex items-center gap-3 text-sky-700">
+                        <CheckCircle2 className="h-5 w-5" />
+                        <div className="text-sm font-medium">
+                          Vinculado: Point Smart
+                        </div>
+                      </div>
                     ) : (
-                      "Salvar Alterações"
+                      <Button
+                        className="w-full bg-sky-500 hover:bg-sky-600"
+                        onClick={handleConnectMP}
+                        disabled={mpStatus === "connecting"}
+                      >
+                        {mpStatus === "connecting" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Verificando...
+                          </>
+                        ) : (
+                          "Vincular Maquininha"
+                        )}
+                      </Button>
                     )}
-                  </Button>
-                  <div className="space-y-4 pt-4 border-t">
-                    <h3 className="text-lg font-medium">
-                      Documentos Fiscais Eletrônicos
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NF-e (Modelo 55)</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Vendas e Operações Interestaduais
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfeEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfeEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NFC-e (Modelo 65)</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Venda ao Consumidor Final
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfceEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfceEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NFS-e</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Prestação de Serviços
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfseEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfseEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>CT-e / MDF-e</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Transporte e Manifesto
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Switch
-                            checked={settings.cteEnabled}
-                            onCheckedChange={(checked) =>
-                              updateSetting("cteEnabled", checked)
-                            }
-                          />
-                          <Switch
-                            checked={settings.mdfeEnabled}
-                            onCheckedChange={(checked) =>
-                              updateSetting("mdfeEnabled", checked)
-                            }
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                    <Button
+                      onClick={handleSaveSettings}
+                      disabled={saving || (settings.mpEnabled && !mpTerminalValid)}
+                      className="w-full"
+                    >
+                      {saving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Salvando...
+                        </>
+                      ) : (
+                        "Salvar Alterações"
+                      )}
+                    </Button>
+                  </CardContent>
+                </Card>
 
-              <Card className="col-span-2 bg-muted/30 border-dashed">
-                <CardHeader>
-                  <CardTitle className="text-sm">
-                    Agente Local (Bridge)
-                  </CardTitle>
-                  <CardDescription>
-                    Para comunicação USB/Serial com maquininhas via navegador.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex items-center justify-between">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">
-                      Status do Integrador:{" "}
-                      <span className="text-emerald-600">
-                        Simulado / Online
-                      </span>
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Versão: v2.4.0 (Mock)
-                    </p>
-                  </div>
-                  <Button variant="outline" size="sm">
-                    Baixar Instalador (.exe)
-                  </Button>
-                  <div className="space-y-4 pt-4 border-t">
-                    <h3 className="text-lg font-medium">
-                      Documentos Fiscais Eletrônicos
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NF-e (Modelo 55)</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Vendas e Operações Interestaduais
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfeEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfeEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NFC-e (Modelo 65)</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Venda ao Consumidor Final
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfceEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfceEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NFS-e</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Prestação de Serviços
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfseEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfseEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>CT-e / MDF-e</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Transporte e Manifesto
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Switch
-                            checked={settings.cteEnabled}
-                            onCheckedChange={(checked) =>
-                              updateSetting("cteEnabled", checked)
-                            }
-                          />
-                          <Switch
-                            checked={settings.mdfeEnabled}
-                            onCheckedChange={(checked) =>
-                              updateSetting("mdfeEnabled", checked)
-                            }
-                          />
-                        </div>
-                      </div>
+                <Card className="col-span-2 bg-muted/30 border-dashed">
+                  <CardHeader>
+                    <CardTitle className="text-sm">
+                      Agente Local (Bridge)
+                    </CardTitle>
+                    <CardDescription>
+                      Para comunicação USB/Serial com maquininhas via navegador.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">
+                        Status do Integrador:{" "}
+                        <span className="text-emerald-600">
+                          Simulado / Online
+                        </span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Versão: v2.4.0 (Mock)
+                      </p>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
+                    <Button variant="outline" size="sm">
+                      Baixar Instalador (.exe)
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+          )}
 
-          <TabsContent value="equipment">
-            <div className="grid gap-4 md:grid-cols-2">
+          {isManagerSession && (
+            <TabsContent value="equipment">
+              <div className="grid gap-4 md:grid-cols-2">
               <Card>
                 <CardHeader className="flex flex-row items-center gap-4 space-y-0">
                   <div className="h-10 w-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600">
@@ -2357,77 +2060,6 @@ export default function Settings() {
                       "Salvar Alterações"
                     )}
                   </Button>
-                  <div className="space-y-4 pt-4 border-t">
-                    <h3 className="text-lg font-medium">
-                      Documentos Fiscais Eletrônicos
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NF-e (Modelo 55)</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Vendas e Operações Interestaduais
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfeEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfeEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NFC-e (Modelo 65)</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Venda ao Consumidor Final
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfceEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfceEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NFS-e</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Prestação de Serviços
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfseEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfseEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>CT-e / MDF-e</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Transporte e Manifesto
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Switch
-                            checked={settings.cteEnabled}
-                            onCheckedChange={(checked) =>
-                              updateSetting("cteEnabled", checked)
-                            }
-                          />
-                          <Switch
-                            checked={settings.mdfeEnabled}
-                            onCheckedChange={(checked) =>
-                              updateSetting("mdfeEnabled", checked)
-                            }
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
                 </CardContent>
               </Card>
 
@@ -2529,81 +2161,11 @@ export default function Settings() {
                       "Salvar Alterações"
                     )}
                   </Button>
-                  <div className="space-y-4 pt-4 border-t">
-                    <h3 className="text-lg font-medium">
-                      Documentos Fiscais Eletrônicos
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NF-e (Modelo 55)</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Vendas e Operações Interestaduais
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfeEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfeEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NFC-e (Modelo 65)</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Venda ao Consumidor Final
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfceEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfceEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>NFS-e</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Prestação de Serviços
-                          </p>
-                        </div>
-                        <Switch
-                          checked={settings.nfseEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("nfseEnabled", checked)
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center justify-between p-3 border rounded-lg">
-                        <div className="space-y-0.5">
-                          <Label>CT-e / MDF-e</Label>
-                          <p className="text-xs text-muted-foreground">
-                            Transporte e Manifesto
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Switch
-                            checked={settings.cteEnabled}
-                            onCheckedChange={(checked) =>
-                              updateSetting("cteEnabled", checked)
-                            }
-                          />
-                          <Switch
-                            checked={settings.mdfeEnabled}
-                            onCheckedChange={(checked) =>
-                              updateSetting("mdfeEnabled", checked)
-                            }
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
                 </CardContent>
               </Card>
-            </div>
-          </TabsContent>
+              </div>
+            </TabsContent>
+          )}
 
           <TabsContent value="terminals">
             <Card>
@@ -2949,77 +2511,6 @@ export default function Settings() {
                     </li>
                   </ul>
                 </div>
-                <div className="space-y-4 pt-4 border-t">
-                  <h3 className="text-lg font-medium">
-                    Documentos Fiscais Eletrônicos
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NF-e (Modelo 55)</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Vendas e Operações Interestaduais
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfeEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfeEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NFC-e (Modelo 65)</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Venda ao Consumidor Final
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfceEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfceEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NFS-e</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Prestação de Serviços
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfseEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfseEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>CT-e / MDF-e</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Transporte e Manifesto
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Switch
-                          checked={settings.cteEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("cteEnabled", checked)
-                          }
-                        />
-                        <Switch
-                          checked={settings.mdfeEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("mdfeEnabled", checked)
-                          }
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -3051,77 +2542,6 @@ export default function Settings() {
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
                   </Link>
-                </div>
-                <div className="space-y-4 pt-4 border-t">
-                  <h3 className="text-lg font-medium">
-                    Documentos Fiscais Eletrônicos
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NF-e (Modelo 55)</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Vendas e Operações Interestaduais
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfeEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfeEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NFC-e (Modelo 65)</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Venda ao Consumidor Final
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfceEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfceEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>NFS-e</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Prestação de Serviços
-                        </p>
-                      </div>
-                      <Switch
-                        checked={settings.nfseEnabled}
-                        onCheckedChange={(checked) =>
-                          updateSetting("nfseEnabled", checked)
-                        }
-                      />
-                    </div>
-                    <div className="flex items-center justify-between p-3 border rounded-lg">
-                      <div className="space-y-0.5">
-                        <Label>CT-e / MDF-e</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Transporte e Manifesto
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Switch
-                          checked={settings.cteEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("cteEnabled", checked)
-                          }
-                        />
-                        <Switch
-                          checked={settings.mdfeEnabled}
-                          onCheckedChange={(checked) =>
-                            updateSetting("mdfeEnabled", checked)
-                          }
-                        />
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </CardContent>
             </Card>

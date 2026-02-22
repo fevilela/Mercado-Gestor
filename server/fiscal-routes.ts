@@ -40,6 +40,7 @@ import * as soap from "soap";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import * as path from "path";
+import { generateDanfeNFCeThermal, generateDanfeNFeA4 } from "./danfe";
 
 const CEST_REGEX = /^\d{7}$/;
 const isCestRequired = (ncm?: string) => Boolean(ncm);
@@ -1942,6 +1943,216 @@ router.post(
   },
 );
 
+router.post(
+  "/nfce/cancel-extemporaneous",
+  requireAuth,
+  requirePermission("fiscal:cancel_nfce"),
+  requireValidFiscalCertificate(),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const saleId = Number(req.body.saleId);
+      const reason = String(req.body.reason || "").trim();
+      if (!saleId) {
+        return res.status(400).json({ error: "Venda nao informada" });
+      }
+      if (reason.length < 15) {
+        return res.status(400).json({
+          error: "Justificativa obrigatoria (min 15 caracteres)",
+        });
+      }
+
+      const sale = await storage.getSale(saleId, companyId);
+      if (!sale) {
+        return res.status(404).json({ error: "Venda nao encontrada" });
+      }
+
+      if (sale.nfceStatus !== "Autorizada") {
+        return res.status(400).json({
+          error: "Apenas NFC-e autorizada pode ser cancelada",
+        });
+      }
+
+      const accessKey = String(sale.nfceKey || "").replace(/\D/g, "");
+      const protocol = String(sale.nfceProtocol || "").trim();
+      if (!accessKey || accessKey.length !== 44) {
+        return res
+          .status(400)
+          .json({ error: "Chave NFC-e invalida ou ausente" });
+      }
+      if (!protocol) {
+        return res
+          .status(400)
+          .json({ error: "Protocolo NFC-e ausente" });
+      }
+
+      const settings = await storage.getCompanySettings(companyId);
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+      const uf = String(settings?.sefazUf || company.state || "SP").toUpperCase();
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado",
+        });
+      }
+
+      const sefazService = new SefazService({
+        environment: resolvedEnvironment,
+        uf,
+        certificateBuffer,
+        certificatePassword,
+        cnpj: String(company.cnpj || "").replace(/\D/g, ""),
+      });
+
+      const result = await sefazService.cancelNFCe(
+        accessKey,
+        protocol,
+        reason,
+      );
+
+      await logSefazTransmission({
+        companyId,
+        action: "nfce-cancel-extemporaneous",
+        environment: resolvedEnvironment,
+        requestPayload: { saleId, accessKey, protocol, reason, uf },
+        responsePayload: result,
+        success: result.success,
+      });
+
+      if (!result.success) {
+        await storage.updateSaleNfceStatus(
+          saleId,
+          companyId,
+          "Pendente Fiscal",
+          sale.nfceProtocol || undefined,
+          sale.nfceKey || undefined,
+          result.message || "Erro ao cancelar NFC-e extemporanea",
+        );
+        return res.status(400).json({
+          error: result.message || "Falha no cancelamento extemporaneo de NFC-e",
+          status: result.status,
+          rawResponse: result.rawResponse,
+        });
+      }
+
+      const updated = await storage.updateSaleNfceStatus(
+        saleId,
+        companyId,
+        "Cancelada",
+        sale.nfceProtocol || undefined,
+        sale.nfceKey || undefined,
+        undefined,
+      );
+
+      res.json({ success: true, sale: updated });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao cancelar NFC-e extemporanea",
+      });
+    }
+  },
+);
+
+router.get("/nfce/:saleId/pdf", async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ error: "Nao autenticado" });
+    }
+
+    const saleId = Number(req.params.saleId);
+    if (!Number.isFinite(saleId) || saleId <= 0) {
+      return res.status(400).json({ error: "Venda invalida" });
+    }
+
+    const sale = await storage.getSale(saleId, companyId);
+    if (!sale) {
+      return res.status(404).json({ error: "Venda nao encontrada" });
+    }
+
+    const nfceKey = String(sale.nfceKey || "").replace(/\D/g, "");
+    if (!nfceKey || nfceKey.length !== 44) {
+      return res
+        .status(400)
+        .json({ error: "Venda ainda nao possui NFC-e autorizada" });
+    }
+
+    const xmlRecord = await storage.getFiscalXmlByKey(companyId, nfceKey);
+    if (!xmlRecord?.xmlContent) {
+      return res.status(404).json({ error: "XML da NFC-e nao encontrado" });
+    }
+
+    const settings = await storage.getCompanySettings(companyId);
+    const company = await storage.getCompanyById(companyId);
+    if (!company) {
+      return res.status(400).json({ error: "Empresa nao configurada" });
+    }
+
+    if (!settings?.cscToken || !settings?.cscId) {
+      return res.status(400).json({
+        error: "CSC da NFC-e nao configurado para gerar DANFE",
+      });
+    }
+
+    const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+    const { getSefazDefaults } = await import("@shared/sefaz-defaults");
+    const defaults = getSefazDefaults(
+      settings?.sefazUf || company.state || "SP",
+    );
+
+    const qrBaseUrl =
+      resolvedEnvironment === "producao"
+        ? settings.sefazQrCodeUrlProducao || defaults.sefazQrCodeUrlProducao
+        : settings.sefazQrCodeUrlHomologacao ||
+          defaults.sefazQrCodeUrlHomologacao;
+
+    if (!qrBaseUrl) {
+      return res.status(400).json({
+        error: "URL do QR Code da NFC-e nao configurada",
+      });
+    }
+
+    const pdfBuffer = await generateDanfeNFCeThermal(xmlRecord.xmlContent, {
+      sefazUrl: qrBaseUrl,
+      cscId: String(settings.cscId || ""),
+      csc: String(settings.cscToken || ""),
+    });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename=\"danfe-nfce-${saleId}.pdf\"`,
+    );
+    res.setHeader("Cache-Control", "no-store");
+    res.send(pdfBuffer);
+  } catch (error) {
+    res.status(500).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "Falha ao gerar PDF da NFC-e",
+    });
+  }
+});
+
 router.get(
   "/nfse/status/:key",
   requireAuth,
@@ -2928,6 +3139,55 @@ router.get("/nfe/history", requireAuth, async (req, res) => {
     res.status(400).json({
       error:
         error instanceof Error ? error.message : "Erro ao buscar historico NF-e",
+    });
+  }
+});
+
+router.get("/nfe/:nfeLogId/pdf", requireAuth, requirePermission("fiscal:view"), async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ error: "Empresa nao identificada" });
+    }
+
+    const nfeLogId = Number(req.params.nfeLogId);
+    if (!Number.isFinite(nfeLogId) || nfeLogId <= 0) {
+      return res.status(400).json({ error: "nfeLogId invalido" });
+    }
+
+    const [log] = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(
+        and(
+          eq(sefazTransmissionLogs.id, nfeLogId),
+          eq(sefazTransmissionLogs.companyId, companyId),
+          eq(sefazTransmissionLogs.action, "generate"),
+        ),
+      )
+      .limit(1);
+
+    if (!log) {
+      return res.status(404).json({ error: "Registro de NF-e nao encontrado" });
+    }
+
+    const responsePayload = (log.responsePayload || {}) as any;
+    const xmlContent = String(responsePayload?.xml || "").trim();
+    if (!xmlContent) {
+      return res.status(404).json({ error: "XML da NF-e nao encontrado" });
+    }
+
+    const pdfBuffer = await generateDanfeNFeA4(xmlContent);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename=\"danfe-nfe-${nfeLogId}.pdf\"`,
+    );
+    res.setHeader("Cache-Control", "no-store");
+    res.send(pdfBuffer);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Falha ao gerar DANFE da NF-e",
     });
   }
 });

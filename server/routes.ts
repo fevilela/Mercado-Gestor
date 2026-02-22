@@ -2950,17 +2950,116 @@ export async function registerRoutes(
       const userId = getUserId(req);
       if (!companyId) return res.status(401).json({ error: "Não autenticado" });
 
+      const unreadOnly =
+        String(req.query.unread || "").toLowerCase() === "true";
+
       const notificationsList = await storage.getAllNotifications(
         companyId,
         userId || undefined
       );
-      res.json(notificationsList);
+
+      const now = new Date();
+      const upcomingLimit = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+      const [sales, payables, receivables] = await Promise.all([
+        storage.getAllSales(companyId),
+        storage.getAllPayables(companyId),
+        storage.getAllReceivables(companyId),
+      ]);
+
+      const pendingFiscalSales = sales.filter((sale: any) => {
+        const fiscalStatus = String(sale.nfceStatus || "").toLowerCase();
+        const saleStatus = String(sale.status || "").toLowerCase();
+        const isCanceled = saleStatus.includes("cancel");
+        return !isCanceled && fiscalStatus !== "autorizada";
+      });
+
+      const payablesPending = payables.filter((item: any) => {
+        const status = String(item.status || "").toLowerCase();
+        return status !== "pago";
+      });
+
+      const receivablesPending = receivables.filter((item: any) => {
+        const status = String(item.status || "").toLowerCase();
+        return status !== "recebido";
+      });
+
+      const payablesOverdue = payablesPending.filter(
+        (item: any) => new Date(item.dueDate) < now
+      );
+      const payablesUpcoming = payablesPending.filter((item: any) => {
+        const due = new Date(item.dueDate);
+        return due >= now && due <= upcomingLimit;
+      });
+
+      const receivablesOverdue = receivablesPending.filter(
+        (item: any) => new Date(item.dueDate) < now
+      );
+      const receivablesUpcoming = receivablesPending.filter((item: any) => {
+        const due = new Date(item.dueDate);
+        return due >= now && due <= upcomingLimit;
+      });
+
+      const dynamicAlerts: any[] = [];
+
+      if (pendingFiscalSales.length > 0) {
+        dynamicAlerts.push({
+          id: -1001,
+          companyId,
+          userId: userId || null,
+          type: "fiscal_pending",
+          title: "Notas fiscais pendentes",
+          message: `${pendingFiscalSales.length} venda(s) com pendencia de emissao/autorizacao fiscal.`,
+          referenceId: null,
+          referenceType: "sales",
+          isRead: false,
+          createdAt: now,
+        });
+      }
+
+      if (payablesOverdue.length > 0 || payablesUpcoming.length > 0) {
+        dynamicAlerts.push({
+          id: -1002,
+          companyId,
+          userId: userId || null,
+          type: "payables_due",
+          title: "Contas a pagar proximas do vencimento",
+          message: `${payablesUpcoming.length} a vencer em ate 7 dias e ${payablesOverdue.length} em atraso.`,
+          referenceId: null,
+          referenceType: "payables",
+          isRead: false,
+          createdAt: now,
+        });
+      }
+
+      if (receivablesOverdue.length > 0 || receivablesUpcoming.length > 0) {
+        dynamicAlerts.push({
+          id: -1003,
+          companyId,
+          userId: userId || null,
+          type: "receivables_due",
+          title: "Contas a receber proximas do vencimento",
+          message: `${receivablesUpcoming.length} a vencer em ate 7 dias e ${receivablesOverdue.length} em atraso.`,
+          referenceId: null,
+          referenceType: "receivables",
+          isRead: false,
+          createdAt: now,
+        });
+      }
+
+      const mergedNotifications = [...dynamicAlerts, ...notificationsList]
+        .filter((item: any) => (unreadOnly ? !item.isRead : true))
+        .sort(
+          (a: any, b: any) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+
+      res.json(mergedNotifications);
     } catch (error) {
       console.error("Failed to fetch notifications:", error);
       res.status(500).json({ error: "Falha ao buscar notificações" });
     }
   });
-
   app.get("/api/notifications/count", requireAuth, async (req, res) => {
     try {
       const companyId = getCompanyId(req);

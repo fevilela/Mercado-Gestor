@@ -1250,8 +1250,6 @@ export default function FiscalDocuments() {
         >
           <TabsList>
             <TabsTrigger value="nfe">NF-e (Modelo 55)</TabsTrigger>
-            <TabsTrigger value="nfce">NFC-e (Modelo 65)</TabsTrigger>
-            <TabsTrigger value="nfse">NFS-e</TabsTrigger>
           </TabsList>
 
           {/* NF-e */}

@@ -21,6 +21,7 @@ import {
 import {
   Bar,
   BarChart,
+  Cell,
   ResponsiveContainer,
   XAxis,
   YAxis,
@@ -54,6 +55,20 @@ interface Product {
 }
 
 export default function Dashboard() {
+  const weekBarColors = [
+    "#3B82F6",
+    "#14B8A6",
+    "#22C55E",
+    "#F59E0B",
+    "#EF4444",
+    "#8B5CF6",
+    "#0EA5E9",
+  ];
+  const chartAxisColor = "#6B7280";
+  const chartGridColor = "#E5E7EB";
+  const areaStrokeColor = "#0F1E2E";
+  const areaGradientStart = "#3B82F6";
+
   const { data: sales = [], isLoading: salesLoading } = useQuery({
     queryKey: ["/api/sales"],
     queryFn: async () => {
@@ -244,9 +259,9 @@ export default function Dashboard() {
               </div>
               <p className="text-xs text-muted-foreground flex items-center mt-1">
                 <span className="text-emerald-500 flex items-center font-medium">
-                  {todaySales.length} vendas
-                </span>{" "}
-                realizadas hoje
+                  {todaySales.length} vendas 
+                </span>{"  "}
+                 realizadas hoje
               </p>
             </CardContent>
           </Card>
@@ -329,13 +344,13 @@ export default function Dashboard() {
                 <BarChart data={salesByDay}>
                   <XAxis
                     dataKey="name"
-                    stroke="#888888"
+                    stroke={chartAxisColor}
                     fontSize={12}
                     tickLine={false}
                     axisLine={false}
                   />
                   <YAxis
-                    stroke="#888888"
+                    stroke={chartAxisColor}
                     fontSize={12}
                     tickLine={false}
                     axisLine={false}
@@ -355,9 +370,15 @@ export default function Dashboard() {
                   />
                   <Bar
                     dataKey="total"
-                    fill="hsl(var(--primary))"
                     radius={[4, 4, 0, 0]}
-                  />
+                  >
+                    {salesByDay.map((_, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={weekBarColors[index % weekBarColors.length]}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -377,12 +398,12 @@ export default function Dashboard() {
                     <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
                       <stop
                         offset="5%"
-                        stopColor="hsl(var(--primary))"
-                        stopOpacity={0.3}
+                        stopColor={areaGradientStart}
+                        stopOpacity={0.35}
                       />
                       <stop
                         offset="95%"
-                        stopColor="hsl(var(--primary))"
+                        stopColor={areaGradientStart}
                         stopOpacity={0}
                       />
                     </linearGradient>
@@ -390,11 +411,11 @@ export default function Dashboard() {
                   <CartesianGrid
                     strokeDasharray="3 3"
                     vertical={false}
-                    stroke="#eee"
+                    stroke={chartGridColor}
                   />
                   <XAxis
                     dataKey="time"
-                    stroke="#888888"
+                    stroke={chartAxisColor}
                     fontSize={12}
                     tickLine={false}
                     axisLine={false}
@@ -413,7 +434,8 @@ export default function Dashboard() {
                   <Area
                     type="monotone"
                     dataKey="sales"
-                    stroke="hsl(var(--primary))"
+                    stroke={areaStrokeColor}
+                    strokeWidth={2.5}
                     fillOpacity={1}
                     fill="url(#colorSales)"
                   />

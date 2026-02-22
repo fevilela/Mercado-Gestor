@@ -48,8 +48,8 @@ export default function Login() {
         <CardHeader className="text-center">
           <div className="mb-2 flex justify-center">
             <img
-              src="/images/Zyron.png"
-              alt="Zyron"
+              src="/images/Arqis.png"
+              alt="Arqis"
               className="block h-20 w-auto object-contain"
               data-testid="image-login-brand"
             />

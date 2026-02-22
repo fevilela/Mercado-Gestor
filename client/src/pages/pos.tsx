@@ -23,7 +23,6 @@ import {
   Wallet,
   Lock,
   ArrowDownLeft,
-  Upload,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -260,34 +259,9 @@ export default function POS() {
   const isScannerAutoAdd = settings?.barcodeScannerAutoAdd !== false;
   const isScannerBeep = settings?.barcodeScannerBeep !== false;
 
-  const handleSendPdvLoad = async () => {
-    try {
-      const res = await fetch("/api/pdv/load", { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || "Falha ao enviar carga");
-      }
-      await refetchPdvLoad();
-      toast({
-        title: "Carga enviada",
-        description: `Produtos: ${data.products} ? Pagamentos: ${data.paymentMethods}`,
-        className: "bg-emerald-500 text-white border-none",
-      });
-    } catch (error) {
-      toast({
-        title: "Erro ao enviar carga",
-        description: error instanceof Error ? error.message : "Falha ao enviar carga",
-        variant: "destructive",
-      });
-    }
-  };
-
-
   const {
     data: pdvLoad,
     error: pdvLoadError,
-    isFetching: isFetchingPdvLoad,
-    refetch: refetchPdvLoad,
   } = useQuery({
     queryKey: ["/api/pdv/load"],
     queryFn: async () => {
@@ -909,6 +883,30 @@ export default function POS() {
       },
     };
 
+    const autoPrintFiscalCoupon = (saleId: number) => {
+      if (!Number.isFinite(saleId) || saleId <= 0) return;
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.src = `/api/fiscal/nfce/${saleId}/pdf`;
+      iframe.onload = () => {
+        setTimeout(() => {
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+          } catch (_error) {
+            // If browser blocks iframe print for PDF, user can still reprint from Fiscal Central.
+          }
+          setTimeout(() => iframe.remove(), 3000);
+        }, 500);
+      };
+      document.body.appendChild(iframe);
+    };
+
     try {
       const result = await createSaleMutation.mutateAsync(saleData);
 
@@ -936,9 +934,12 @@ export default function POS() {
           throw new Error(data?.error || "Erro ao enviar NFC-e");
         }
         setFiscalStatus("success");
+        if (result.sale?.id) {
+          autoPrintFiscalCoupon(Number(result.sale.id));
+        }
         toast({
           title: "Envio Fiscal Iniciado",
-          description: "NFC-e enviada automaticamente para a SEFAZ.",
+          description: "NFC-e enviada para a SEFAZ e cupom fiscal enviado para impressao.",
           variant: "default",
           className: "bg-emerald-500 text-white border-none",
         });
@@ -1085,29 +1086,6 @@ export default function POS() {
     return matchesSearch && matchesCategory;
   });
 
-  const paymentTypeStyles = {
-    pix: {
-      active: "bg-purple-600 hover:bg-purple-700 ring-2 ring-purple-300 ring-offset-2",
-      base: "bg-purple-600/70 hover:bg-purple-600",
-    },
-    credito: {
-      active: "bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-300 ring-offset-2",
-      base: "bg-blue-600/70 hover:bg-blue-600",
-    },
-    debito: {
-      active: "bg-emerald-600 hover:bg-emerald-700 ring-2 ring-emerald-300 ring-offset-2",
-      base: "bg-emerald-600/70 hover:bg-emerald-600",
-    },
-    dinheiro: {
-      active: "bg-amber-600 hover:bg-amber-700 ring-2 ring-amber-300 ring-offset-2",
-      base: "bg-amber-600/70 hover:bg-amber-600",
-    },
-    outros: {
-      active: "bg-slate-600 hover:bg-slate-700 ring-2 ring-slate-300 ring-offset-2",
-      base: "bg-slate-600/70 hover:bg-slate-600",
-    },
-  } as const;
-
   const paymentTypeIcons = {
     pix: QrCode,
     credito: CreditCard,
@@ -1120,7 +1098,7 @@ export default function POS() {
     <div className="flex h-screen w-full bg-background overflow-hidden">
       {/* Catalog Panel - Only shown when showCatalog is true */}
       {showCatalog && (
-        <div className="flex-1 flex flex-col border-r border-border">
+        <div className="w-[56%] min-w-[430px] max-w-[740px] shrink-0 flex flex-col border-r border-border">
           {/* Header */}
           <div className="h-16 border-b border-border flex items-center px-6 gap-4 bg-card">
             <Button
@@ -1222,7 +1200,7 @@ export default function POS() {
       {/* Main Cart & Checkout Area */}
       <div
         className={`flex flex-col bg-card shadow-xl z-10 ${
-          showCatalog ? "w-[400px]" : "flex-1"
+          showCatalog ? "flex-1 min-w-[500px]" : "flex-1"
         }`}
       >
         {/* Cart Header */}
@@ -1243,27 +1221,6 @@ export default function POS() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {isFiscalConfigured ? (
-              <Badge
-                variant="secondary"
-                className="bg-white/20 hover:bg-white/30 text-white border-0"
-              >
-                <CheckCircle2 className="h-3 w-3 mr-1" /> SEFAZ Online
-              </Badge>
-            ) : (
-              <Badge
-                variant="secondary"
-                className="bg-white/20 hover:bg-white/30 text-white border-0"
-              >
-                <FileCheck className="h-3 w-3 mr-1" /> Modo Offline
-              </Badge>
-            )}
-            <Badge
-              variant="secondary"
-              className="bg-white/20 hover:bg-white/30 text-white border-0"
-            >
-              {fiscalEnvironmentLabel}
-            </Badge>
             {cashRegister && hasPermission("pos:sangria") && (
               <Button
                 variant="secondary"
@@ -1275,25 +1232,15 @@ export default function POS() {
                 Sangria
               </Button>
             )}
-            <Button
-              variant="secondary"
-              className="gap-2"
-              onClick={() => setShowCatalog(!showCatalog)}
-              data-testid="button-toggle-catalog"
-            >
-              <Package className="h-4 w-4" />
-              Catálogo
-            </Button>
-            {hasPermission("settings:payments") && (
+            {!showCatalog && (
               <Button
                 variant="secondary"
                 className="gap-2"
-                onClick={handleSendPdvLoad}
-                disabled={isFetchingPdvLoad}
-                data-testid="button-send-pdv-load"
+                onClick={() => setShowCatalog(true)}
+                data-testid="button-toggle-catalog"
               >
-                <Upload className="h-4 w-4" />
-                Enviar Carga
+                <Package className="h-4 w-4" />
+                Catálogo
               </Button>
             )}
             <Badge
@@ -1396,11 +1343,11 @@ export default function POS() {
 
         {/* Totals Section */}
         <div
-          className={`border-t border-border bg-muted/30 p-6 space-y-4 ${
+          className={`border-t border-border bg-background p-6 space-y-4 ${
             !showCatalog ? "max-w-2xl mx-auto w-full" : ""
           }`}
         >
-          <div className="space-y-2">
+          <div className="space-y-2 rounded-lg border border-border/70 p-4">
             <div className="flex justify-between text-sm text-muted-foreground">
               <span>Subtotal</span>
               <span>R$ {subtotal.toFixed(2)}</span>
@@ -1409,15 +1356,11 @@ export default function POS() {
               <span>Descontos</span>
               <span>R$ 0,00</span>
             </div>
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>Tributos Aprox. (IBPT)</span>
-              <span>R$ {(total * 0.18).toFixed(2)}</span>
-            </div>
             <Separator className="my-2" />
             <div className="flex justify-between items-end">
-              <span className="font-bold text-lg">Total a Pagar</span>
+              <span className="font-medium text-base">Total a pagar</span>
               <span
-                className="font-bold text-3xl text-primary"
+                className="font-semibold text-3xl text-foreground tracking-tight"
                 data-testid="text-total"
               >
                 R$ {total.toFixed(2)}
@@ -1425,30 +1368,32 @@ export default function POS() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-2">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             {availablePaymentMethods.map((method) => {
               const isSelected = selectedPayment?.id === method.id;
-              const styles = paymentTypeStyles[method.type] || paymentTypeStyles.outros;
               const Icon = paymentTypeIcons[method.type] || Wallet;
               return (
                 <Button
                   key={method.id}
-                  className={`h-14 flex flex-col gap-1 transition-all ${
-                    isSelected ? styles.active : styles.base
+                  variant="outline"
+                  className={`h-11 justify-start gap-2 px-3 text-sm font-medium transition-colors ${
+                    isSelected
+                      ? "border-foreground bg-foreground text-background hover:bg-foreground/90"
+                      : "border-border bg-background text-foreground hover:bg-muted/60"
                   }`}
                   onClick={() => handleSelectPayment(method)}
                   disabled={cart.length === 0 || paymentStatus === "processing"}
                   data-testid={`button-payment-${method.id}`}
                 >
-                  <Icon className="h-5 w-5" />
-                  <span className="text-xs">{method.name}</span>
+                  <Icon className="h-4 w-4" />
+                  <span className="truncate">{method.name}</span>
                 </Button>
               );
             })}
           </div>
 
           {selectedPayment && (
-            <div className="text-center text-sm text-muted-foreground space-y-1">
+            <div className="rounded-md border border-border px-3 py-2 text-center text-sm text-muted-foreground space-y-1">
               <div>
                 Forma de pagamento:{" "}
                 <span className="font-medium text-foreground">
@@ -1474,28 +1419,33 @@ export default function POS() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2 pt-1">
             <Button
               size="lg"
-              variant="destructive"
-              className="h-12 text-lg font-bold gap-2"
+              variant="outline"
+              className="h-11 gap-2 border-border text-foreground hover:bg-muted/60"
               disabled={cart.length === 0}
               onClick={() => setShowCancelDialog(true)}
               data-testid="button-cancel-sale"
             >
               <Ban className="h-5 w-5" />
-              CANCELAR
+              Cancelar venda
             </Button>
             <Button
               size="lg"
-              className="h-12 text-lg font-bold gap-2"
+              className="h-11 gap-2"
               disabled={cart.length === 0 || paymentStatus !== "approved"}
               onClick={handleFinishSale}
               data-testid="button-finish-sale"
             >
-              FINALIZAR
+              Finalizar venda
               <FileCheck className="h-5 w-5" />
             </Button>
+          </div>
+          <div className="flex items-center justify-end gap-2 px-1 text-[11px] text-muted-foreground">
+            <span>{isFiscalConfigured ? "SEFAZ online" : "SEFAZ offline"}</span>
+            <span>•</span>
+            <span>Ambiente {fiscalEnvironmentLabel}</span>
           </div>
         </div>
       </div>
@@ -1633,23 +1583,14 @@ export default function POS() {
           <DialogFooter className="sm:justify-center gap-2">
             {(fiscalStatus === "success" ||
               fiscalStatus === "pending_fiscal") && (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={resetSale}
-                  className="flex-1"
-                  data-testid="button-new-sale"
-                >
-                  <Plus className="mr-2 h-4 w-4" /> Nova Venda
-                </Button>
-                <Button
-                  onClick={resetSale}
-                  className="flex-1"
-                  data-testid="button-print-receipt"
-                >
-                  <Printer className="mr-2 h-4 w-4" /> Imprimir Cupom
-                </Button>
-              </>
+              <Button
+                variant="outline"
+                onClick={resetSale}
+                className="flex-1"
+                data-testid="button-new-sale"
+              >
+                <Plus className="mr-2 h-4 w-4" /> Nova Venda
+              </Button>
             )}
           </DialogFooter>
         </DialogContent>

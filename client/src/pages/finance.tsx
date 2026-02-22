@@ -72,8 +72,9 @@ import {
   isSameYear,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useLocation } from "wouter";
 
 interface Sale {
   id: number;
@@ -139,11 +140,31 @@ const PAYABLE_CATEGORIES = [
 const RECEIVABLE_CATEGORIES = ["Vendas", "Serviços", "Empréstimos", "Outros"];
 
 export default function Finance() {
+  const [location] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [payableDialogOpen, setPayableDialogOpen] = useState(false);
   const [receivableDialogOpen, setReceivableDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<
+    "cashflow" | "payables" | "receivables" | "dre"
+  >("cashflow");
+
+  useEffect(() => {
+    const queryString = location.includes("?")
+      ? location.substring(location.indexOf("?"))
+      : window.location.search;
+    const tabParam = new URLSearchParams(queryString).get("tab");
+
+    if (
+      tabParam === "cashflow" ||
+      tabParam === "payables" ||
+      tabParam === "receivables" ||
+      tabParam === "dre"
+    ) {
+      setActiveTab(tabParam);
+    }
+  }, [location]);
 
   const { data: sales = [], isLoading: salesLoading } = useQuery({
     queryKey: ["/api/sales"],
@@ -637,7 +658,13 @@ export default function Finance() {
           </Card>
         </div>
 
-        <Tabs defaultValue="cashflow" className="space-y-4">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) =>
+            setActiveTab(value as "cashflow" | "payables" | "receivables" | "dre")
+          }
+          className="space-y-4"
+        >
           <TabsList>
             <TabsTrigger value="cashflow">Fluxo de Caixa</TabsTrigger>
             <TabsTrigger value="payables">Contas a Pagar</TabsTrigger>

@@ -25,6 +25,7 @@ import CashHistory from "@/pages/cash-history";
 import FiscalConfig from "@/pages/fiscal-config";
 import FiscalCentralPage from "@/pages/fiscal-central";
 import FiscalDocuments from "@/pages/fiscal-documents";
+import Notifications from "@/pages/notifications";
 import { CertificateConfig } from "@/pages/certificate-config";
 import SequentialNumberingConfig from "@/pages/sequential-numbering-config";
 import { Loader2 } from "lucide-react";
@@ -138,6 +139,9 @@ function Router() {
       </Route>
       <Route path="/fiscal-central">
         <ProtectedRoute component={FiscalCentralPage} />
+      </Route>
+      <Route path="/notifications">
+        <ProtectedRoute component={Notifications} />
       </Route>
       <Route path="/nfe-emissao">
         <Redirect to="/fiscal-documents" />

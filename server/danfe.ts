@@ -33,11 +33,17 @@ function formatCurrency(value: number) {
 
 async function parseNFe(xmlContent: string) {
   const parsed = await parseStringPromise(xmlContent, { explicitArray: false });
-  const inf = (parsed?.NFe ?? parsed?.nfeProc?.NFe)?.infNFe ?? parsed?.infNFe;
+  const nfeRoot = (parsed?.NFe ?? parsed?.nfeProc?.NFe) ?? null;
+  const inf = nfeRoot?.infNFe ?? parsed?.infNFe;
+  const protNfe = parsed?.nfeProc?.protNFe?.infProt ?? parsed?.protNFe?.infProt ?? {};
   const ide: XmlNode = inf?.ide ?? {};
   const emit: XmlNode = inf?.emit ?? {};
   const dest: XmlNode = inf?.dest ?? {};
   const total: XmlNode = inf?.total?.ICMSTot ?? {};
+  const detPag = toArray(inf?.pag?.detPag).map((item: any) => ({
+    tPag: String(item?.tPag ?? ""),
+    vPag: String(item?.vPag ?? "0"),
+  }));
   const det = toArray(inf?.det).map((item: any, index: number) => {
     const prod = item?.prod ?? {};
     return {
@@ -51,10 +57,11 @@ async function parseNFe(xmlContent: string) {
   });
   const chave =
     (inf?.["$"]?.Id as string | undefined)?.replace("NFe", "") ??
-    (parsed?.protNFe?.infProt?.chNFe as string | undefined) ??
+    (protNfe?.chNFe as string | undefined) ??
     "";
+  const protocolo = (protNfe?.nProt as string | undefined) ?? "";
 
-  return { ide, emit, dest, total, det, chave, inf };
+  return { ide, emit, dest, total, det, detPag, chave, protocolo, inf, nfeRoot };
 }
 
 function createPdf(docDefinition: any): Promise<Buffer> {
@@ -204,7 +211,7 @@ export async function generateDanfeNFCeThermal(
   xmlContent: string,
   opts: { sefazUrl: string; cscId: string; csc: string },
 ): Promise<Buffer> {
-  const { ide, emit, dest, total, det, chave, inf } =
+  const { ide, emit, dest, total, det, detPag, chave, protocolo, inf, nfeRoot } =
     await parseNFe(xmlContent);
   const totalTributos = numberString(total.vTotTrib);
   const totalsBody = [
@@ -215,8 +222,38 @@ export async function generateDanfeNFCeThermal(
     totalsBody.push(["Tributos (IBPT)", formatCurrency(totalTributos)]);
   }
   totalsBody.push(["Total", formatCurrency(numberString(total.vNF))]);
-  const suplQr = inf?.infNFeSupl?.qrCode;
-  const signature = toArray((inf as any)?.Signature).at(0);
+  const paymentTypeLabel = (code: string) => {
+    const normalized = String(code || "").padStart(2, "0");
+    const map: Record<string, string> = {
+      "01": "Dinheiro",
+      "02": "Cheque",
+      "03": "Cartao Credito",
+      "04": "Cartao Debito",
+      "05": "Credito Loja",
+      "10": "Vale Alimentacao",
+      "11": "Vale Refeicao",
+      "12": "Vale Presente",
+      "13": "Vale Combustivel",
+      "15": "Boleto",
+      "16": "Deposito",
+      "17": "PIX",
+      "18": "Transferencia",
+      "19": "Programa fidelidade",
+      "90": "Sem pagamento",
+      "99": "Outros",
+    };
+    return map[normalized] || `Codigo ${normalized}`;
+  };
+
+  const paymentRows = detPag.length
+    ? detPag.map((p) => [
+        paymentTypeLabel(p.tPag),
+        formatCurrency(numberString(p.vPag)),
+      ])
+    : [["Forma de pagamento", "Nao informado"]];
+
+  const suplQr = nfeRoot?.infNFeSupl?.qrCode ?? inf?.infNFeSupl?.qrCode;
+  const signature = toArray((nfeRoot as any)?.Signature ?? (inf as any)?.Signature).at(0);
   const digestValue =
     signature?.SignedInfo?.Reference?.[0]?.DigestValue?.[0] ??
     signature?.SignedInfo?.Reference?.DigestValue ??
@@ -237,12 +274,17 @@ export async function generateDanfeNFCeThermal(
       csc: opts.csc,
     });
 
-  const qrCodeDataUrl = await QRCode.toDataURL(qrUrl, {
-    errorCorrectionLevel: "M",
-  });
+  let qrCodeDataUrl = "";
+  try {
+    qrCodeDataUrl = await QRCode.toDataURL(qrUrl, {
+      errorCorrectionLevel: "M",
+    });
+  } catch {
+    qrCodeDataUrl = "";
+  }
 
   const docDefinition = {
-    pageSize: { width: 227, height: "auto" },
+    pageSize: { width: 227, height: 1200 },
     pageMargins: [10, 10, 10, 10],
     defaultStyle: { font: "Roboto", fontSize: 8 },
     content: [
@@ -269,6 +311,10 @@ export async function generateDanfeNFCeThermal(
         margin: [0, 2, 0, 4],
       },
       {
+        text: `Protocolo de autorizacao: ${protocolo || "N/A"}`,
+        margin: [0, 0, 0, 2],
+      },
+      {
         text: `Chave de Acesso: ${chave}`,
         style: "small",
         margin: [0, 0, 0, 6],
@@ -291,40 +337,41 @@ export async function generateDanfeNFCeThermal(
         margin: [0, 0, 0, 8],
       },
       {
-        columns: [
-          { width: "*", text: "" },
-          {
-            width: 100,
-            table: {
-              widths: ["*", "*"],
-              body: totalsBody,
-            },
-            layout: "lightHorizontalLines",
-          },
-        ],
+        table: {
+          widths: ["*", 70],
+          body: totalsBody,
+        },
+        layout: "lightHorizontalLines",
         margin: [0, 0, 0, 8],
       },
       {
-        columns: [
-          {
-            width: "*",
-            text: "Consulta via leitor de QR Code",
-            alignment: "center",
-          },
-        ],
-        margin: [0, 4, 0, 4],
+        text: "Pagamentos",
+        style: "subtitle",
+        margin: [0, 2, 0, 4],
       },
       {
-        columns: [
-          {
-            width: "*",
-            image: qrCodeDataUrl,
-            fit: [120, 120],
-            alignment: "center",
-          },
-        ],
-        margin: [0, 0, 0, 6],
+        table: {
+          widths: ["*", 70],
+          body: [["Forma", "Valor"], ...paymentRows],
+        },
+        layout: "lightHorizontalLines",
+        margin: [0, 0, 0, 8],
       },
+      {
+        text: "Consulta via leitor de QR Code",
+        alignment: "center",
+        margin: [0, 4, 0, 4],
+      },
+      ...(qrCodeDataUrl
+        ? [
+            {
+              image: qrCodeDataUrl,
+              fit: [120, 120],
+              alignment: "center",
+              margin: [0, 0, 0, 6],
+            },
+          ]
+        : []),
       { text: qrUrl, style: "small", alignment: "center" },
       {
         text: `Data emissao: ${ide.dhEmi ?? ide.dEmi ?? ""}`,
@@ -333,6 +380,10 @@ export async function generateDanfeNFCeThermal(
       {
         text: `Consumidor: ${dest.xNome ?? "Nao identificado"}`,
         margin: [0, 2, 0, 0],
+      },
+      {
+        text: `Documento: ${dest.CNPJ ?? dest.CPF ?? "Nao informado"}`,
+        margin: [0, 1, 0, 0],
       },
     ],
     styles: {

@@ -13,6 +13,7 @@
   Bell,
   Menu,
   ChevronDown,
+  ChevronRight,
   User,
   History,
   FileText,
@@ -32,7 +33,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 
@@ -178,14 +179,44 @@ interface Notification {
   type: string;
   title: string;
   message: string;
+  referenceType?: string | null;
   isRead: boolean;
   createdAt: string;
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
+  const SIDEBAR_STATE_KEY = "arqis_sidebar_collapsed_sections";
   const [location, setLocation] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<
+    Record<string, boolean>
+  >(() => {
+    const defaultState = Object.fromEntries(
+      sidebarSections.map((section) => [section.title, true]),
+    ) as Record<string, boolean>;
+
+    try {
+      const raw = window.localStorage.getItem(SIDEBAR_STATE_KEY);
+      if (!raw) return defaultState;
+      const parsed = JSON.parse(raw) as Record<string, boolean>;
+      if (!parsed || typeof parsed !== "object") return defaultState;
+      return { ...defaultState, ...parsed };
+    } catch {
+      return defaultState;
+    }
+  });
   const { user, company, logout, hasAnyPermission } = useAuth();
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_STATE_KEY,
+        JSON.stringify(collapsedSections),
+      );
+    } catch {
+      // ignore localStorage write errors
+    }
+  }, [collapsedSections]);
 
   const { data: notifications = [] } = useQuery<Notification[]>({
     queryKey: ["/api/notifications"],
@@ -198,6 +229,22 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   });
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+  const getNotificationTarget = (notification: Notification) => {
+    const type = String(notification.type || "").toLowerCase();
+    const referenceType = String(notification.referenceType || "").toLowerCase();
+
+    if (type.includes("fiscal") || referenceType === "sales") {
+      return "/fiscal-documents";
+    }
+    if (type.includes("payables") || referenceType === "payables") {
+      return "/finance?tab=payables";
+    }
+    if (type.includes("receivables") || referenceType === "receivables") {
+      return "/finance?tab=receivables";
+    }
+    return "/notifications";
+  };
 
   const getInitials = (name: string) => {
     return name
@@ -213,13 +260,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     setLocation("/login");
   };
 
+  const toggleSection = (title: string) => {
+    setCollapsedSections((prev) => ({
+      ...prev,
+      [title]: !prev[title],
+    }));
+  };
+
   const SidebarContent = () => (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-16 items-center px-6 border-b border-sidebar-border">
         <div className="flex w-full items-center justify-center">
           <img
-            src="/images/Zyron-branco.png"
-            alt="Zyron"
+            src="/images/Arqis-branco.png"
+            alt="Arqis"
             className="block h-9 w-auto object-contain"
             data-testid="image-sidebar-brand"
           />
@@ -237,26 +291,37 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
             return (
               <div key={section.title} className="space-y-1">
-                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
-                  {section.title}
-                </p>
-                {visibleItems.map((item) => {
-                  const isActive = location === item.href;
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
-                        isActive
-                          ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                      }`}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
+                <button
+                  type="button"
+                  onClick={() => toggleSection(section.title)}
+                  className="flex w-full items-center justify-between px-3 pb-1 text-left text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 hover:text-sidebar-foreground"
+                  data-testid={`button-toggle-section-${section.title.toLowerCase().replace(/\s+/g, "-")}`}
+                >
+                  <span>{section.title}</span>
+                  <ChevronRight
+                    className={`h-3.5 w-3.5 transition-transform ${
+                      collapsedSections[section.title] ? "" : "rotate-90"
+                    }`}
+                  />
+                </button>
+                {!collapsedSections[section.title] &&
+                  visibleItems.map((item) => {
+                    const isActive = location === item.href;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
+                          isActive
+                            ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                            : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                        }`}
+                      >
+                        <item.icon className="h-4 w-4" />
+                        {item.label}
+                      </Link>
+                    );
+                  })}
               </div>
             );
           })}
@@ -348,7 +413,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   notifications.slice(0, 5).map((notification) => (
                     <DropdownMenuItem
                       key={notification.id}
-                      className="flex flex-col items-start gap-1 p-3"
+                      className="flex flex-col items-start gap-1 rounded-md border border-transparent p-3 focus:bg-transparent data-[highlighted]:bg-transparent data-[highlighted]:border-border"
+                      onClick={() => setLocation(getNotificationTarget(notification))}
                     >
                       <span className="font-medium text-sm">
                         {notification.title}
@@ -363,7 +429,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      className="justify-center text-primary"
+                      className="justify-center rounded-md border border-transparent text-primary focus:bg-transparent data-[highlighted]:bg-transparent data-[highlighted]:border-border"
                       onClick={() => setLocation("/notifications")}
                     >
                       Ver todas as notificações
@@ -422,5 +488,3 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-

@@ -23,6 +23,7 @@ import {
   PackagePlus,
   PackageMinus,
   Loader2,
+  Upload,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -170,6 +171,7 @@ export default function Inventory() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
+  const [isSendingPdvLoad, setIsSendingPdvLoad] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -197,6 +199,26 @@ export default function Inventory() {
       return res.json();
     },
   });
+
+  const handleSendPdvLoad = async () => {
+    setIsSendingPdvLoad(true);
+    try {
+      const response = await fetch("/api/pdv/load", { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Falha ao enviar carga do PDV");
+      }
+      toast.success(
+        `Carga PDV enviada: ${data.products ?? 0} produtos e ${data.paymentMethods ?? 0} pagamentos`
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao enviar carga do PDV"
+      );
+    } finally {
+      setIsSendingPdvLoad(false);
+    }
+  };
 
   const handleXmlImport = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -841,6 +863,19 @@ export default function Inventory() {
                 <FileUp className="mr-2 h-4 w-4" />
               )}
               {isImporting ? "Importando..." : "Importar XML"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleSendPdvLoad}
+              disabled={isSendingPdvLoad}
+              data-testid="button-send-pdv-load-inventory"
+            >
+              {isSendingPdvLoad ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="mr-2 h-4 w-4" />
+              )}
+              Enviar Carga PDV
             </Button>
             <Button onClick={handleNewProduct}>
               <Plus className="mr-2 h-4 w-4" /> Novo Produto

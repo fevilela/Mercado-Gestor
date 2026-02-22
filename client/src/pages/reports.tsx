@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Download, Eye } from "lucide-react";
+import { Loader2, Download, Eye, ChevronDown, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type CsvValue = string | number;
@@ -1047,6 +1047,7 @@ export default function Reports() {
   const [filteredRows, setFilteredRows] = useState<ReportRow[]>([]);
   const [hasAppliedFilter, setHasAppliedFilter] = useState(false);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   const exportCsv = (report: ReportOutput, rows: ReportRow[]) => {
     const escapeCsv = (value: CsvValue) => `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -1184,6 +1185,11 @@ export default function Reports() {
     return Array.from(groups.entries());
   }, []);
 
+  const isGroupCollapsed = (groupName: string) => Boolean(collapsedGroups[groupName]);
+  const toggleGroup = (groupName: string) => {
+    setCollapsedGroups((prev) => ({ ...prev, [groupName]: !prev[groupName] }));
+  };
+
   const filterConfigByColumn = useMemo(() => {
     const config = new Map<string, { type: FilterControlType; options: string[] }>();
     if (!rawReport) return config;
@@ -1272,23 +1278,35 @@ export default function Reports() {
           <div className="space-y-4">
             {groupedDefinitions.map(([groupName, defs]) => (
               <Card key={groupName}>
-                <CardHeader>
-                  <CardTitle>{groupName}</CardTitle>
+                <CardHeader
+                  className="cursor-pointer"
+                  onClick={() => toggleGroup(groupName)}
+                >
+                  <CardTitle className="flex items-center justify-between">
+                    {groupName}
+                    {isGroupCollapsed(groupName) ? (
+                      <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                    )}
+                  </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  {defs.map((report) => (
-                    <button
-                      key={report.id}
-                      type="button"
-                      className="w-full rounded-md border p-3 text-left transition-colors hover:bg-muted/50"
-                      onClick={() => handleOpenReport(report.id)}
-                      disabled={isGenerating}
-                    >
-                      <p className="font-medium">{report.title}</p>
-                      <p className="text-sm text-muted-foreground">{report.description}</p>
-                    </button>
-                  ))}
-                </CardContent>
+                {!isGroupCollapsed(groupName) && (
+                  <CardContent className="space-y-2">
+                    {defs.map((report) => (
+                      <button
+                        key={report.id}
+                        type="button"
+                        className="w-full rounded-md border p-3 text-left transition-colors hover:bg-muted/50"
+                        onClick={() => handleOpenReport(report.id)}
+                        disabled={isGenerating}
+                      >
+                        <p className="font-medium">{report.title}</p>
+                        <p className="text-sm text-muted-foreground">{report.description}</p>
+                      </button>
+                    ))}
+                  </CardContent>
+                )}
               </Card>
             ))}
           </div>
@@ -1366,8 +1384,8 @@ export default function Reports() {
                       )}
                       <div className="max-h-[520px] overflow-auto rounded-md border">
                         <Table>
-                          <TableHeader>
-                            <TableRow>
+                          <TableHeader className="bg-muted/70">
+                            <TableRow className="hover:bg-muted/70">
                               {rawReport.columns.map((col) => (
                                 <TableHead key={col}>{col}</TableHead>
                               ))}

@@ -82,6 +82,27 @@ export default function FiscalCentralPage() {
     doc: NFeHistoryRecord | null;
     reason: string;
   }>({ open: false, doc: null, reason: "" });
+  const [nfeCceDialog, setNfeCceDialog] = useState<{
+    open: boolean;
+    doc: NFeHistoryRecord | null;
+    correctedContent: string;
+    sequence: string;
+  }>({ open: false, doc: null, correctedContent: "", sequence: "1" });
+  const [nfeInutilizeDialog, setNfeInutilizeDialog] = useState<{
+    open: boolean;
+    doc: NFeHistoryRecord | null;
+    series: string;
+    startNumber: string;
+    endNumber: string;
+    reason: string;
+  }>({
+    open: false,
+    doc: null,
+    series: "",
+    startNumber: "",
+    endNumber: "",
+    reason: "",
+  });
   const [nfeSearch, setNfeSearch] = useState("");
   const [nfeStatusFilter, setNfeStatusFilter] = useState("all");
   const [nfeDateFrom, setNfeDateFrom] = useState("");
@@ -92,6 +113,27 @@ export default function FiscalCentralPage() {
     sale: SaleRecord | null;
     reason: string;
   }>({ open: false, sale: null, reason: "" });
+  const [nfceExtemporaneousCancelDialog, setNfceExtemporaneousCancelDialog] =
+    useState<{
+      open: boolean;
+      sale: SaleRecord | null;
+      reason: string;
+    }>({ open: false, sale: null, reason: "" });
+  const [nfceInutilizeDialog, setNfceInutilizeDialog] = useState<{
+    open: boolean;
+    sale: SaleRecord | null;
+    serie: string;
+    startNumber: string;
+    endNumber: string;
+    reason: string;
+  }>({
+    open: false,
+    sale: null,
+    serie: "",
+    startNumber: "",
+    endNumber: "",
+    reason: "",
+  });
   const [nfceSearch, setNfceSearch] = useState("");
   const [nfceStatusFilter, setNfceStatusFilter] = useState("all");
   const [nfceDateFrom, setNfceDateFrom] = useState("");
@@ -328,6 +370,168 @@ export default function FiscalCentralPage() {
     },
   });
 
+  const cceNfeMutation = useMutation({
+    mutationFn: async () => {
+      if (!nfeCceDialog.doc) throw new Error("NF-e nao selecionada");
+      const res = await fetch("/api/fiscal/sefaz/correction-letter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessKey: nfeCceDialog.doc.documentKey,
+          correctedContent: nfeCceDialog.correctedContent,
+          sequence: Number(nfeCceDialog.sequence || "1"),
+          uf: sefazUf,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "Falha ao enviar carta de correcao");
+      }
+      return payload;
+    },
+    onSuccess: () => {
+      toast({ title: "Sucesso", description: "Carta de correção enviada." });
+      setNfeCceDialog({
+        open: false,
+        doc: null,
+        correctedContent: "",
+        sequence: "1",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Falha ao enviar carta de correção",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const inutilizeNfeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/fiscal/sefaz/inutilize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          series: nfeInutilizeDialog.series,
+          startNumber: nfeInutilizeDialog.startNumber,
+          endNumber: nfeInutilizeDialog.endNumber,
+          reason: nfeInutilizeDialog.reason,
+          uf: sefazUf,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "Falha ao inutilizar numeracao");
+      }
+      return payload;
+    },
+    onSuccess: () => {
+      toast({ title: "Sucesso", description: "Inutilização registrada." });
+      setNfeInutilizeDialog({
+        open: false,
+        doc: null,
+        series: "",
+        startNumber: "",
+        endNumber: "",
+        reason: "",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Falha ao inutilizar numeração",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const cancelNfceExtemporaneousMutation = useMutation({
+    mutationFn: async (sale: SaleRecord) => {
+      const res = await fetch("/api/fiscal/nfce/cancel-extemporaneous", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          saleId: sale.id,
+          reason: nfceExtemporaneousCancelDialog.reason,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          payload?.error || "Falha no cancelamento extemporaneo de NFC-e",
+        );
+      }
+      return payload;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Sucesso",
+        description: "Cancelamento extemporaneo da NFC-e enviado.",
+      });
+      setNfceExtemporaneousCancelDialog({ open: false, sale: null, reason: "" });
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Falha no cancelamento extemporaneo de NFC-e",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const inutilizeNfceMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/fiscal/nfce/inutilize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          serie: nfceInutilizeDialog.serie,
+          startNumber: nfceInutilizeDialog.startNumber,
+          endNumber: nfceInutilizeDialog.endNumber,
+          reason: nfceInutilizeDialog.reason,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "Falha ao inutilizar numeracao");
+      }
+      return payload;
+    },
+    onSuccess: () => {
+      toast({ title: "Sucesso", description: "Inutilizacao registrada." });
+      setNfceInutilizeDialog({
+        open: false,
+        sale: null,
+        serie: "",
+        startNumber: "",
+        endNumber: "",
+        reason: "",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Falha ao inutilizar numeracao",
+        variant: "destructive",
+      });
+    },
+  });
+
   const downloadTextFile = (fileName: string, content: string) => {
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const href = URL.createObjectURL(blob);
@@ -521,6 +725,174 @@ export default function FiscalCentralPage() {
     return normalized.includes("autoriz") && Boolean(key) && Boolean(protocol);
   };
 
+  const canSendNfe = (doc: NFeHistoryRecord) => Boolean(doc.canSend);
+  const canCancelNfe = (doc: NFeHistoryRecord) => Boolean(doc.canCancel);
+  const canCceNfe = (doc: NFeHistoryRecord) =>
+    String(doc.status || "").toLowerCase().includes("autorizada") &&
+    Boolean(doc.documentKey);
+
+  const openNfeInutilize = (doc: NFeHistoryRecord) => {
+    const fallbackNumber = String(doc.nfeNumber || "").trim();
+    const fallbackSeries = String(doc.nfeSeries || "").trim();
+    setNfeInutilizeDialog({
+      open: true,
+      doc,
+      series: fallbackSeries,
+      startNumber: fallbackNumber,
+      endNumber: fallbackNumber,
+      reason: "",
+    });
+  };
+
+  const openNfcePdf = async (saleId: number) => {
+    const url = `/api/fiscal/nfce/${saleId}/pdf`;
+    try {
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error || "Falha ao carregar PDF da NFC-e");
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      window.open(objectUrl, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (error) {
+      toast({
+        title: "Nao foi possivel abrir o PDF",
+        description:
+          error instanceof Error ? error.message : "Falha ao carregar DANFE NFC-e.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const reprintNfce = async (saleId: number) => {
+    const url = `/api/fiscal/nfce/${saleId}/pdf`;
+    try {
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error || "Falha ao carregar PDF da NFC-e");
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.src = objectUrl;
+      iframe.onload = () => {
+        setTimeout(() => {
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+          } catch (_error) {
+            toast({
+              title: "Nao foi possivel imprimir automaticamente",
+              description: "Use a opcao Ver PDF para imprimir manualmente.",
+              variant: "destructive",
+            });
+          }
+          setTimeout(() => {
+            iframe.remove();
+            URL.revokeObjectURL(objectUrl);
+          }, 3000);
+        }, 500);
+      };
+      document.body.appendChild(iframe);
+    } catch (error) {
+      toast({
+        title: "Nao foi possivel reimprimir",
+        description:
+          error instanceof Error ? error.message : "Falha ao carregar DANFE NFC-e.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const openNfceInutilizeDialog = (sale: SaleRecord) => {
+    setNfceInutilizeDialog({
+      open: true,
+      sale,
+      serie: "",
+      startNumber: "",
+      endNumber: "",
+      reason: "",
+    });
+  };
+
+  const openNfePdf = async (nfeLogId: number) => {
+    const url = `/api/fiscal/nfe/${nfeLogId}/pdf`;
+    try {
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error || "Falha ao carregar DANFE da NF-e");
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      window.open(objectUrl, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (error) {
+      toast({
+        title: "Nao foi possivel abrir o DANFE",
+        description:
+          error instanceof Error ? error.message : "Falha ao abrir PDF da NF-e.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const printNfeDanfe = async (nfeLogId: number) => {
+    const url = `/api/fiscal/nfe/${nfeLogId}/pdf`;
+    try {
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error || "Falha ao carregar DANFE da NF-e");
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.src = objectUrl;
+      iframe.onload = () => {
+        setTimeout(() => {
+          try {
+            iframe.contentWindow?.focus();
+            iframe.contentWindow?.print();
+          } catch (_error) {
+            toast({
+              title: "Nao foi possivel imprimir automaticamente",
+              description: "Use a opcao Ver DANFE (PDF) para imprimir manualmente.",
+              variant: "destructive",
+            });
+          }
+          setTimeout(() => {
+            iframe.remove();
+            URL.revokeObjectURL(objectUrl);
+          }, 3000);
+        }, 500);
+      };
+      document.body.appendChild(iframe);
+    } catch (error) {
+      toast({
+        title: "Nao foi possivel imprimir DANFE",
+        description:
+          error instanceof Error ? error.message : "Falha ao carregar PDF da NF-e.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const filteredNfe = useMemo(() => {
     const query = nfeSearch.trim().toLowerCase();
     const dateFrom = parseDateRangeStart(nfeDateFrom);
@@ -701,8 +1073,9 @@ export default function FiscalCentralPage() {
                       </TableHeader>
                       <TableBody>
                         {filteredNfe.map((doc) => {
-                          const rowCanSend = doc.canSend;
-                          const rowCanCancel = doc.canCancel;
+                          const rowCanSend = canSendNfe(doc);
+                          const rowCanCancel = canCancelNfe(doc);
+                          const rowCanCce = canCceNfe(doc);
                           return (
                             <TableRow key={doc.id}>
                               <TableCell>
@@ -755,6 +1128,16 @@ export default function FiscalCentralPage() {
                                       Enviar para SEFAZ
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
+                                      onClick={() => openNfePdf(doc.id)}
+                                    >
+                                      Ver DANFE (PDF)
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => printNfeDanfe(doc.id)}
+                                    >
+                                      Imprimir DANFE
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
                                       onClick={() =>
                                         setNfeCancelDialog({
                                           open: true,
@@ -767,6 +1150,25 @@ export default function FiscalCentralPage() {
                                       }
                                     >
                                       Cancelar NF-e
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setNfeCceDialog({
+                                          open: true,
+                                          doc,
+                                          correctedContent: "",
+                                          sequence: "1",
+                                        })
+                                      }
+                                      disabled={!rowCanCce || cceNfeMutation.isPending}
+                                    >
+                                      Carta de correção
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => openNfeInutilize(doc)}
+                                      disabled={inutilizeNfeMutation.isPending}
+                                    >
+                                      Inutilizar numeração
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
@@ -943,6 +1345,18 @@ export default function FiscalCentralPage() {
                                       Enviar para SEFAZ
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
+                                      onClick={() => openNfcePdf(sale.id)}
+                                      disabled={!sale.nfceKey}
+                                    >
+                                      Ver PDF
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => reprintNfce(sale.id)}
+                                      disabled={!sale.nfceKey}
+                                    >
+                                      Reimprimir
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
                                       onClick={() =>
                                         setNfceCancelDialog({
                                           open: true,
@@ -956,6 +1370,27 @@ export default function FiscalCentralPage() {
                                       }
                                     >
                                       Cancelar NFC-e
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        setNfceExtemporaneousCancelDialog({
+                                          open: true,
+                                          sale,
+                                          reason: "",
+                                        })
+                                      }
+                                      disabled={
+                                        !rowCanCancel ||
+                                        cancelNfceExtemporaneousMutation.isPending
+                                      }
+                                    >
+                                      Cancelamento extemporâneo
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => openNfceInutilizeDialog(sale)}
+                                      disabled={inutilizeNfceMutation.isPending}
+                                    >
+                                      Inutilizar numeração
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
@@ -1160,6 +1595,177 @@ export default function FiscalCentralPage() {
       </Dialog>
 
       <Dialog
+        open={nfeCceDialog.open}
+        onOpenChange={(open) => setNfeCceDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Carta de correção (CC-e) NF-e</DialogTitle>
+            <DialogDescription>
+              Informe o texto da correção e a sequência do evento.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>Sequência</Label>
+              <Input
+                value={nfeCceDialog.sequence}
+                onChange={(e) =>
+                  setNfeCceDialog((prev) => ({
+                    ...prev,
+                    sequence: e.target.value,
+                  }))
+                }
+                placeholder="1"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Texto da correção</Label>
+              <Input
+                value={nfeCceDialog.correctedContent}
+                onChange={(e) =>
+                  setNfeCceDialog((prev) => ({
+                    ...prev,
+                    correctedContent: e.target.value,
+                  }))
+                }
+                placeholder="Descreva a correção"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() =>
+                setNfeCceDialog({
+                  open: false,
+                  doc: null,
+                  correctedContent: "",
+                  sequence: "1",
+                })
+              }
+            >
+              Fechar
+            </Button>
+            <Button
+              onClick={() => cceNfeMutation.mutate()}
+              disabled={
+                cceNfeMutation.isPending ||
+                nfeCceDialog.correctedContent.trim().length < 15
+              }
+            >
+              {cceNfeMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Enviar CC-e
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={nfeInutilizeDialog.open}
+        onOpenChange={(open) =>
+          setNfeInutilizeDialog((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Inutilizar numeração NF-e</DialogTitle>
+            <DialogDescription>
+              Informe série, intervalo e justificativa (mínimo 15 caracteres).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-2">
+              <Label>Série</Label>
+              <Input
+                value={nfeInutilizeDialog.series}
+                onChange={(e) =>
+                  setNfeInutilizeDialog((prev) => ({
+                    ...prev,
+                    series: e.target.value,
+                  }))
+                }
+                placeholder="1"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Número inicial</Label>
+              <Input
+                value={nfeInutilizeDialog.startNumber}
+                onChange={(e) =>
+                  setNfeInutilizeDialog((prev) => ({
+                    ...prev,
+                    startNumber: e.target.value,
+                  }))
+                }
+                placeholder="100"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Número final</Label>
+              <Input
+                value={nfeInutilizeDialog.endNumber}
+                onChange={(e) =>
+                  setNfeInutilizeDialog((prev) => ({
+                    ...prev,
+                    endNumber: e.target.value,
+                  }))
+                }
+                placeholder="120"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Justificativa</Label>
+            <Input
+              value={nfeInutilizeDialog.reason}
+              onChange={(e) =>
+                setNfeInutilizeDialog((prev) => ({
+                  ...prev,
+                  reason: e.target.value,
+                }))
+              }
+              placeholder="Motivo da inutilização"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() =>
+                setNfeInutilizeDialog({
+                  open: false,
+                  doc: null,
+                  series: "",
+                  startNumber: "",
+                  endNumber: "",
+                  reason: "",
+                })
+              }
+            >
+              Fechar
+            </Button>
+            <Button
+              onClick={() => inutilizeNfeMutation.mutate()}
+              disabled={
+                inutilizeNfeMutation.isPending ||
+                !nfeInutilizeDialog.series.trim() ||
+                !nfeInutilizeDialog.startNumber.trim() ||
+                !nfeInutilizeDialog.endNumber.trim() ||
+                nfeInutilizeDialog.reason.trim().length < 15
+              }
+            >
+              {inutilizeNfeMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Confirmar inutilização
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={nfceCancelDialog.open}
         onOpenChange={(open) =>
           setNfceCancelDialog((prev) => ({ ...prev, open }))
@@ -1203,6 +1809,169 @@ export default function FiscalCentralPage() {
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Confirmar cancelamento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={nfceExtemporaneousCancelDialog.open}
+        onOpenChange={(open) =>
+          setNfceExtemporaneousCancelDialog((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancelamento extemporâneo NFC-e</DialogTitle>
+            <DialogDescription>
+              Informe a justificativa do cancelamento extemporâneo (mínimo 15 caracteres).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Justificativa</Label>
+            <Input
+              value={nfceExtemporaneousCancelDialog.reason}
+              onChange={(e) =>
+                setNfceExtemporaneousCancelDialog((prev) => ({
+                  ...prev,
+                  reason: e.target.value,
+                }))
+              }
+              placeholder="Motivo do cancelamento extemporâneo"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() =>
+                setNfceExtemporaneousCancelDialog({
+                  open: false,
+                  sale: null,
+                  reason: "",
+                })
+              }
+            >
+              Fechar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!nfceExtemporaneousCancelDialog.sale) return;
+                cancelNfceExtemporaneousMutation.mutate(
+                  nfceExtemporaneousCancelDialog.sale,
+                );
+              }}
+              disabled={
+                cancelNfceExtemporaneousMutation.isPending ||
+                nfceExtemporaneousCancelDialog.reason.trim().length < 15
+              }
+            >
+              {cancelNfceExtemporaneousMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Confirmar extemporâneo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={nfceInutilizeDialog.open}
+        onOpenChange={(open) =>
+          setNfceInutilizeDialog((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Inutilizar numeração NFC-e</DialogTitle>
+            <DialogDescription>
+              Informe série, faixa de numeração e justificativa (mínimo 15 caracteres).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-2">
+              <Label>Série</Label>
+              <Input
+                value={nfceInutilizeDialog.serie}
+                onChange={(e) =>
+                  setNfceInutilizeDialog((prev) => ({
+                    ...prev,
+                    serie: e.target.value,
+                  }))
+                }
+                placeholder="1"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Número inicial</Label>
+              <Input
+                value={nfceInutilizeDialog.startNumber}
+                onChange={(e) =>
+                  setNfceInutilizeDialog((prev) => ({
+                    ...prev,
+                    startNumber: e.target.value,
+                  }))
+                }
+                placeholder="100"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Número final</Label>
+              <Input
+                value={nfceInutilizeDialog.endNumber}
+                onChange={(e) =>
+                  setNfceInutilizeDialog((prev) => ({
+                    ...prev,
+                    endNumber: e.target.value,
+                  }))
+                }
+                placeholder="120"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Justificativa</Label>
+            <Input
+              value={nfceInutilizeDialog.reason}
+              onChange={(e) =>
+                setNfceInutilizeDialog((prev) => ({
+                  ...prev,
+                  reason: e.target.value,
+                }))
+              }
+              placeholder="Motivo da inutilização"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() =>
+                setNfceInutilizeDialog({
+                  open: false,
+                  sale: null,
+                  serie: "",
+                  startNumber: "",
+                  endNumber: "",
+                  reason: "",
+                })
+              }
+            >
+              Fechar
+            </Button>
+            <Button
+              onClick={() => inutilizeNfceMutation.mutate()}
+              disabled={
+                inutilizeNfceMutation.isPending ||
+                !nfceInutilizeDialog.serie.trim() ||
+                !nfceInutilizeDialog.startNumber.trim() ||
+                !nfceInutilizeDialog.endNumber.trim() ||
+                nfceInutilizeDialog.reason.trim().length < 15
+              }
+            >
+              {inutilizeNfceMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Confirmar inutilização
             </Button>
           </DialogFooter>
         </DialogContent>
