@@ -39,7 +39,7 @@ app.use(
     store: new PgSession({
       pool: pool,
       tableName: "session",
-      createTableIfMissing: true,
+      createTableIfMissing: process.env.NODE_ENV !== "production",
     }),
     secret:
       process.env.SESSION_SECRET || "erp-session-secret-change-in-production",
