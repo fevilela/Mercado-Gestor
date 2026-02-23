@@ -73,6 +73,50 @@ function formatCurrency(value: number) {
   return `R$ ${value.toFixed(2)}`;
 }
 
+function wrapLongToken(value: string, chunkSize: number) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += chunkSize) {
+    chunks.push(text.slice(i, i + chunkSize));
+  }
+  return chunks.join("\n");
+}
+
+function wrapTextLines(value: string, maxChars: number, maxLines: number) {
+  const raw = String(value || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  const words = raw.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const chunks =
+      word.length > maxChars
+        ? Array.from({ length: Math.ceil(word.length / maxChars) }, (_, idx) =>
+            word.slice(idx * maxChars, (idx + 1) * maxChars),
+          )
+        : [word];
+    for (const chunk of chunks) {
+      const candidate = current ? `${current} ${chunk}` : chunk;
+      if (candidate.length <= maxChars) {
+        current = candidate;
+      } else {
+        if (current) lines.push(current);
+        current = chunk;
+      }
+      if (lines.length >= maxLines) break;
+    }
+    if (lines.length >= maxLines) break;
+  }
+  if (lines.length < maxLines && current) lines.push(current);
+  if (lines.length > maxLines) lines.length = maxLines;
+  if (raw.length > lines.join(" ").length && lines.length > 0) {
+    const last = lines[lines.length - 1];
+    lines[lines.length - 1] = last.length >= 1 ? `${last.slice(0, Math.max(0, maxChars - 1))}…` : "…";
+  }
+  return lines.join("\n");
+}
+
 async function parseNFe(xmlContent: string) {
   const parsed = await parseStringPromise(xmlContent, { explicitArray: false });
   const nfeRoot = (parsed?.NFe ?? parsed?.nfeProc?.NFe) ?? null;
@@ -251,16 +295,58 @@ function buildNFCeQrUrl(params: {
 
 export async function generateDanfeNFCeThermal(
   xmlContent: string,
-  opts: { sefazUrl: string; cscId: string; csc: string; sellerName?: string | null },
+  opts: {
+    sefazUrl: string;
+    cscId: string;
+    csc: string;
+    sellerName?: string | null;
+    showSeller?: boolean;
+    headerText?: string | null;
+    footerText?: string | null;
+    printerColumns?: number | null;
+    layout?: Record<string, unknown> | null;
+  },
 ): Promise<Buffer> {
   const { ide, emit, dest, total, det, detPag, chave, protocolo, inf, nfeRoot } =
     await parseNFe(xmlContent);
+  const rawLayout = (opts.layout || {}) as Record<string, any>;
+  const configuredPaperWidth = String(rawLayout.paperWidth || "auto");
+  const paperWidth =
+    configuredPaperWidth === "58mm" || configuredPaperWidth === "80mm"
+      ? configuredPaperWidth
+      : Number(opts.printerColumns || 48) <= 32
+        ? "58mm"
+        : "80mm";
+  const isNarrow = paperWidth === "58mm";
+  const configuredFontSize = String(rawLayout.fontSize || "auto");
+  const compactItems = rawLayout.compactItems !== false || isNarrow;
+  const itemDescriptionLines = Math.min(
+    3,
+    Math.max(1, Number(rawLayout.itemDescriptionLines || (isNarrow ? 2 : 3))),
+  );
+  const showProtocol = rawLayout.showProtocol !== false;
+  const showAccessKey = rawLayout.showAccessKey !== false;
+  const showPayments = rawLayout.showPayments !== false;
+  const showQrCode = rawLayout.showQrCode !== false;
+  const showCustomer = rawLayout.showCustomer !== false;
+  const showCustomerDocument = rawLayout.showCustomerDocument !== false;
+  const showTaxes = rawLayout.showTaxes !== false;
+  const pageWidth = isNarrow ? 164 : 227;
+  const pageMargins: [number, number, number, number] = isNarrow ? [6, 8, 6, 8] : [10, 10, 10, 10];
+  const baseFont =
+    configuredFontSize === "small" ? 7 : configuredFontSize === "normal" ? 8 : isNarrow ? 7 : 8;
+  const smallFont = Math.max(6, baseFont - 1);
+  const titleFont = baseFont + (isNarrow ? 1 : 2);
+  const qrFit = isNarrow ? [92, 92] : [120, 120];
+  const textWrapChars = isNarrow ? 28 : 42;
   const totalTributos = numberString(total.vTotTrib);
   const totalsBody = [
     ["Subtotal", formatCurrency(numberString(total.vProd))],
-    ["ICMS", formatCurrency(numberString(total.vICMS))],
   ];
-  if (totalTributos > 0) {
+  if (showTaxes) {
+    totalsBody.push(["ICMS", formatCurrency(numberString(total.vICMS))]);
+  }
+  if (showTaxes && totalTributos > 0) {
     totalsBody.push(["Tributos (IBPT)", formatCurrency(totalTributos)]);
   }
   totalsBody.push(["Total", formatCurrency(numberString(total.vNF))]);
@@ -294,6 +380,27 @@ export async function generateDanfeNFCeThermal(
       ])
     : [["Forma de pagamento", "Nao informado"]];
 
+  const itemTableBody = compactItems
+    ? [
+        ["#", "Descricao", "Qtde", "Total"],
+        ...det.map((item) => [
+          item.idx,
+          wrapTextLines(String(item.desc || ""), isNarrow ? 14 : 22, itemDescriptionLines),
+          String(item.qty || "0"),
+          formatCurrency(numberString(item.total)),
+        ]),
+      ]
+    : [
+        ["#", "Descricao", "Qtde", "Vlr Unit", "Vlr Total"],
+        ...det.map((item) => [
+          item.idx,
+          wrapTextLines(String(item.desc || ""), isNarrow ? 14 : 20, itemDescriptionLines),
+          String(item.qty || "0"),
+          formatCurrency(numberString(item.unitPrice)),
+          formatCurrency(numberString(item.total)),
+        ]),
+      ];
+
   const suplQr = nfeRoot?.infNFeSupl?.qrCode ?? inf?.infNFeSupl?.qrCode;
   const signature = toArray((nfeRoot as any)?.Signature ?? (inf as any)?.Signature).at(0);
   const digestValue =
@@ -326,22 +433,35 @@ export async function generateDanfeNFCeThermal(
   }
 
   const docDefinition = {
-    pageSize: { width: 227, height: 1200 },
-    pageMargins: [10, 10, 10, 10],
-    defaultStyle: { font: "Roboto", fontSize: 8 },
+    pageSize: { width: pageWidth, height: 1200 },
+    pageMargins,
+    defaultStyle: { font: "Roboto", fontSize: baseFont },
     content: [
       { text: emit.xNome ?? "", style: "title" },
+      ...(opts.headerText
+        ? [{ text: opts.headerText, alignment: "center", margin: [0, 0, 0, 4] as [number, number, number, number] }]
+        : []),
       { text: `CNPJ: ${emit.CNPJ ?? ""}`, margin: [0, 2, 0, 2] },
       {
-        text: emit.enderEmit?.xLgr
-          ? `${emit.enderEmit.xLgr}, ${emit.enderEmit.nro}`
-          : "",
+        text: wrapTextLines(
+          emit.enderEmit?.xLgr ? `${emit.enderEmit.xLgr}, ${emit.enderEmit.nro}` : "",
+          textWrapChars,
+          2,
+        ),
       },
       {
-        text: `Bairro: ${emit.enderEmit?.xBairro ?? ""} - ${emit.enderEmit?.xMun ?? ""}`,
+        text: wrapTextLines(
+          `Bairro: ${emit.enderEmit?.xBairro ?? ""} - ${emit.enderEmit?.xMun ?? ""}`,
+          textWrapChars,
+          2,
+        ),
       },
       {
-        text: `UF: ${emit.enderEmit?.UF ?? ""} CEP: ${emit.enderEmit?.CEP ?? ""}`,
+        text: wrapTextLines(
+          `UF: ${emit.enderEmit?.UF ?? ""} CEP: ${emit.enderEmit?.CEP ?? ""}`,
+          textWrapChars,
+          1,
+        ),
         margin: [0, 0, 0, 6],
       },
       {
@@ -352,99 +472,125 @@ export async function generateDanfeNFCeThermal(
         text: `Numero: ${ide.nNF ?? ""} Serie: ${ide.serie ?? ""}`,
         margin: [0, 2, 0, 4],
       },
-      {
-        text: `Protocolo de autorizacao: ${protocolo || "N/A"}`,
-        margin: [0, 0, 0, 2],
-      },
-      {
-        text: `Chave de Acesso: ${chave}`,
-        style: "small",
-        margin: [0, 0, 0, 6],
-      },
+      ...(showProtocol
+        ? [
+            {
+              text: `Protocolo de autorizacao: ${protocolo || "N/A"}`,
+              margin: [0, 0, 0, 2],
+            },
+          ]
+        : []),
+      ...(showAccessKey
+        ? [
+            {
+              text: `Chave de Acesso:\n${wrapLongToken(String(chave || "").replace(/\s+/g, ""), isNarrow ? 22 : 28)}`,
+              style: "small",
+              margin: [0, 0, 0, 6],
+            },
+          ]
+        : []),
       {
         table: {
-          widths: [15, "*", 40, 35, 45],
-          body: [
-            ["#", "Descricao", "Qtde", "Vlr Unit", "Vlr Total"],
-            ...det.map((item) => [
-              item.idx,
-              item.desc,
-              item.qty,
-              formatCurrency(numberString(item.unitPrice)),
-              formatCurrency(numberString(item.total)),
-            ]),
-          ],
+          widths: compactItems
+            ? (isNarrow ? [10, "*", 22, 40] : [12, "*", 28, 52])
+            : [12, "*", isNarrow ? 22 : 28, isNarrow ? 30 : 40, isNarrow ? 38 : 50],
+          body: itemTableBody,
         },
         layout: "lightHorizontalLines",
         margin: [0, 0, 0, 8],
       },
       {
         table: {
-          widths: ["*", 70],
+          widths: ["*", isNarrow ? 52 : 70],
           body: totalsBody,
         },
         layout: "lightHorizontalLines",
         margin: [0, 0, 0, 8],
       },
-      {
-        text: "Pagamentos",
-        style: "subtitle",
-        margin: [0, 2, 0, 4],
-      },
-      {
-        table: {
-          widths: ["*", 70],
-          body: [["Forma", "Valor"], ...paymentRows],
-        },
-        layout: "lightHorizontalLines",
-        margin: [0, 0, 0, 8],
-      },
-      {
-        text: "Consulta via leitor de QR Code",
-        alignment: "center",
-        margin: [0, 4, 0, 4],
-      },
-      ...(qrCodeDataUrl
+      ...(showPayments
         ? [
             {
-              image: qrCodeDataUrl,
-              fit: [120, 120],
-              alignment: "center",
-              margin: [0, 0, 0, 6],
+              text: "Pagamentos",
+              style: "subtitle",
+              margin: [0, 2, 0, 4],
+            },
+            {
+              table: {
+                widths: ["*", isNarrow ? 52 : 70],
+                body: [["Forma", "Valor"], ...paymentRows],
+              },
+              layout: "lightHorizontalLines",
+              margin: [0, 0, 0, 8],
             },
           ]
         : []),
-      { text: qrUrl, style: "small", alignment: "center" },
+      ...(showQrCode
+        ? [
+            {
+              text: "Consulta via leitor de QR Code",
+              alignment: "center",
+              margin: [0, 4, 0, 4],
+            },
+            ...(qrCodeDataUrl
+              ? [
+                  {
+                    image: qrCodeDataUrl,
+                    fit: qrFit,
+                    alignment: "center",
+                    margin: [0, 0, 0, 6],
+                  },
+                ]
+              : []),
+            { text: wrapLongToken(qrUrl, isNarrow ? 26 : 42), style: "small", alignment: "center" },
+          ]
+        : []),
       {
         text: `Data emissao: ${ide.dhEmi ?? ide.dEmi ?? ""}`,
         margin: [0, 6, 0, 0],
       },
-      {
-        text: `Consumidor: ${dest.xNome ?? "Nao identificado"}`,
-        margin: [0, 2, 0, 0],
-      },
-      {
-        text: `Documento: ${dest.CNPJ ?? dest.CPF ?? "Nao informado"}`,
-        margin: [0, 1, 0, 0],
-      },
-      ...(opts.sellerName
+      ...(showCustomer
         ? [
             {
-              text: `Vendedor: ${opts.sellerName}`,
+              text: wrapTextLines(`Consumidor: ${dest.xNome ?? "Nao identificado"}`, textWrapChars, 2),
+              margin: [0, 2, 0, 0],
+            },
+          ]
+        : []),
+      ...(showCustomerDocument
+        ? [
+            {
+              text: `Documento: ${dest.CNPJ ?? dest.CPF ?? "Nao informado"}`,
               margin: [0, 1, 0, 0],
+            },
+          ]
+        : []),
+      ...(opts.showSeller !== false && opts.sellerName
+        ? [
+            {
+              text: wrapTextLines(`Vendedor: ${opts.sellerName}`, textWrapChars, 2),
+              margin: [0, 1, 0, 0],
+            },
+          ]
+        : []),
+      ...(opts.footerText
+        ? [
+            {
+              text: wrapTextLines(String(opts.footerText), textWrapChars, 4),
+              alignment: "center",
+              margin: [0, 6, 0, 0],
             },
           ]
         : []),
     ],
     styles: {
-      title: { fontSize: 10, bold: true, alignment: "center" },
+      title: { fontSize: titleFont, bold: true, alignment: "center" },
       subtitle: {
-        fontSize: 8,
+        fontSize: baseFont,
         bold: true,
         alignment: "center",
         margin: [0, 2, 0, 4],
       },
-      small: { fontSize: 7 },
+      small: { fontSize: smallFont },
     },
   };
 

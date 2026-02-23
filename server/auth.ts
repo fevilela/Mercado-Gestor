@@ -510,6 +510,24 @@ const managerCreateCompanySchema = z.object({
   printerColumns: z.coerce.number().int().optional(),
   printerCutCommand: z.boolean().optional(),
   printerBeepOnSale: z.boolean().optional(),
+  receiptHeaderText: z.string().optional(),
+  receiptFooterText: z.string().optional(),
+  receiptShowSeller: z.boolean().optional(),
+  nfcePrintLayout: z
+    .object({
+      paperWidth: z.enum(["auto", "58mm", "80mm"]).optional(),
+      fontSize: z.enum(["auto", "small", "normal"]).optional(),
+      compactItems: z.boolean().optional(),
+      itemDescriptionLines: z.coerce.number().int().min(1).max(3).optional(),
+      showProtocol: z.boolean().optional(),
+      showAccessKey: z.boolean().optional(),
+      showPayments: z.boolean().optional(),
+      showQrCode: z.boolean().optional(),
+      showCustomer: z.boolean().optional(),
+      showCustomerDocument: z.boolean().optional(),
+      showTaxes: z.boolean().optional(),
+    })
+    .optional(),
   initialMachines: z
     .array(
       z.object({
@@ -580,6 +598,24 @@ const managerUpdateCompanySchema = z.object({
   printerColumns: z.coerce.number().int().optional(),
   printerCutCommand: z.boolean().optional(),
   printerBeepOnSale: z.boolean().optional(),
+  receiptHeaderText: z.string().optional(),
+  receiptFooterText: z.string().optional(),
+  receiptShowSeller: z.boolean().optional(),
+  nfcePrintLayout: z
+    .object({
+      paperWidth: z.enum(["auto", "58mm", "80mm"]).optional(),
+      fontSize: z.enum(["auto", "small", "normal"]).optional(),
+      compactItems: z.boolean().optional(),
+      itemDescriptionLines: z.coerce.number().int().min(1).max(3).optional(),
+      showProtocol: z.boolean().optional(),
+      showAccessKey: z.boolean().optional(),
+      showPayments: z.boolean().optional(),
+      showQrCode: z.boolean().optional(),
+      showCustomer: z.boolean().optional(),
+      showCustomerDocument: z.boolean().optional(),
+      showTaxes: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 const managerSetCompanyActiveSchema = z.object({
@@ -912,6 +948,10 @@ authRouter.get("/manager/onboarding-users", async (req, res) => {
         printerColumns: companySettings.printerColumns,
         printerCutCommand: companySettings.printerCutCommand,
         printerBeepOnSale: companySettings.printerBeepOnSale,
+        receiptHeaderText: companySettings.receiptHeaderText,
+        receiptFooterText: companySettings.receiptFooterText,
+        receiptShowSeller: companySettings.receiptShowSeller,
+        nfcePrintLayout: companySettings.nfcePrintLayout,
       })
       .from(users)
       .innerJoin(companies, eq(users.companyId, companies.id))
@@ -1010,6 +1050,11 @@ authRouter.post("/manager/companies", async (req, res) => {
         data.printerCutCommand === undefined ? true : Boolean(data.printerCutCommand),
       printerBeepOnSale:
         data.printerBeepOnSale === undefined ? true : Boolean(data.printerBeepOnSale),
+      receiptHeaderText: data.receiptHeaderText || null,
+      receiptFooterText: data.receiptFooterText || null,
+      receiptShowSeller:
+        data.receiptShowSeller === undefined ? true : Boolean(data.receiptShowSeller),
+      nfcePrintLayout: data.nfcePrintLayout || null,
     });
 
     const initialMachineIdByKey = new Map<string, number>();
@@ -1423,6 +1468,11 @@ authRouter.patch("/manager/company", async (req, res) => {
           data.printerCutCommand === undefined ? true : Boolean(data.printerCutCommand),
         printerBeepOnSale:
           data.printerBeepOnSale === undefined ? true : Boolean(data.printerBeepOnSale),
+        receiptHeaderText: data.receiptHeaderText || null,
+        receiptFooterText: data.receiptFooterText || null,
+        receiptShowSeller:
+          data.receiptShowSeller === undefined ? true : Boolean(data.receiptShowSeller),
+        nfcePrintLayout: data.nfcePrintLayout || null,
       })
       .where(eq(companySettings.companyId, data.companyId));
 

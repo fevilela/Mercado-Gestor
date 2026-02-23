@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -65,6 +65,22 @@ type OnboardingUserRow = {
   printerColumns: number | null;
   printerCutCommand: boolean | null;
   printerBeepOnSale: boolean | null;
+  receiptHeaderText: string | null;
+  receiptFooterText: string | null;
+  receiptShowSeller: boolean | null;
+  nfcePrintLayout: {
+    paperWidth?: "auto" | "58mm" | "80mm";
+    fontSize?: "auto" | "small" | "normal";
+    compactItems?: boolean;
+    itemDescriptionLines?: number;
+    showProtocol?: boolean;
+    showAccessKey?: boolean;
+    showPayments?: boolean;
+    showQrCode?: boolean;
+    showCustomer?: boolean;
+    showCustomerDocument?: boolean;
+    showTaxes?: boolean;
+  } | null;
 };
 
 export default function ManagerOnboarding() {
@@ -163,6 +179,22 @@ export default function ManagerOnboarding() {
     printerColumns: "48",
     printerCutCommand: true,
     printerBeepOnSale: true,
+    receiptHeaderText: "",
+    receiptFooterText: "",
+    receiptShowSeller: true,
+    nfcePrintLayout: {
+      paperWidth: "auto",
+      fontSize: "auto",
+      compactItems: true,
+      itemDescriptionLines: 2,
+      showProtocol: true,
+      showAccessKey: true,
+      showPayments: true,
+      showQrCode: true,
+      showCustomer: true,
+      showCustomerDocument: true,
+      showTaxes: true,
+    },
   });
 
   const loadUsers = async (query = "") => {
@@ -302,6 +334,7 @@ export default function ManagerOnboarding() {
         ...data,
         cnpj: data.cnpj.replace(/\D/g, ""),
         state: data.state.toUpperCase(),
+        nfcePrintLayout: data.nfcePrintLayout,
         initialMachines: initialMachines
           .filter((m) => m.enabled && String(m.name || "").trim())
           .map((m) => ({
@@ -398,6 +431,10 @@ export default function ManagerOnboarding() {
           printerColumns: Number(data.printerColumns || 48),
           printerCutCommand: data.printerCutCommand,
           printerBeepOnSale: data.printerBeepOnSale,
+          receiptHeaderText: data.receiptHeaderText,
+          receiptFooterText: data.receiptFooterText,
+          receiptShowSeller: data.receiptShowSeller,
+          nfcePrintLayout: data.nfcePrintLayout,
         }),
       });
 
@@ -600,6 +637,22 @@ export default function ManagerOnboarding() {
       printerColumns: "48",
       printerCutCommand: true,
       printerBeepOnSale: true,
+      receiptHeaderText: "",
+      receiptFooterText: "",
+      receiptShowSeller: true,
+      nfcePrintLayout: {
+        paperWidth: "auto",
+        fontSize: "auto",
+        compactItems: true,
+        itemDescriptionLines: 2,
+        showProtocol: true,
+        showAccessKey: true,
+        showPayments: true,
+        showQrCode: true,
+        showCustomer: true,
+        showCustomerDocument: true,
+        showTaxes: true,
+      },
     });
     setInitialTerminals([
       {
@@ -677,6 +730,48 @@ export default function ManagerOnboarding() {
         row.printerCutCommand === null ? true : Boolean(row.printerCutCommand),
       printerBeepOnSale:
         row.printerBeepOnSale === null ? true : Boolean(row.printerBeepOnSale),
+      receiptHeaderText: row.receiptHeaderText || "",
+      receiptFooterText: row.receiptFooterText || "",
+      receiptShowSeller:
+        row.receiptShowSeller === null ? true : Boolean(row.receiptShowSeller),
+      nfcePrintLayout: {
+        paperWidth: row.nfcePrintLayout?.paperWidth || "auto",
+        fontSize: row.nfcePrintLayout?.fontSize || "auto",
+        compactItems:
+          row.nfcePrintLayout?.compactItems === undefined
+            ? true
+            : Boolean(row.nfcePrintLayout.compactItems),
+        itemDescriptionLines:
+          Number(row.nfcePrintLayout?.itemDescriptionLines || 2) || 2,
+        showProtocol:
+          row.nfcePrintLayout?.showProtocol === undefined
+            ? true
+            : Boolean(row.nfcePrintLayout.showProtocol),
+        showAccessKey:
+          row.nfcePrintLayout?.showAccessKey === undefined
+            ? true
+            : Boolean(row.nfcePrintLayout.showAccessKey),
+        showPayments:
+          row.nfcePrintLayout?.showPayments === undefined
+            ? true
+            : Boolean(row.nfcePrintLayout.showPayments),
+        showQrCode:
+          row.nfcePrintLayout?.showQrCode === undefined
+            ? true
+            : Boolean(row.nfcePrintLayout.showQrCode),
+        showCustomer:
+          row.nfcePrintLayout?.showCustomer === undefined
+            ? true
+            : Boolean(row.nfcePrintLayout.showCustomer),
+        showCustomerDocument:
+          row.nfcePrintLayout?.showCustomerDocument === undefined
+            ? true
+            : Boolean(row.nfcePrintLayout.showCustomerDocument),
+        showTaxes:
+          row.nfcePrintLayout?.showTaxes === undefined
+            ? true
+            : Boolean(row.nfcePrintLayout.showTaxes),
+      },
     });
     setShowCreateForm(true);
   };
@@ -789,6 +884,44 @@ export default function ManagerOnboarding() {
       });
   };
 
+  const companyRows = useMemo(() => {
+    const grouped = new Map<
+      number,
+      {
+        companyId: number;
+        companyName: string;
+        cnpj: string;
+        companyIsActive: boolean;
+        adminRow: OnboardingUserRow;
+        users: OnboardingUserRow[];
+      }
+    >();
+
+    for (const row of usersRows) {
+      const existing = grouped.get(row.companyId);
+      if (!existing) {
+        grouped.set(row.companyId, {
+          companyId: row.companyId,
+          companyName: row.nomeFantasia || row.razaoSocial || "Empresa",
+          cnpj: row.cnpj || "",
+          companyIsActive: Boolean(row.companyIsActive),
+          adminRow: row,
+          users: [row],
+        });
+        continue;
+      }
+
+      existing.users.push(row);
+      if (String(row.roleName || "").toLowerCase().includes("admin")) {
+        existing.adminRow = row;
+      }
+    }
+
+    return Array.from(grouped.values()).sort((a, b) =>
+      a.companyName.localeCompare(b.companyName, "pt-BR"),
+    );
+  }, [usersRows]);
+
   if (isCheckingSession) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -887,9 +1020,9 @@ export default function ManagerOnboarding() {
           <CardHeader>
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <CardTitle>Usuarios para onboarding</CardTitle>
+                <CardTitle>Empresas (Manager)</CardTitle>
                 <CardDescription>
-                  Pesquise por CNPJ, email ou nome e gerencie cada cadastro
+                  Tela principal por empresa. Usuarios ficam como detalhe de cada empresa.
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
@@ -910,7 +1043,7 @@ export default function ManagerOnboarding() {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar por CNPJ, email ou nome"
+                  placeholder="Buscar por CNPJ, empresa, email ou usuario"
                   className="pl-10"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -948,30 +1081,56 @@ export default function ManagerOnboarding() {
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
                   <tr>
-                    <th className="text-left p-3">Nome</th>
-                    <th className="text-left p-3">Email</th>
                     <th className="text-left p-3">Empresa</th>
                     <th className="text-left p-3">CNPJ</th>
+                    <th className="text-left p-3">Responsavel</th>
+                    <th className="text-left p-3">Usuarios</th>
                     <th className="text-left p-3">Status</th>
                     <th className="text-left p-3 w-[80px]">Acoes</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {usersRows.length === 0 ? (
+                  {companyRows.length === 0 ? (
                     <tr>
                       <td className="p-4 text-muted-foreground" colSpan={6}>
-                        Nenhum usuario encontrado
+                        Nenhuma empresa encontrada
                       </td>
                     </tr>
                   ) : (
-                    usersRows.map((row) => (
-                      <tr key={row.id} className="border-t">
-                        <td className="p-3">{row.name}</td>
-                        <td className="p-3">{row.email}</td>
-                        <td className="p-3">{row.nomeFantasia || row.razaoSocial}</td>
-                        <td className="p-3">{formatCNPJ(row.cnpj || "")}</td>
+                    companyRows.map((company) => (
+                      <tr key={company.companyId} className="border-t align-top">
                         <td className="p-3">
-                          {row.companyIsActive ? "Ativa" : "Inativa"}
+                          <div className="font-medium">{company.companyName}</div>
+                          <div className="text-xs text-muted-foreground">
+                            ID {company.companyId}
+                          </div>
+                        </td>
+                        <td className="p-3">{formatCNPJ(company.cnpj || "")}</td>
+                        <td className="p-3">
+                          <div>{company.adminRow.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {company.adminRow.email}
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          <details>
+                            <summary className="cursor-pointer">
+                              {company.users.length} usuario(s)
+                            </summary>
+                            <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                              {company.users.slice(0, 6).map((u) => (
+                                <div key={u.id}>
+                                  {u.name} ({u.roleName || "Sem perfil"})
+                                </div>
+                              ))}
+                              {company.users.length > 6 ? (
+                                <div>... e mais {company.users.length - 6}</div>
+                              ) : null}
+                            </div>
+                          </details>
+                        </td>
+                        <td className="p-3">
+                          {company.companyIsActive ? "Ativa" : "Inativa"}
                         </td>
                         <td className="p-3">
                           <DropdownMenu>
@@ -983,43 +1142,43 @@ export default function ManagerOnboarding() {
                             <DropdownMenuContent align="end">
                               <DropdownMenuLabel>Acoes</DropdownMenuLabel>
                               <DropdownMenuItem
-                                onClick={() => openCreateUserForm(row)}
+                                onClick={() => openCreateUserForm(company.adminRow)}
                               >
                                 Adicionar usuario
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() =>
                                   resendInviteMutation.mutate({
-                                    cnpj: row.cnpj,
-                                    adminEmail: row.email,
+                                    cnpj: company.adminRow.cnpj,
+                                    adminEmail: company.adminRow.email,
                                   })
                                 }
                               >
                                 Reenviar codigo
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => openEditForm(row)}>
+                              <DropdownMenuItem onClick={() => openEditForm(company.adminRow)}>
                                 Editar cadastro
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => {
-                                  const nextActive = !row.companyIsActive;
+                                  const nextActive = !company.companyIsActive;
                                   const label = nextActive ? "ativar" : "inativar";
                                   if (
                                     !window.confirm(
                                       `Deseja ${label} a empresa ${
-                                        row.nomeFantasia || row.razaoSocial
+                                        company.companyName
                                       }?`,
                                     )
                                   ) {
                                     return;
                                   }
                                   setCompanyActiveMutation.mutate({
-                                    companyId: row.companyId,
+                                    companyId: company.companyId,
                                     isActive: nextActive,
                                   });
                                 }}
                               >
-                                {row.companyIsActive ? "Inativar" : "Ativar"}
+                                {company.companyIsActive ? "Inativar" : "Ativar"}
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
@@ -1032,7 +1191,7 @@ export default function ManagerOnboarding() {
                                   ) {
                                     return;
                                   }
-                                  deleteCompanyMutation.mutate(row.companyId);
+                                  deleteCompanyMutation.mutate(company.companyId);
                                 }}
                               >
                                 Excluir
@@ -1684,6 +1843,216 @@ export default function ManagerOnboarding() {
                         }
                       />
                       <Label htmlFor="printerBeepOnSale">Bip ao finalizar venda</Label>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border p-4 space-y-4 bg-muted/20">
+                    <div>
+                      <h4 className="font-medium">Layout do cupom / DANFE NFC-e</h4>
+                      <p className="text-xs text-muted-foreground">
+                        Ajuste largura, fonte e blocos do DANFE NFC-e para evitar corte na impressao termica.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="receiptShowSeller"
+                        type="checkbox"
+                        checked={companyForm.receiptShowSeller}
+                        onChange={(e) =>
+                          setCompanyForm((prev) => ({
+                            ...prev,
+                            receiptShowSeller: e.target.checked,
+                          }))
+                        }
+                      />
+                      <Label htmlFor="receiptShowSeller">Mostrar vendedor / operador no cupom</Label>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="nfcePaperWidth">Largura do papel (DANFE NFC-e)</Label>
+                        <select
+                          id="nfcePaperWidth"
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.nfcePrintLayout?.paperWidth || "auto"}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfcePrintLayout: {
+                                ...(prev.nfcePrintLayout || {}),
+                                paperWidth: e.target.value as "auto" | "58mm" | "80mm",
+                              },
+                            }))
+                          }
+                        >
+                          <option value="auto">Automatico (usa colunas da impressora)</option>
+                          <option value="58mm">58mm</option>
+                          <option value="80mm">80mm</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="nfceFontSize">Tamanho da fonte (DANFE NFC-e)</Label>
+                        <select
+                          id="nfceFontSize"
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.nfcePrintLayout?.fontSize || "auto"}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfcePrintLayout: {
+                                ...(prev.nfcePrintLayout || {}),
+                                fontSize: e.target.value as "auto" | "small" | "normal",
+                              },
+                            }))
+                          }
+                        >
+                          <option value="auto">Automatico</option>
+                          <option value="small">Pequena</option>
+                          <option value="normal">Normal</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="flex items-center gap-2">
+                        <input
+                          id="nfceCompactItems"
+                          type="checkbox"
+                          checked={companyForm.nfcePrintLayout?.compactItems !== false}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfcePrintLayout: {
+                                ...(prev.nfcePrintLayout || {}),
+                                compactItems: e.target.checked,
+                              },
+                            }))
+                          }
+                        />
+                        <Label htmlFor="nfceCompactItems">Itens compactos (evita corte em 58mm)</Label>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="nfceItemDescLines">Linhas da descricao do item</Label>
+                        <select
+                          id="nfceItemDescLines"
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={String(companyForm.nfcePrintLayout?.itemDescriptionLines || 2)}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfcePrintLayout: {
+                                ...(prev.nfcePrintLayout || {}),
+                                itemDescriptionLines: Number(e.target.value),
+                              },
+                            }))
+                          }
+                        >
+                          <option value="1">1 linha</option>
+                          <option value="2">2 linhas</option>
+                          <option value="3">3 linhas</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {[
+                        ["showProtocol", "Mostrar protocolo"],
+                        ["showAccessKey", "Mostrar chave de acesso"],
+                        ["showCustomer", "Mostrar cliente"],
+                        ["showCustomerDocument", "Mostrar documento do cliente"],
+                        ["showPayments", "Mostrar pagamentos"],
+                        ["showQrCode", "Mostrar QR Code e link"],
+                        ["showTaxes", "Mostrar linhas de impostos"],
+                      ].map(([key, label]) => (
+                        <label key={key} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={
+                              (companyForm.nfcePrintLayout as any)?.[key] !== false
+                            }
+                            onChange={(e) =>
+                              setCompanyForm((prev) => ({
+                                ...prev,
+                                nfcePrintLayout: {
+                                  ...(prev.nfcePrintLayout || {}),
+                                  [key]: e.target.checked,
+                                },
+                              }))
+                            }
+                          />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="receiptHeaderText">Cabecalho personalizado</Label>
+                        <textarea
+                          id="receiptHeaderText"
+                          className="w-full min-h-[88px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.receiptHeaderText}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              receiptHeaderText: e.target.value,
+                            }))
+                          }
+                          placeholder={"Ex.: Obrigado pela preferencia\\nVolte sempre"}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="receiptFooterText">Rodape personalizado</Label>
+                        <textarea
+                          id="receiptFooterText"
+                          className="w-full min-h-[88px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.receiptFooterText}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              receiptFooterText: e.target.value,
+                            }))
+                          }
+                          placeholder={"Ex.: Troca em ate 7 dias\\nWhatsApp: (00) 00000-0000"}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Preview rapido</Label>
+                      <div className="rounded-md border bg-white p-3 text-xs font-mono whitespace-pre-line leading-5">
+                        {[
+                          `PREVIEW NFC-e (${companyForm.nfcePrintLayout?.paperWidth || "auto"})`,
+                          companyForm.receiptHeaderText?.trim() || "",
+                          "------------------------------",
+                          "VENDA #1234",
+                          (companyForm.nfcePrintLayout?.showCustomer !== false)
+                            ? "Cliente: Consumidor Final"
+                            : "",
+                          (companyForm.nfcePrintLayout?.showCustomerDocument !== false)
+                            ? "Documento: 000.000.000-00"
+                            : "",
+                          companyForm.receiptShowSeller ? "Operador: Joao" : "",
+                          (companyForm.nfcePrintLayout?.showPayments !== false)
+                            ? "Forma: PIX"
+                            : "",
+                          (companyForm.nfcePrintLayout?.showProtocol !== false)
+                            ? "Protocolo: 123456789"
+                            : "",
+                          "Total: R$ 59,90",
+                          (companyForm.nfcePrintLayout?.showQrCode !== false)
+                            ? "[QR CODE]"
+                            : "",
+                          "------------------------------",
+                          companyForm.receiptFooterText?.trim() || "",
+                        ]
+                          .filter(Boolean)
+                          .join("\n")}
+                      </div>
                     </div>
                   </div>
                 </div>

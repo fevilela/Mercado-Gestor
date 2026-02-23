@@ -2270,6 +2270,11 @@ router.get("/nfce/:saleId/pdf", async (req, res) => {
         typeof (sale as any)?.userName === "string" && (sale as any).userName.trim()
           ? (sale as any).userName.trim()
           : null,
+      showSeller: settings?.receiptShowSeller !== false,
+      headerText: settings?.receiptHeaderText || null,
+      footerText: settings?.receiptFooterText || null,
+      printerColumns: Number(settings?.printerColumns || 48),
+      layout: ((settings as any)?.nfcePrintLayout as Record<string, unknown> | null) || null,
     });
 
     res.setHeader("Content-Type", "application/pdf");
