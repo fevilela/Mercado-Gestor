@@ -58,6 +58,13 @@ type OnboardingUserRow = {
   mpEnabled: boolean | null;
   mpAccessToken: string | null;
   mpTerminalId: string | null;
+  printerEnabled: boolean | null;
+  printerModel: string | null;
+  printerPort: string | null;
+  printerBaudRate: number | null;
+  printerColumns: number | null;
+  printerCutCommand: boolean | null;
+  printerBeepOnSale: boolean | null;
 };
 
 export default function ManagerOnboarding() {
@@ -149,6 +156,13 @@ export default function ManagerOnboarding() {
     mpEnabled: false,
     mpAccessToken: "",
     mpTerminalId: "",
+    printerEnabled: false,
+    printerModel: "",
+    printerPort: "",
+    printerBaudRate: "9600",
+    printerColumns: "48",
+    printerCutCommand: true,
+    printerBeepOnSale: true,
   });
 
   const loadUsers = async (query = "") => {
@@ -377,6 +391,13 @@ export default function ManagerOnboarding() {
           mpEnabled: data.mpEnabled,
           mpAccessToken: data.mpAccessToken,
           mpTerminalId: data.mpTerminalId,
+          printerEnabled: data.printerEnabled,
+          printerModel: data.printerModel,
+          printerPort: data.printerPort,
+          printerBaudRate: Number(data.printerBaudRate || 9600),
+          printerColumns: Number(data.printerColumns || 48),
+          printerCutCommand: data.printerCutCommand,
+          printerBeepOnSale: data.printerBeepOnSale,
         }),
       });
 
@@ -572,6 +593,13 @@ export default function ManagerOnboarding() {
       mpEnabled: false,
       mpAccessToken: "",
       mpTerminalId: "",
+      printerEnabled: false,
+      printerModel: "",
+      printerPort: "",
+      printerBaudRate: "9600",
+      printerColumns: "48",
+      printerCutCommand: true,
+      printerBeepOnSale: true,
     });
     setInitialTerminals([
       {
@@ -640,6 +668,15 @@ export default function ManagerOnboarding() {
       mpEnabled: Boolean(row.mpEnabled),
       mpAccessToken: row.mpAccessToken || "",
       mpTerminalId: row.mpTerminalId || "",
+      printerEnabled: Boolean(row.printerEnabled),
+      printerModel: row.printerModel || "",
+      printerPort: row.printerPort || "",
+      printerBaudRate: String(row.printerBaudRate || 9600),
+      printerColumns: String(row.printerColumns || 48),
+      printerCutCommand:
+        row.printerCutCommand === null ? true : Boolean(row.printerCutCommand),
+      printerBeepOnSale:
+        row.printerBeepOnSale === null ? true : Boolean(row.printerBeepOnSale),
     });
     setShowCreateForm(true);
   };
@@ -1482,6 +1519,154 @@ export default function ManagerOnboarding() {
                           Mercado Pago validado
                         </span>
                       )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-4 space-y-4">
+                  <div>
+                    <h3 className="font-medium">Impressora termica</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Configure a impressora no onboarding do manager.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="printerEnabled"
+                      type="checkbox"
+                      checked={companyForm.printerEnabled}
+                      onChange={(e) =>
+                        setCompanyForm((prev) => ({
+                          ...prev,
+                          printerEnabled: e.target.checked,
+                        }))
+                      }
+                    />
+                    <Label htmlFor="printerEnabled">Habilitar impressora</Label>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="printerModel">Modelo</Label>
+                      <select
+                        id="printerModel"
+                        className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={companyForm.printerModel}
+                        onChange={(e) =>
+                          setCompanyForm((prev) => ({
+                            ...prev,
+                            printerModel: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Selecione o modelo</option>
+                        <option value="epson-tm-t20">Epson TM-T20</option>
+                        <option value="epson-tm-t88">Epson TM-T88</option>
+                        <option value="bematech-mp4200">Bematech MP-4200 TH</option>
+                        <option value="elgin-i9">Elgin i9</option>
+                        <option value="daruma-dr800">Daruma DR800</option>
+                        <option value="sweda-si-300">Sweda SI-300</option>
+                        <option value="generic-escpos">Generica ESC/POS</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="printerPort">Porta</Label>
+                      <select
+                        id="printerPort"
+                        className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={companyForm.printerPort}
+                        onChange={(e) =>
+                          setCompanyForm((prev) => ({
+                            ...prev,
+                            printerPort: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Selecione a porta</option>
+                        <option value="USB001">USB001</option>
+                        <option value="USB002">USB002</option>
+                        <option value="COM1">COM1 (Serial)</option>
+                        <option value="COM2">COM2 (Serial)</option>
+                        <option value="COM3">COM3 (Serial)</option>
+                        <option value="LPT1">LPT1 (Paralela)</option>
+                        <option value="network">Rede (IP)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="printerBaudRate">Baud rate</Label>
+                      <select
+                        id="printerBaudRate"
+                        className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={companyForm.printerBaudRate}
+                        onChange={(e) =>
+                          setCompanyForm((prev) => ({
+                            ...prev,
+                            printerBaudRate: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="9600">9600</option>
+                        <option value="19200">19200</option>
+                        <option value="38400">38400</option>
+                        <option value="57600">57600</option>
+                        <option value="115200">115200</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="printerColumns">Colunas</Label>
+                      <select
+                        id="printerColumns"
+                        className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={companyForm.printerColumns}
+                        onChange={(e) =>
+                          setCompanyForm((prev) => ({
+                            ...prev,
+                            printerColumns: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="32">32 (58mm)</option>
+                        <option value="42">42 (76mm)</option>
+                        <option value="48">48 (80mm)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="printerCutCommand"
+                        type="checkbox"
+                        checked={companyForm.printerCutCommand}
+                        onChange={(e) =>
+                          setCompanyForm((prev) => ({
+                            ...prev,
+                            printerCutCommand: e.target.checked,
+                          }))
+                        }
+                      />
+                      <Label htmlFor="printerCutCommand">Guilhotina automatica</Label>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="printerBeepOnSale"
+                        type="checkbox"
+                        checked={companyForm.printerBeepOnSale}
+                        onChange={(e) =>
+                          setCompanyForm((prev) => ({
+                            ...prev,
+                            printerBeepOnSale: e.target.checked,
+                          }))
+                        }
+                      />
+                      <Label htmlFor="printerBeepOnSale">Bip ao finalizar venda</Label>
                     </div>
                   </div>
                 </div>

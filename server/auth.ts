@@ -503,6 +503,13 @@ const managerCreateCompanySchema = z.object({
   mpEnabled: z.boolean().optional(),
   mpAccessToken: z.string().optional(),
   mpTerminalId: z.string().optional(),
+  printerEnabled: z.boolean().optional(),
+  printerModel: z.string().optional(),
+  printerPort: z.string().optional(),
+  printerBaudRate: z.coerce.number().int().optional(),
+  printerColumns: z.coerce.number().int().optional(),
+  printerCutCommand: z.boolean().optional(),
+  printerBeepOnSale: z.boolean().optional(),
   initialMachines: z
     .array(
       z.object({
@@ -566,6 +573,13 @@ const managerUpdateCompanySchema = z.object({
   mpEnabled: z.boolean().optional(),
   mpAccessToken: z.string().optional(),
   mpTerminalId: z.string().optional(),
+  printerEnabled: z.boolean().optional(),
+  printerModel: z.string().optional(),
+  printerPort: z.string().optional(),
+  printerBaudRate: z.coerce.number().int().optional(),
+  printerColumns: z.coerce.number().int().optional(),
+  printerCutCommand: z.boolean().optional(),
+  printerBeepOnSale: z.boolean().optional(),
 });
 
 const managerSetCompanyActiveSchema = z.object({
@@ -891,6 +905,13 @@ authRouter.get("/manager/onboarding-users", async (req, res) => {
         mpEnabled: companySettings.mpEnabled,
         mpAccessToken: companySettings.mpAccessToken,
         mpTerminalId: companySettings.mpTerminalId,
+        printerEnabled: companySettings.printerEnabled,
+        printerModel: companySettings.printerModel,
+        printerPort: companySettings.printerPort,
+        printerBaudRate: companySettings.printerBaudRate,
+        printerColumns: companySettings.printerColumns,
+        printerCutCommand: companySettings.printerCutCommand,
+        printerBeepOnSale: companySettings.printerBeepOnSale,
       })
       .from(users)
       .innerJoin(companies, eq(users.companyId, companies.id))
@@ -980,6 +1001,15 @@ authRouter.post("/manager/companies", async (req, res) => {
       mpEnabled: Boolean(data.mpEnabled),
       mpAccessToken: data.mpAccessToken || null,
       mpTerminalId: data.mpTerminalId || null,
+      printerEnabled: Boolean(data.printerEnabled),
+      printerModel: data.printerModel || null,
+      printerPort: data.printerPort || null,
+      printerBaudRate: data.printerBaudRate ?? 9600,
+      printerColumns: data.printerColumns ?? 48,
+      printerCutCommand:
+        data.printerCutCommand === undefined ? true : Boolean(data.printerCutCommand),
+      printerBeepOnSale:
+        data.printerBeepOnSale === undefined ? true : Boolean(data.printerBeepOnSale),
     });
 
     const initialMachineIdByKey = new Map<string, number>();
@@ -1384,6 +1414,15 @@ authRouter.patch("/manager/company", async (req, res) => {
         mpEnabled: Boolean(data.mpEnabled),
         mpAccessToken: data.mpAccessToken || null,
         mpTerminalId: data.mpTerminalId || null,
+        printerEnabled: Boolean(data.printerEnabled),
+        printerModel: data.printerModel || null,
+        printerPort: data.printerPort || null,
+        printerBaudRate: data.printerBaudRate ?? 9600,
+        printerColumns: data.printerColumns ?? 48,
+        printerCutCommand:
+          data.printerCutCommand === undefined ? true : Boolean(data.printerCutCommand),
+        printerBeepOnSale:
+          data.printerBeepOnSale === undefined ? true : Boolean(data.printerBeepOnSale),
       })
       .where(eq(companySettings.companyId, data.companyId));
 
