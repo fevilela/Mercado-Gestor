@@ -66,7 +66,7 @@ const sidebarSections: SidebarSection[] = [
         icon: Store,
         label: "Comercial (Vendas e Pedidos)",
         href: "/sales",
-        permissions: ["pos:view", "reports:view"],
+        permissions: ["reports:view"],
       },
       {
         icon: Wallet,

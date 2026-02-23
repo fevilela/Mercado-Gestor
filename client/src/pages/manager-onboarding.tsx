@@ -50,6 +50,14 @@ type OnboardingUserRow = {
   zipCode: string | null;
   companyIsActive: boolean;
   roleName: string | null;
+  stoneEnabled: boolean | null;
+  stoneClientId: string | null;
+  stoneClientSecret: string | null;
+  stoneTerminalId: string | null;
+  stoneEnvironment: string | null;
+  mpEnabled: boolean | null;
+  mpAccessToken: string | null;
+  mpTerminalId: string | null;
 };
 
 export default function ManagerOnboarding() {
@@ -59,20 +67,66 @@ export default function ManagerOnboarding() {
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [isManagerAuthenticated, setIsManagerAuthenticated] = useState(false);
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
+  const [stoneValidationStatus, setStoneValidationStatus] = useState<
+    "idle" | "connecting" | "connected"
+  >("idle");
+  const [mpValidationStatus, setMpValidationStatus] = useState<
+    "idle" | "connecting" | "connected"
+  >("idle");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [usersRows, setUsersRows] = useState<OnboardingUserRow[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [userCreateTarget, setUserCreateTarget] = useState<{
+    companyId: number;
+    companyName: string;
+    cnpj: string;
+  } | null>(null);
   const [editingTarget, setEditingTarget] = useState<{
     companyId: number;
     userId: string;
   } | null>(null);
+  const [companyUserForm, setCompanyUserForm] = useState({
+    name: "",
+    email: "",
+    roleName: "Caixa",
+  });
 
   const [managerLogin, setManagerLogin] = useState({
     email: "",
     password: "",
   });
+  const [initialMachines, setInitialMachines] = useState<
+    Array<{
+      key: string;
+      name: string;
+      provider: "mercadopago" | "stone";
+      mpTerminalId: string;
+      stoneTerminalId: string;
+      enabled: boolean;
+    }>
+  >([]);
+  const [initialTerminals, setInitialTerminals] = useState([
+    {
+      enabled: true,
+      name: "Caixa 1",
+      code: "CX01",
+      paymentProvider: "company_default",
+      paymentMachineKey: "",
+      mpTerminalId: "",
+      stoneTerminalId: "",
+    },
+    {
+      enabled: false,
+      name: "Caixa 2",
+      code: "CX02",
+      paymentProvider: "company_default",
+      paymentMachineKey: "",
+      mpTerminalId: "",
+      stoneTerminalId: "",
+    },
+  ]);
 
   const [companyForm, setCompanyForm] = useState({
     cnpj: "",
@@ -87,6 +141,14 @@ export default function ManagerOnboarding() {
     zipCode: "",
     adminName: "",
     adminEmail: "",
+    stoneEnabled: false,
+    stoneClientId: "",
+    stoneClientSecret: "",
+    stoneTerminalId: "",
+    stoneEnvironment: "producao",
+    mpEnabled: false,
+    mpAccessToken: "",
+    mpTerminalId: "",
   });
 
   const loadUsers = async (query = "") => {
@@ -171,6 +233,52 @@ export default function ManagerOnboarding() {
       setSearchQuery("");
       setShowCreateForm(false);
       setEditingTarget(null);
+      setUserCreateTarget(null);
+    },
+  });
+
+  const createCompanyUserMutation = useMutation({
+    mutationFn: async (
+      data: typeof companyUserForm & { companyId: number; cnpj: string },
+    ) => {
+      const res = await fetch("/api/auth/manager/company-users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyId: data.companyId,
+          name: data.name,
+          email: data.email,
+          roleName: data.roleName,
+        }),
+      });
+
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body.error || "Nao foi possivel cadastrar usuario");
+      }
+      return body;
+    },
+    onSuccess: async (result) => {
+      const emailSent = result?.onboarding?.emailSent;
+      const code = result?.onboarding?.code;
+      toast({
+        title: emailSent ? "Usuario cadastrado e convite enviado" : "Usuario cadastrado",
+        description: emailSent
+          ? "O usuario deve verificar o email para concluir o acesso"
+          : code
+            ? `Codigo gerado (dev): ${code}`
+            : "Verifique configuracao SMTP no .env",
+      });
+      setCompanyUserForm({ name: "", email: "", roleName: "Caixa" });
+      setUserCreateTarget(null);
+      await loadUsers(searchQuery);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro ao cadastrar usuario",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -180,6 +288,25 @@ export default function ManagerOnboarding() {
         ...data,
         cnpj: data.cnpj.replace(/\D/g, ""),
         state: data.state.toUpperCase(),
+        initialMachines: initialMachines
+          .filter((m) => m.enabled && String(m.name || "").trim())
+          .map((m) => ({
+            key: m.key,
+            name: String(m.name || "").trim(),
+            provider: m.provider,
+            mpTerminalId: String(m.mpTerminalId || "").trim(),
+            stoneTerminalId: String(m.stoneTerminalId || "").trim(),
+          })),
+        initialTerminals: initialTerminals
+          .filter((t) => t.enabled && String(t.name || "").trim())
+          .map((t) => ({
+            name: String(t.name || "").trim(),
+            code: String(t.code || "").trim().toUpperCase(),
+            paymentProvider: t.paymentProvider,
+            paymentMachineKey: String(t.paymentMachineKey || "").trim(),
+            mpTerminalId: String(t.mpTerminalId || "").trim(),
+            stoneTerminalId: String(t.stoneTerminalId || "").trim(),
+          })),
       };
 
       const res = await fetch("/api/auth/manager/companies", {
@@ -242,6 +369,14 @@ export default function ManagerOnboarding() {
           zipCode: data.zipCode,
           adminName: data.adminName,
           adminEmail: data.adminEmail,
+          stoneEnabled: data.stoneEnabled,
+          stoneClientId: data.stoneClientId,
+          stoneClientSecret: data.stoneClientSecret,
+          stoneTerminalId: data.stoneTerminalId,
+          stoneEnvironment: data.stoneEnvironment,
+          mpEnabled: data.mpEnabled,
+          mpAccessToken: data.mpAccessToken,
+          mpTerminalId: data.mpTerminalId,
         }),
       });
 
@@ -414,6 +549,8 @@ export default function ManagerOnboarding() {
   };
 
   const resetForm = () => {
+    setStoneValidationStatus("idle");
+    setMpValidationStatus("idle");
     setCompanyForm({
       cnpj: "",
       ie: "",
@@ -427,16 +564,60 @@ export default function ManagerOnboarding() {
       zipCode: "",
       adminName: "",
       adminEmail: "",
+      stoneEnabled: false,
+      stoneClientId: "",
+      stoneClientSecret: "",
+      stoneTerminalId: "",
+      stoneEnvironment: "producao",
+      mpEnabled: false,
+      mpAccessToken: "",
+      mpTerminalId: "",
     });
+    setInitialTerminals([
+      {
+        enabled: true,
+        name: "Caixa 1",
+        code: "CX01",
+        paymentProvider: "company_default",
+        paymentMachineKey: "",
+        mpTerminalId: "",
+        stoneTerminalId: "",
+      },
+      {
+        enabled: false,
+        name: "Caixa 2",
+        code: "CX02",
+        paymentProvider: "company_default",
+        paymentMachineKey: "",
+        mpTerminalId: "",
+        stoneTerminalId: "",
+      },
+    ]);
+    setInitialMachines([]);
   };
 
   const openCreateForm = () => {
     setEditingTarget(null);
+    setUserCreateTarget(null);
     resetForm();
     setShowCreateForm(true);
   };
 
+  const openCreateUserForm = (row: OnboardingUserRow) => {
+    setShowCreateForm(false);
+    setEditingTarget(null);
+    setCompanyUserForm({ name: "", email: "", roleName: "Caixa" });
+    setUserCreateTarget({
+      companyId: row.companyId,
+      companyName: row.nomeFantasia || row.razaoSocial || "Empresa",
+      cnpj: row.cnpj,
+    });
+  };
+
   const openEditForm = (row: OnboardingUserRow) => {
+    setUserCreateTarget(null);
+    setStoneValidationStatus("idle");
+    setMpValidationStatus("idle");
     setEditingTarget({ companyId: row.companyId, userId: row.id });
     setCompanyForm({
       cnpj: formatCNPJ(row.cnpj || ""),
@@ -451,8 +632,124 @@ export default function ManagerOnboarding() {
       zipCode: row.zipCode || "",
       adminName: row.name || "",
       adminEmail: row.email || "",
+      stoneEnabled: Boolean(row.stoneEnabled),
+      stoneClientId: row.stoneClientId || "",
+      stoneClientSecret: row.stoneClientSecret || "",
+      stoneTerminalId: row.stoneTerminalId || "",
+      stoneEnvironment: row.stoneEnvironment || "producao",
+      mpEnabled: Boolean(row.mpEnabled),
+      mpAccessToken: row.mpAccessToken || "",
+      mpTerminalId: row.mpTerminalId || "",
     });
     setShowCreateForm(true);
+  };
+
+  const handleValidateStone = () => {
+    if (!companyForm.stoneEnabled) {
+      toast({
+        title: "Ative a integracao",
+        description: "Habilite a Stone antes de testar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (
+      !companyForm.stoneClientId ||
+      !companyForm.stoneClientSecret ||
+      !companyForm.stoneTerminalId
+    ) {
+      toast({
+        title: "Credenciais incompletas",
+        description: "Informe client id, client secret e terminal.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setStoneValidationStatus("connecting");
+    fetch("/api/auth/manager/payments/stone/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: companyForm.stoneClientId,
+        clientSecret: companyForm.stoneClientSecret,
+        terminalId: companyForm.stoneTerminalId,
+        environment: companyForm.stoneEnvironment || "producao",
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || "Falha ao validar Stone");
+        }
+        setStoneValidationStatus("connected");
+        toast({
+          title: "Stone conectada",
+          description: "Credenciais validadas com sucesso.",
+        });
+      })
+      .catch((error) => {
+        setStoneValidationStatus("idle");
+        toast({
+          title: "Nao foi possivel conectar",
+          description:
+            error instanceof Error ? error.message : "Falha ao validar Stone.",
+          variant: "destructive",
+        });
+      });
+  };
+
+  const handleValidateMercadoPago = () => {
+    if (!companyForm.mpEnabled) {
+      toast({
+        title: "Ative a integracao",
+        description: "Habilite o Mercado Pago antes de testar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!companyForm.mpAccessToken || !companyForm.mpTerminalId) {
+      toast({
+        title: "Credenciais incompletas",
+        description: "Informe access token e terminal/store_id|pos_id.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setMpValidationStatus("connecting");
+    fetch("/api/auth/manager/payments/mercadopago/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accessToken: companyForm.mpAccessToken,
+        terminalId: companyForm.mpTerminalId,
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || "Falha ao validar Mercado Pago");
+        }
+        setMpValidationStatus("connected");
+        toast({
+          title: "Mercado Pago validado",
+          description: "Credenciais validadas com sucesso.",
+        });
+      })
+      .catch((error) => {
+        setMpValidationStatus("idle");
+        toast({
+          title: "Nao foi possivel validar",
+          description:
+            error instanceof Error
+              ? error.message
+              : "Falha ao validar Mercado Pago.",
+          variant: "destructive",
+        });
+      });
   };
 
   if (isCheckingSession) {
@@ -649,6 +946,11 @@ export default function ManagerOnboarding() {
                             <DropdownMenuContent align="end">
                               <DropdownMenuLabel>Acoes</DropdownMenuLabel>
                               <DropdownMenuItem
+                                onClick={() => openCreateUserForm(row)}
+                              >
+                                Adicionar usuario
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
                                 onClick={() =>
                                   resendInviteMutation.mutate({
                                     cnpj: row.cnpj,
@@ -709,6 +1011,98 @@ export default function ManagerOnboarding() {
             </div>
           </CardContent>
         </Card>
+
+        {userCreateTarget && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Adicionar usuario</CardTitle>
+              <CardDescription>
+                {userCreateTarget.companyName} ({formatCNPJ(userCreateTarget.cnpj)})
+              </CardDescription>
+            </CardHeader>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                createCompanyUserMutation.mutate({
+                  ...companyUserForm,
+                  companyId: userCreateTarget.companyId,
+                  cnpj: userCreateTarget.cnpj,
+                });
+              }}
+            >
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="newUserName">Nome *</Label>
+                    <Input
+                      id="newUserName"
+                      value={companyUserForm.name}
+                      onChange={(e) =>
+                        setCompanyUserForm((prev) => ({ ...prev, name: e.target.value }))
+                      }
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="newUserEmail">Email *</Label>
+                    <Input
+                      id="newUserEmail"
+                      type="email"
+                      value={companyUserForm.email}
+                      onChange={(e) =>
+                        setCompanyUserForm((prev) => ({ ...prev, email: e.target.value }))
+                      }
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="newUserRole">Perfil</Label>
+                  <select
+                    id="newUserRole"
+                    className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={companyUserForm.roleName}
+                    onChange={(e) =>
+                      setCompanyUserForm((prev) => ({ ...prev, roleName: e.target.value }))
+                    }
+                  >
+                    <option value="Caixa">Caixa</option>
+                    <option value="Caixa Sênior">Caixa Sênior</option>
+                    <option value="Gerente">Gerente</option>
+                    <option value="Estoquista">Estoquista</option>
+                    <option value="Financeiro">Financeiro</option>
+                    <option value="Visualizador">Visualizador</option>
+                    <option value="Administrador">Administrador</option>
+                  </select>
+                </div>
+              </CardContent>
+              <CardFooter className="flex flex-col gap-3">
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={createCompanyUserMutation.isPending}
+                >
+                  {createCompanyUserMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Cadastrando...
+                    </>
+                  ) : (
+                    "Cadastrar usuario e enviar convite"
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setUserCreateTarget(null)}
+                >
+                  Cancelar
+                </Button>
+              </CardFooter>
+            </form>
+          </Card>
+        )}
 
         {showCreateForm && (
           <Card>
@@ -907,6 +1301,479 @@ export default function ManagerOnboarding() {
                     />
                   </div>
                 </div>
+
+                <div className="rounded-lg border p-4 space-y-4">
+                  <div>
+                    <h3 className="font-medium">Integracoes de maquininha</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Configure Stone e Mercado Pago para a empresa no onboarding manager.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="stoneEnabled"
+                        type="checkbox"
+                        checked={companyForm.stoneEnabled}
+                        onChange={(e) =>
+                          setCompanyForm((prev) => ({
+                            ...prev,
+                            stoneEnabled: e.target.checked,
+                          }))
+                        }
+                      />
+                      <Label htmlFor="stoneEnabled">Habilitar Stone</Label>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="stoneClientId">Stone Client ID</Label>
+                        <Input
+                          id="stoneClientId"
+                          value={companyForm.stoneClientId}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              stoneClientId: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="stoneClientSecret">Stone Client Secret</Label>
+                        <Input
+                          id="stoneClientSecret"
+                          type="password"
+                          value={companyForm.stoneClientSecret}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              stoneClientSecret: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="stoneTerminalId">Stone Terminal ID</Label>
+                        <Input
+                          id="stoneTerminalId"
+                          value={companyForm.stoneTerminalId}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              stoneTerminalId: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="stoneEnvironment">Ambiente Stone</Label>
+                        <select
+                          id="stoneEnvironment"
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.stoneEnvironment}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              stoneEnvironment: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="producao">Producao</option>
+                          <option value="homologacao">Homologacao</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleValidateStone}
+                        disabled={stoneValidationStatus === "connecting"}
+                      >
+                        {stoneValidationStatus === "connecting" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Testando Stone...
+                          </>
+                        ) : (
+                          "Testar conexao Stone"
+                        )}
+                      </Button>
+                      {stoneValidationStatus === "connected" && (
+                        <span className="text-sm text-green-600">Stone validada</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="mpEnabled"
+                        type="checkbox"
+                        checked={companyForm.mpEnabled}
+                        onChange={(e) =>
+                          setCompanyForm((prev) => ({
+                            ...prev,
+                            mpEnabled: e.target.checked,
+                          }))
+                        }
+                      />
+                      <Label htmlFor="mpEnabled">Habilitar Mercado Pago</Label>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="mpAccessToken">MP Access Token</Label>
+                        <Input
+                          id="mpAccessToken"
+                          type="password"
+                          value={companyForm.mpAccessToken}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              mpAccessToken: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="mpTerminalId">MP Terminal (store_id|pos_id ou terminal_id)</Label>
+                        <Input
+                          id="mpTerminalId"
+                          value={companyForm.mpTerminalId}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              mpTerminalId: e.target.value,
+                            }))
+                          }
+                          placeholder="STORE123|POS456"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleValidateMercadoPago}
+                        disabled={mpValidationStatus === "connecting"}
+                      >
+                        {mpValidationStatus === "connecting" ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Testando Mercado Pago...
+                          </>
+                        ) : (
+                          "Testar conexao Mercado Pago"
+                        )}
+                      </Button>
+                      {mpValidationStatus === "connected" && (
+                        <span className="text-sm text-green-600">
+                          Mercado Pago validado
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {!editingTarget && (
+                  <div className="rounded-lg border p-4 space-y-4">
+                    <div>
+                      <h3 className="font-medium">Terminais iniciais (PDV)</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Opcional: crie os caixas iniciais e vincule a maquininha de cada um.
+                      </p>
+                    </div>
+
+                    <div className="rounded-md border p-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium">Maquininhas iniciais</h4>
+                          <p className="text-xs text-muted-foreground">
+                            Cadastre as maquininhas e depois selecione no caixa abaixo.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setInitialMachines((prev) => [
+                              ...prev,
+                              {
+                                key: `machine_${Date.now()}_${prev.length + 1}`,
+                                name: `Maquininha ${prev.length + 1}`,
+                                provider: "mercadopago",
+                                mpTerminalId: "",
+                                stoneTerminalId: "",
+                                enabled: true,
+                              },
+                            ])
+                          }
+                        >
+                          Adicionar maquininha
+                        </Button>
+                      </div>
+
+                      {initialMachines.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Nenhuma maquininha inicial cadastrada. Os caixas podem usar o padrao da empresa.
+                        </p>
+                      ) : (
+                        <div className="space-y-3">
+                          {initialMachines.map((machine, index) => (
+                            <div key={machine.key} className="rounded border p-3 space-y-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="font-medium text-sm">
+                                  Maquininha {index + 1}
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() =>
+                                    setInitialMachines((prev) =>
+                                      prev.filter((m) => m.key !== machine.key),
+                                    )
+                                  }
+                                >
+                                  Remover
+                                </Button>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="space-y-2">
+                                  <Label>Nome</Label>
+                                  <Input
+                                    value={machine.name}
+                                    onChange={(e) =>
+                                      setInitialMachines((prev) =>
+                                        prev.map((m) =>
+                                          m.key === machine.key
+                                            ? { ...m, name: e.target.value }
+                                            : m,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Marca</Label>
+                                  <select
+                                    className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    value={machine.provider}
+                                    onChange={(e) =>
+                                      setInitialMachines((prev) =>
+                                        prev.map((m) =>
+                                          m.key === machine.key
+                                            ? {
+                                                ...m,
+                                                provider: e.target.value as
+                                                  | "mercadopago"
+                                                  | "stone",
+                                              }
+                                            : m,
+                                        ),
+                                      )
+                                    }
+                                  >
+                                    <option value="mercadopago">Mercado Pago</option>
+                                    <option value="stone">Stone</option>
+                                  </select>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>
+                                    {machine.provider === "mercadopago"
+                                      ? "MP Terminal"
+                                      : "Stone Terminal ID"}
+                                  </Label>
+                                  <Input
+                                    value={
+                                      machine.provider === "mercadopago"
+                                        ? machine.mpTerminalId
+                                        : machine.stoneTerminalId
+                                    }
+                                    placeholder={
+                                      machine.provider === "mercadopago"
+                                        ? "STORE123|POS456"
+                                        : "Terminal Stone"
+                                    }
+                                    onChange={(e) =>
+                                      setInitialMachines((prev) =>
+                                        prev.map((m) =>
+                                          m.key === machine.key
+                                            ? m.provider === "mercadopago"
+                                              ? { ...m, mpTerminalId: e.target.value }
+                                              : { ...m, stoneTerminalId: e.target.value }
+                                            : m,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {initialTerminals.map((terminal, index) => (
+                      <div key={index} className="rounded-md border p-3 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <input
+                            id={`initial-terminal-enabled-${index}`}
+                            type="checkbox"
+                            checked={terminal.enabled}
+                            onChange={(e) =>
+                              setInitialTerminals((prev) =>
+                                prev.map((t, i) =>
+                                  i === index ? { ...t, enabled: e.target.checked } : t,
+                                ),
+                              )
+                            }
+                          />
+                          <Label htmlFor={`initial-terminal-enabled-${index}`}>
+                            Criar {terminal.name || `Caixa ${index + 1}`}
+                          </Label>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label>Nome do terminal</Label>
+                            <Input
+                              value={terminal.name}
+                              onChange={(e) =>
+                                setInitialTerminals((prev) =>
+                                  prev.map((t, i) =>
+                                    i === index ? { ...t, name: e.target.value } : t,
+                                  ),
+                                )
+                              }
+                              disabled={!terminal.enabled}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Codigo</Label>
+                            <Input
+                              value={terminal.code}
+                              onChange={(e) =>
+                                setInitialTerminals((prev) =>
+                                  prev.map((t, i) =>
+                                    i === index
+                                      ? { ...t, code: e.target.value.toUpperCase() }
+                                      : t,
+                                  ),
+                                )
+                              }
+                              placeholder={`CX0${index + 1}`}
+                              disabled={!terminal.enabled}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-2">
+                            <Label>Maquininha cadastrada</Label>
+                            <select
+                              className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              value={terminal.paymentMachineKey}
+                              disabled={!terminal.enabled}
+                              onChange={(e) =>
+                                setInitialTerminals((prev) =>
+                                  prev.map((t, i) =>
+                                    i === index
+                                      ? {
+                                          ...t,
+                                          paymentMachineKey: e.target.value,
+                                          paymentProvider: e.target.value
+                                            ? "company_default"
+                                            : t.paymentProvider,
+                                        }
+                                      : t,
+                                  ),
+                                )
+                              }
+                            >
+                              <option value="">Sem vinculo (usar campos abaixo/padrao)</option>
+                              {initialMachines
+                                .filter((m) => m.enabled)
+                                .map((m) => (
+                                  <option key={m.key} value={m.key}>
+                                    {m.name} ({m.provider === "mercadopago" ? "MP" : "Stone"})
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Maquininha (provedor)</Label>
+                            <select
+                              className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              value={terminal.paymentProvider}
+                              disabled={!terminal.enabled || !!terminal.paymentMachineKey}
+                              onChange={(e) =>
+                                setInitialTerminals((prev) =>
+                                  prev.map((t, i) =>
+                                    i === index
+                                      ? { ...t, paymentProvider: e.target.value }
+                                      : t,
+                                  ),
+                                )
+                              }
+                            >
+                              <option value="company_default">Padrao da empresa</option>
+                              <option value="mercadopago">Mercado Pago</option>
+                              <option value="stone">Stone</option>
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>MP Terminal</Label>
+                            <Input
+                              value={terminal.mpTerminalId}
+                              onChange={(e) =>
+                                setInitialTerminals((prev) =>
+                                  prev.map((t, i) =>
+                                    i === index
+                                      ? { ...t, mpTerminalId: e.target.value }
+                                      : t,
+                                  ),
+                                )
+                              }
+                              placeholder="STORE123|POS456"
+                              disabled={!terminal.enabled || !!terminal.paymentMachineKey}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Stone Terminal ID</Label>
+                            <Input
+                              value={terminal.stoneTerminalId}
+                              onChange={(e) =>
+                                setInitialTerminals((prev) =>
+                                  prev.map((t, i) =>
+                                    i === index
+                                      ? { ...t, stoneTerminalId: e.target.value }
+                                      : t,
+                                  ),
+                                )
+                              }
+                              placeholder="Terminal Stone"
+                              disabled={!terminal.enabled || !!terminal.paymentMachineKey}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
 
               <CardFooter className="flex flex-col gap-3">

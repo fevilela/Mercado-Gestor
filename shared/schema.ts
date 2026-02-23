@@ -648,6 +648,11 @@ export const posTerminals = pgTable("pos_terminals", {
   name: text("name").notNull(),
   code: text("code"),
   description: text("description"),
+  assignedUserId: varchar("assigned_user_id"),
+  paymentMachineId: integer("payment_machine_id"),
+  paymentProvider: text("payment_provider"),
+  mpTerminalId: text("mp_terminal_id"),
+  stoneTerminalId: text("stone_terminal_id"),
   isAutonomous: boolean("is_autonomous").default(false),
   requiresSangria: boolean("requires_sangria").default(false),
   requiresSuprimento: boolean("requires_suprimento").default(false),
@@ -663,6 +668,27 @@ export const insertPosTerminalSchema = createInsertSchema(posTerminals).omit({
 });
 export type InsertPosTerminal = z.infer<typeof insertPosTerminalSchema>;
 export type PosTerminal = typeof posTerminals.$inferSelect;
+
+// ============================================
+// PAYMENT MACHINES: Maquininhas cadastradas
+// ============================================
+export const paymentMachines = pgTable("payment_machines", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  name: text("name").notNull(),
+  provider: text("provider").notNull(), // mercadopago | stone
+  mpTerminalId: text("mp_terminal_id"),
+  stoneTerminalId: text("stone_terminal_id"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertPaymentMachineSchema = createInsertSchema(paymentMachines).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertPaymentMachine = z.infer<typeof insertPaymentMachineSchema>;
+export type PaymentMachine = typeof paymentMachines.$inferSelect;
 
 // ============================================
 // CASH REGISTER: Controle de Caixa

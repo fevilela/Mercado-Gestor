@@ -129,6 +129,10 @@ interface PosTerminal {
   id?: number;
   name: string;
   code: string;
+  assignedUserId?: string | null;
+  paymentProvider?: "company_default" | "mercadopago" | "stone" | "";
+  mpTerminalId?: string;
+  stoneTerminalId?: string;
   isAutonomous: boolean;
   requiresSangria: boolean;
   requiresSuprimento: boolean;
@@ -142,6 +146,13 @@ interface SimplesAliquot {
   rangeEnd: string;
   nominalAliquot: string;
   effectiveAliquot: string;
+}
+interface CompanyUserOption {
+  id: string;
+  name: string;
+  email: string;
+  roleName?: string | null;
+  isActive?: boolean;
 }
 
 interface FiscalReadinessCheck {
@@ -226,6 +237,7 @@ export default function Settings() {
     "idle" | "testing" | "connected"
   >("idle");
   const [terminals, setTerminals] = useState<PosTerminal[]>([]);
+  const [companyUsers, setCompanyUsers] = useState<CompanyUserOption[]>([]);
   const [editingTerminal, setEditingTerminal] = useState<PosTerminal | null>(
     null
   );
@@ -242,6 +254,10 @@ export default function Settings() {
   const [newTerminal, setNewTerminal] = useState<PosTerminal>({
     name: "",
     code: "",
+    assignedUserId: "",
+    paymentProvider: "company_default",
+    mpTerminalId: "",
+    stoneTerminalId: "",
     isAutonomous: false,
     requiresSangria: true,
     requiresSuprimento: true,
@@ -254,13 +270,41 @@ export default function Settings() {
   const [loadingFiscalReadiness, setLoadingFiscalReadiness] = useState(false);
   const [isManagerSession, setIsManagerSession] = useState(false);
 
+  const mpTerminalSuggestions = Array.from(
+    new Set(
+      [settings.mpTerminalId, ...terminals.map((t) => t.mpTerminalId)]
+        .map((v) => String(v || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  const stoneTerminalSuggestions = Array.from(
+    new Set(
+      [settings.stoneTerminalId, ...terminals.map((t) => t.stoneTerminalId)]
+        .map((v) => String(v || "").trim())
+        .filter(Boolean)
+    )
+  );
+
   useEffect(() => {
     fetchSettings();
     fetchTerminals();
+    fetchCompanyUsers();
     fetchSimplesAliquots();
     fetchFiscalReadiness();
     fetchManagerSession();
   }, []);
+
+  const fetchCompanyUsers = async () => {
+    try {
+      const response = await fetch("/api/auth/users");
+      if (!response.ok) return;
+      const data = await response.json();
+      setCompanyUsers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Failed to fetch users for terminal assignment:", error);
+    }
+  };
 
   const fetchManagerSession = async () => {
     try {
@@ -369,6 +413,10 @@ export default function Settings() {
         setNewTerminal({
           name: "",
           code: "",
+          assignedUserId: "",
+          paymentProvider: "company_default",
+          mpTerminalId: "",
+          stoneTerminalId: "",
           isAutonomous: false,
           requiresSangria: true,
           requiresSuprimento: true,
@@ -2189,6 +2237,16 @@ export default function Settings() {
                 </Button>
               </CardHeader>
               <CardContent className="space-y-4">
+                <datalist id="mp-terminal-suggestions">
+                  {mpTerminalSuggestions.map((value) => (
+                    <option key={value} value={value} />
+                  ))}
+                </datalist>
+                <datalist id="stone-terminal-suggestions">
+                  {stoneTerminalSuggestions.map((value) => (
+                    <option key={value} value={value} />
+                  ))}
+                </datalist>
                 {showNewTerminalForm && (
                   <div className="border rounded-lg p-4 space-y-4 bg-muted/50">
                     <h4 className="font-medium">Novo Terminal</h4>
@@ -2221,6 +2279,81 @@ export default function Settings() {
                             })
                           }
                           data-testid="input-terminal-code"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="terminal-assigned-user">
+                        Usuário autorizado (opcional)
+                      </Label>
+                      <select
+                        id="terminal-assigned-user"
+                        className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        value={String(newTerminal.assignedUserId || "")}
+                        onChange={(e) =>
+                          setNewTerminal({
+                            ...newTerminal,
+                            assignedUserId: e.target.value || "",
+                          })
+                        }
+                      >
+                        <option value="">Todos os usuários (com permissão)</option>
+                        {companyUsers
+                          .filter((u) => u.isActive !== false)
+                          .map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.name} ({u.roleName || "Sem perfil"})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="terminal-provider">Maquininha (provedor)</Label>
+                        <select
+                          id="terminal-provider"
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={newTerminal.paymentProvider || "company_default"}
+                          onChange={(e) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              paymentProvider: e.target.value as any,
+                            })
+                          }
+                        >
+                          <option value="company_default">Padrao da empresa</option>
+                          <option value="mercadopago">Mercado Pago</option>
+                          <option value="stone">Stone</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="terminal-mp-id">MP Terminal</Label>
+                        <Input
+                          id="terminal-mp-id"
+                          placeholder="STORE123|POS456 ou terminal_id"
+                          list="mp-terminal-suggestions"
+                          value={newTerminal.mpTerminalId || ""}
+                          onChange={(e) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              mpTerminalId: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="terminal-stone-id">Stone Terminal ID</Label>
+                        <Input
+                          id="terminal-stone-id"
+                          placeholder="Terminal Stone"
+                          list="stone-terminal-suggestions"
+                          value={newTerminal.stoneTerminalId || ""}
+                          onChange={(e) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              stoneTerminalId: e.target.value,
+                            })
+                          }
                         />
                       </div>
                     </div>
@@ -2356,6 +2489,80 @@ export default function Settings() {
                                 />
                               </div>
                             </div>
+                            <div className="space-y-2">
+                              <Label>Usuário autorizado (opcional)</Label>
+                              <select
+                                className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                value={String(editingTerminal.assignedUserId || "")}
+                                onChange={(e) =>
+                                  setEditingTerminal({
+                                    ...editingTerminal,
+                                    assignedUserId: e.target.value || "",
+                                  })
+                                }
+                              >
+                                <option value="">
+                                  Todos os usuários (com permissão)
+                                </option>
+                                {companyUsers
+                                  .filter((u) => u.isActive !== false)
+                                  .map((u) => (
+                                    <option key={u.id} value={u.id}>
+                                      {u.name} ({u.roleName || "Sem perfil"})
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div className="space-y-2">
+                                <Label>Maquininha (provedor)</Label>
+                                <select
+                                  className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                  value={
+                                    editingTerminal.paymentProvider ||
+                                    "company_default"
+                                  }
+                                  onChange={(e) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      paymentProvider: e.target.value as any,
+                                    })
+                                  }
+                                >
+                                  <option value="company_default">
+                                    Padrao da empresa
+                                  </option>
+                                  <option value="mercadopago">Mercado Pago</option>
+                                  <option value="stone">Stone</option>
+                                </select>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>MP Terminal</Label>
+                                <Input
+                                  list="mp-terminal-suggestions"
+                                  value={editingTerminal.mpTerminalId || ""}
+                                  onChange={(e) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      mpTerminalId: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Stone Terminal ID</Label>
+                                <Input
+                                  list="stone-terminal-suggestions"
+                                  value={editingTerminal.stoneTerminalId || ""}
+                                  onChange={(e) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      stoneTerminalId: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                            </div>
                             <div className="flex flex-wrap gap-4">
                               <div className="flex items-center gap-2">
                                 <Switch
@@ -2441,7 +2648,9 @@ export default function Settings() {
                           <>
                             <div className="flex items-center gap-4">
                               <div className="h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-medium">
-                                {terminal.code.substring(0, 2).toUpperCase()}
+                                {String(terminal.code || terminal.name || "PDV")
+                                  .substring(0, 2)
+                                  .toUpperCase()}
                               </div>
                               <div>
                                 <div className="font-medium flex items-center gap-2">
@@ -2453,7 +2662,23 @@ export default function Settings() {
                                   )}
                                 </div>
                                 <div className="text-sm text-muted-foreground flex items-center gap-2">
-                                  <span>Código: {terminal.code}</span>
+                                  <span>
+                                    Código: {terminal.code || "-"}
+                                  </span>
+                                  {terminal.assignedUserId && (
+                                    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">
+                                      Usuário vinculado
+                                    </span>
+                                  )}
+                                  {terminal.paymentProvider &&
+                                    terminal.paymentProvider !==
+                                      "company_default" && (
+                                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded">
+                                        {terminal.paymentProvider === "mercadopago"
+                                          ? "MP"
+                                          : "Stone"}
+                                      </span>
+                                    )}
                                   {terminal.isAutonomous && (
                                     <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
                                       Autônomo

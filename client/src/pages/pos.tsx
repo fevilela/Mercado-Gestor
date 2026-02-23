@@ -67,6 +67,18 @@ type FiscalReadiness = {
   ready: boolean;
   messages: string[];
 };
+type PosTerminalConfig = {
+  id: number;
+  name: string;
+  code?: string | null;
+  isActive?: boolean | null;
+  assignedUserId?: string | null;
+  requiresSangria?: boolean | null;
+  requiresSuprimento?: boolean | null;
+  paymentProvider?: "company_default" | "mercadopago" | "stone" | null;
+  mpTerminalId?: string | null;
+  stoneTerminalId?: string | null;
+};
 
 export default function POS() {
   const [, setLocation] = useLocation();
@@ -100,7 +112,7 @@ export default function POS() {
   const [sangriaReason, setSangriaReason] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
 
   const { data: cashRegisterData, isLoading: isLoadingCashRegister } = useQuery(
     {
@@ -115,9 +127,63 @@ export default function POS() {
 
   const cashRegister = cashRegisterData?.register;
   const cashMovements = cashRegisterData?.movements || [];
+  const [selectedPosTerminalId, setSelectedPosTerminalId] = useState<number | null>(
+    null
+  );
+
+  const { data: posTerminalsData } = useQuery({
+    queryKey: ["/api/pos-terminals"],
+    queryFn: async () => {
+      const res = await fetch("/api/pos-terminals");
+      if (!res.ok) throw new Error("Failed to fetch POS terminals");
+      return res.json();
+    },
+  });
+  const isAdminTerminalOverride =
+    hasPermission("users:manage") || hasPermission("settings:edit");
+  const posTerminals = ((posTerminalsData || []) as PosTerminalConfig[])
+    .filter((t) => t?.isActive !== false)
+    .filter((t) => {
+      const assigned = String(t?.assignedUserId || "").trim();
+      if (!assigned) return true;
+      if (isAdminTerminalOverride) return true;
+      return assigned === String(user?.id || "");
+    });
+  const selectedPosTerminal =
+    posTerminals.find((t) => t.id === selectedPosTerminalId) || null;
+  const selectedMpTerminalRef = String(
+    selectedPosTerminal?.mpTerminalId || ""
+  ).trim();
+
+  useEffect(() => {
+    const raw = window.localStorage.getItem("pdv:selected-terminal-id");
+    const id = Number(raw);
+    if (Number.isFinite(id) && id > 0) {
+      setSelectedPosTerminalId(id);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!posTerminals.length) return;
+    if (
+      selectedPosTerminalId &&
+      posTerminals.some((t) => t.id === selectedPosTerminalId)
+    ) {
+      return;
+    }
+    setSelectedPosTerminalId(posTerminals[0].id);
+  }, [posTerminals, selectedPosTerminalId]);
+
+  useEffect(() => {
+    if (!selectedPosTerminalId) return;
+    window.localStorage.setItem(
+      "pdv:selected-terminal-id",
+      String(selectedPosTerminalId)
+    );
+  }, [selectedPosTerminalId]);
 
   const openCashRegisterMutation = useMutation({
-    mutationFn: async (data: { openingAmount: string }) => {
+    mutationFn: async (data: { openingAmount: string; terminalId?: number }) => {
       const res = await fetch("/api/cash-register/open", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -198,7 +264,10 @@ export default function POS() {
       });
       return;
     }
-    openCashRegisterMutation.mutate({ openingAmount });
+    openCashRegisterMutation.mutate({
+      openingAmount,
+      terminalId: selectedPosTerminalId || undefined,
+    });
   };
 
   const handleSangria = () => {
@@ -523,6 +592,7 @@ export default function POS() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           providerReference: reference || undefined,
+          terminalId: selectedMpTerminalRef || undefined,
         }),
       }).catch(() => null);
 
@@ -644,6 +714,7 @@ export default function POS() {
             body: JSON.stringify({
               amount: parseFloat(total.toFixed(2)),
               method: tefMethod,
+              posTerminalId: selectedPosTerminalId || undefined,
             }),
           });
           if (res.status !== 409 || attempt === 3) {
@@ -652,7 +723,9 @@ export default function POS() {
           await fetch("/api/payments/mercadopago/clear-queue", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
+            body: JSON.stringify({
+              terminalId: selectedMpTerminalRef || undefined,
+            }),
           }).catch(() => null);
           toast({
             title: "Terminal ocupado",
@@ -790,6 +863,7 @@ export default function POS() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               providerReference: result.providerReference,
+              terminalId: selectedMpTerminalRef || undefined,
             }),
           }).catch(() => null);
           if (clearRes?.ok) {
@@ -1221,7 +1295,45 @@ export default function POS() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {cashRegister && hasPermission("pos:sangria") && (
+            {posTerminals.length > 0 && (
+              posTerminals.length === 1 || !isAdminTerminalOverride ? (
+                <Badge
+                  variant="secondary"
+                  className="bg-white/20 hover:bg-white/20 text-white border-0"
+                  title="Terminal PDV"
+                >
+                  Caixa:{" "}
+                  {(() => {
+                    const terminal = selectedPosTerminal || posTerminals[0];
+                    if (!terminal) return "PDV";
+                    return terminal.code
+                      ? `${terminal.name} - ${terminal.code}`
+                      : terminal.name;
+                  })()}
+                </Badge>
+              ) : (
+                <select
+                  className="h-9 rounded-md border border-white/30 bg-white/15 px-2 text-sm text-white"
+                  value={selectedPosTerminalId || ""}
+                  onChange={(e) => setSelectedPosTerminalId(Number(e.target.value))}
+                  title="Terminal PDV"
+                >
+                  {posTerminals.map((terminal) => (
+                    <option
+                      key={terminal.id}
+                      value={terminal.id}
+                      className="text-black"
+                    >
+                      {terminal.name}
+                      {terminal.code ? ` (${terminal.code})` : ""}
+                    </option>
+                  ))}
+                </select>
+              )
+            )}
+            {cashRegister &&
+              hasPermission("pos:sangria") &&
+              selectedPosTerminal?.requiresSangria !== false && (
               <Button
                 variant="secondary"
                 className="gap-2"

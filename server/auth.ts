@@ -10,8 +10,10 @@ import {
   permissions,
   rolePermissions,
   companySettings,
+  paymentMachines,
   companyOnboardingCodes,
   passwordResetCodes,
+  posTerminals,
   insertCompanySchema,
   insertUserSchema,
   type Company,
@@ -21,6 +23,8 @@ import {
 } from "@shared/schema";
 import { eq, and, isNull, desc, ilike, or, ne, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { validateMercadoPagoSettings } from "./payment-service";
+import { validateStoneSettings } from "./stone-connect";
 
 const authRouter = Router();
 
@@ -466,19 +470,6 @@ async function getUserPermissions(userId: string): Promise<string[]> {
     .limit(1);
   if (!user.length) return [];
 
-  const [role] = await db
-    .select({ isSystemRole: roles.isSystemRole })
-    .from(roles)
-    .where(eq(roles.id, user[0].roleId))
-    .limit(1);
-
-  if (role?.isSystemRole) {
-    const allPermissions = await db
-      .select({ module: permissions.module, action: permissions.action })
-      .from(permissions);
-    return allPermissions.map((p) => `${p.module}:${p.action}`);
-  }
-
   const rolePerms = await db
     .select({
       module: permissions.module,
@@ -504,11 +495,53 @@ const managerCreateCompanySchema = z.object({
   zipCode: z.string().optional(),
   adminName: z.string().min(3),
   adminEmail: z.string().email(),
+  stoneEnabled: z.boolean().optional(),
+  stoneClientId: z.string().optional(),
+  stoneClientSecret: z.string().optional(),
+  stoneTerminalId: z.string().optional(),
+  stoneEnvironment: z.enum(["producao", "homologacao"]).optional(),
+  mpEnabled: z.boolean().optional(),
+  mpAccessToken: z.string().optional(),
+  mpTerminalId: z.string().optional(),
+  initialMachines: z
+    .array(
+      z.object({
+        key: z.string().min(1),
+        name: z.string().min(1),
+        provider: z.enum(["mercadopago", "stone"]),
+        mpTerminalId: z.string().optional(),
+        stoneTerminalId: z.string().optional(),
+      }),
+    )
+    .max(20)
+    .optional(),
+  initialTerminals: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        code: z.string().optional(),
+        paymentProvider: z
+          .enum(["company_default", "mercadopago", "stone"])
+          .optional(),
+        paymentMachineKey: z.string().optional(),
+        mpTerminalId: z.string().optional(),
+        stoneTerminalId: z.string().optional(),
+      }),
+    )
+    .max(10)
+    .optional(),
 });
 
 const managerResendInviteSchema = z.object({
   cnpj: z.string().min(14).max(18),
   adminEmail: z.string().email(),
+});
+
+const managerCreateCompanyUserSchema = z.object({
+  companyId: z.number().int().positive(),
+  name: z.string().min(3),
+  email: z.string().email(),
+  roleName: z.string().min(2),
 });
 
 const managerUpdateCompanySchema = z.object({
@@ -525,6 +558,14 @@ const managerUpdateCompanySchema = z.object({
   zipCode: z.string().optional(),
   adminName: z.string().min(3),
   adminEmail: z.string().email(),
+  stoneEnabled: z.boolean().optional(),
+  stoneClientId: z.string().optional(),
+  stoneClientSecret: z.string().optional(),
+  stoneTerminalId: z.string().optional(),
+  stoneEnvironment: z.enum(["producao", "homologacao"]).optional(),
+  mpEnabled: z.boolean().optional(),
+  mpAccessToken: z.string().optional(),
+  mpTerminalId: z.string().optional(),
 });
 
 const managerSetCompanyActiveSchema = z.object({
@@ -558,6 +599,18 @@ const managerLoginSchema = z.object({
   password: z.string().min(1),
 });
 
+const managerMpValidationSchema = z.object({
+  accessToken: z.string().min(1),
+  terminalId: z.string().min(1),
+});
+
+const managerStoneValidationSchema = z.object({
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  terminalId: z.string().min(1),
+  environment: z.enum(["homologacao", "producao"]).optional(),
+});
+
 const dynamicImport = new Function(
   "modulePath",
   "return import(modulePath);",
@@ -586,6 +639,13 @@ function generateOnboardingCode() {
 
 function hashOnboardingCode(code: string) {
   return createHash("sha256").update(code).digest("hex");
+}
+
+function normalizeTerminalCode(value?: string, fallback = "CX01") {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  return normalized || fallback;
 }
 
 async function sendOnboardingCodeEmail(params: {
@@ -736,6 +796,51 @@ authRouter.get("/manager/session", (req, res) => {
   });
 });
 
+authRouter.post("/manager/payments/mercadopago/validate", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const { accessToken, terminalId } = managerMpValidationSchema.parse(req.body);
+    const result = await validateMercadoPagoSettings(accessToken, terminalId);
+    res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({
+      error:
+        error instanceof Error ? error.message : "Falha ao validar Mercado Pago",
+    });
+  }
+});
+
+authRouter.post("/manager/payments/stone/validate", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const { clientId, clientSecret, terminalId: _terminalId, environment } =
+      managerStoneValidationSchema.parse(req.body);
+    void _terminalId;
+    const result = await validateStoneSettings({
+      clientId,
+      clientSecret,
+      environment: environment === "homologacao" ? "homologacao" : "producao",
+    });
+    res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.errors });
+    }
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Falha ao validar Stone",
+    });
+  }
+});
+
 authRouter.get("/manager/onboarding-users", async (req, res) => {
   if (!ensureManagerSession(req, res)) {
     return;
@@ -778,9 +883,18 @@ authRouter.get("/manager/onboarding-users", async (req, res) => {
         zipCode: companies.zipCode,
         companyIsActive: companies.isActive,
         roleName: roles.name,
+        stoneEnabled: companySettings.stoneEnabled,
+        stoneClientId: companySettings.stoneClientId,
+        stoneClientSecret: companySettings.stoneClientSecret,
+        stoneTerminalId: companySettings.stoneTerminalId,
+        stoneEnvironment: companySettings.stoneEnvironment,
+        mpEnabled: companySettings.mpEnabled,
+        mpAccessToken: companySettings.mpAccessToken,
+        mpTerminalId: companySettings.mpTerminalId,
       })
       .from(users)
       .innerJoin(companies, eq(users.companyId, companies.id))
+      .leftJoin(companySettings, eq(companySettings.companyId, companies.id))
       .leftJoin(roles, eq(users.roleId, roles.id))
       .orderBy(desc(users.createdAt))
       .limit(200);
@@ -858,7 +972,86 @@ authRouter.post("/manager/companies", async (req, res) => {
       ie: data.ie || null,
       razaoSocial: company.razaoSocial,
       nomeFantasia: company.nomeFantasia,
+      stoneEnabled: Boolean(data.stoneEnabled),
+      stoneClientId: data.stoneClientId || null,
+      stoneClientSecret: data.stoneClientSecret || null,
+      stoneTerminalId: data.stoneTerminalId || null,
+      stoneEnvironment: data.stoneEnvironment || "producao",
+      mpEnabled: Boolean(data.mpEnabled),
+      mpAccessToken: data.mpAccessToken || null,
+      mpTerminalId: data.mpTerminalId || null,
     });
+
+    const initialMachineIdByKey = new Map<string, number>();
+    if (Array.isArray(data.initialMachines) && data.initialMachines.length > 0) {
+      const normalizedInitialMachines = data.initialMachines
+        .filter((m) => String(m.name || "").trim())
+        .map((m) => ({
+          key: m.key,
+          row: {
+          companyId: company.id,
+          name: String(m.name || "").trim(),
+          provider: m.provider,
+          mpTerminalId: m.provider === "mercadopago" ? m.mpTerminalId || null : null,
+          stoneTerminalId:
+            m.provider === "stone" ? m.stoneTerminalId || null : null,
+          isActive: true,
+          },
+        }));
+
+      if (normalizedInitialMachines.length > 0) {
+        const insertedMachines = await db
+          .insert(paymentMachines)
+          .values(normalizedInitialMachines.map((m) => m.row))
+          .returning();
+        insertedMachines.forEach((row, index) => {
+          const source = normalizedInitialMachines[index];
+          if (source?.key) initialMachineIdByKey.set(source.key, row.id);
+        });
+      }
+    }
+
+    if (Array.isArray(data.initialTerminals) && data.initialTerminals.length > 0) {
+      const usedCodes = new Set<string>();
+      const terminalRows = data.initialTerminals
+        .filter((t) => String(t.name || "").trim())
+        .map((t, index) => {
+          let code = normalizeTerminalCode(t.code, `CX${String(index + 1).padStart(2, "0")}`);
+          while (usedCodes.has(code)) {
+            code = `${code}_${index + 1}`;
+          }
+          usedCodes.add(code);
+
+          const linkedMachineId = t.paymentMachineKey
+            ? initialMachineIdByKey.get(t.paymentMachineKey) || null
+            : null;
+
+          return {
+            companyId: company.id,
+            name: String(t.name || "").trim(),
+            code,
+            paymentMachineId: linkedMachineId,
+            paymentProvider:
+              linkedMachineId
+                ? "company_default"
+                : t.paymentProvider && t.paymentProvider !== "company_default"
+                ? t.paymentProvider
+                : "company_default",
+            mpTerminalId: t.mpTerminalId || null,
+            stoneTerminalId: t.stoneTerminalId || null,
+            isAutonomous: false,
+            requiresSangria: false,
+            requiresSuprimento: false,
+            requiresOpening: true,
+            requiresClosing: true,
+            isActive: true,
+          };
+        });
+
+      if (terminalRows.length > 0) {
+        await db.insert(posTerminals).values(terminalRows);
+      }
+    }
 
     const [adminRole] = await db
       .select()
@@ -1014,6 +1207,106 @@ authRouter.post("/manager/resend-invite", async (req, res) => {
   }
 });
 
+authRouter.post("/manager/company-users", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerCreateCompanyUserSchema.parse(req.body);
+
+    const [company] = await db
+      .select()
+      .from(companies)
+      .where(eq(companies.id, data.companyId))
+      .limit(1);
+
+    if (!company) {
+      return res.status(404).json({ error: "Empresa nao encontrada" });
+    }
+
+    const existingUser = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, data.email))
+      .limit(1);
+
+    if (existingUser.length > 0) {
+      return res.status(400).json({ error: "Email ja cadastrado no sistema" });
+    }
+
+    const [targetRole] = await db
+      .select()
+      .from(roles)
+      .where(and(eq(roles.companyId, data.companyId), eq(roles.name, data.roleName)))
+      .limit(1);
+
+    if (!targetRole) {
+      return res.status(404).json({ error: "Perfil nao encontrado na empresa" });
+    }
+
+    const temporaryPassword = `invite-pending-${Date.now()}-${Math.random()}`;
+    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+
+    const [newUser] = await db
+      .insert(users)
+      .values({
+        companyId: data.companyId,
+        roleId: targetRole.id,
+        username: data.email.split("@")[0],
+        email: data.email,
+        password: hashedPassword,
+        name: data.name,
+      })
+      .returning();
+
+    const code = generateOnboardingCode();
+    const codeHash = hashOnboardingCode(code);
+    const expiresInMinutes = Number(
+      process.env.ONBOARDING_CODE_TTL_MINUTES || 30,
+    );
+    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+
+    await db.insert(companyOnboardingCodes).values({
+      companyId: company.id,
+      userId: newUser.id,
+      email: newUser.email,
+      codeHash,
+      expiresAt,
+    });
+
+    const emailResult = await sendOnboardingCodeEmail({
+      to: newUser.email,
+      userName: newUser.name,
+      companyName: company.nomeFantasia || company.razaoSocial,
+      code,
+    });
+
+    res.json({
+      message: "Usuario cadastrado e convite gerado",
+      user: {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        companyId: company.id,
+        roleName: targetRole.name,
+      },
+      onboarding: {
+        emailSent: emailResult.sent,
+        expiresAt,
+        ...(process.env.NODE_ENV !== "production" ? { code } : {}),
+        ...(emailResult.sent ? {} : { emailError: emailResult.reason }),
+      },
+    });
+  } catch (error) {
+    console.error("Manager create company user error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao cadastrar usuario da empresa" });
+  }
+});
+
 authRouter.patch("/manager/company", async (req, res) => {
   if (!ensureManagerSession(req, res)) {
     return;
@@ -1083,6 +1376,14 @@ authRouter.patch("/manager/company", async (req, res) => {
         cnpj: normalizedCnpj,
         razaoSocial: data.razaoSocial,
         nomeFantasia: data.nomeFantasia || data.razaoSocial,
+        stoneEnabled: Boolean(data.stoneEnabled),
+        stoneClientId: data.stoneClientId || null,
+        stoneClientSecret: data.stoneClientSecret || null,
+        stoneTerminalId: data.stoneTerminalId || null,
+        stoneEnvironment: data.stoneEnvironment || "producao",
+        mpEnabled: Boolean(data.mpEnabled),
+        mpAccessToken: data.mpAccessToken || null,
+        mpTerminalId: data.mpTerminalId || null,
       })
       .where(eq(companySettings.companyId, data.companyId));
 
@@ -1764,34 +2065,51 @@ authRouter.post("/refresh-session", async (req, res) => {
     // Reinicializar permissões globais
     await initializePermissions();
 
-    // Se o usuário tem companyId, atualizar os roles da empresa
+        // Se o usuario tem companyId, sincronizar os roles padrao da empresa
     if (req.session.companyId) {
-      // Verificar se admin role precisa ser atualizado
-      const adminRole = await db
+      const companyRoles = await db
         .select()
         .from(roles)
-        .where(eq(roles.companyId, req.session.companyId))
-        .limit(1);
+        .where(eq(roles.companyId, req.session.companyId));
 
-      if (adminRole.length > 0) {
-        // Buscar todas as permissões que devem estar no role admin
-        const allPermissions = await db.select().from(permissions);
-        const permissionIds = allPermissions.map((p) => p.id);
+      const allPerms = await db
+        .select({
+          id: permissions.id,
+          module: permissions.module,
+          action: permissions.action,
+        })
+        .from(permissions);
+      const permIdByKey = new Map(
+        allPerms.map((p) => [`${p.module}:${p.action}`, p.id]),
+      );
+      const templateByRoleName = new Map(
+        Object.values(ROLE_TEMPLATES).map((tpl) => [tpl.name, tpl]),
+      );
 
-        // Adicionar permissões que faltam
-        for (const permId of permissionIds) {
-          await db
-            .insert(rolePermissions)
-            .values({
-              roleId: adminRole[0].id,
-              permissionId: permId,
-            })
-            .catch(() => {}); // Ignorar duplicatas
+      for (const role of companyRoles) {
+        if (!role.isSystemRole) continue;
+        const template = templateByRoleName.get(role.name);
+        if (!template) continue;
+
+        const permissionIds = template.permissions
+          .map((permKey) => permIdByKey.get(permKey))
+          .filter((id): id is number => typeof id === "number");
+
+        await db.delete(rolePermissions).where(eq(rolePermissions.roleId, role.id));
+
+        if (permissionIds.length > 0) {
+          await db.insert(rolePermissions).values(
+            permissionIds.map((permissionId) => ({
+              roleId: role.id,
+              permissionId,
+            })),
+          );
         }
       }
     }
 
-    res.json({ message: "Sessão atualizada com sucesso" });
+    req.session.userPermissions = await getUserPermissions(req.session.userId);
+res.json({ message: "Sessão atualizada com sucesso" });
   } catch (error) {
     console.error("Refresh session error:", error);
     res.status(500).json({ error: "Erro ao atualizar sessão" });
@@ -1853,3 +2171,4 @@ authRouter.put("/roles/:id/permissions", async (req, res) => {
 });
 
 export { authRouter, getUserPermissions, initializePermissions };
+

@@ -11,6 +11,7 @@ import {
   customers,
   suppliers,
   transporters,
+  paymentMachines,
   digitalCertificates,
   sefazTransmissionLogs,
 } from "@shared/schema";
@@ -943,7 +944,7 @@ export async function registerRoutes(
   app.get(
     "/api/sales",
     requireAuth,
-    requirePermission("pos:view", "reports:view"),
+    requirePermission("reports:view"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -961,7 +962,7 @@ export async function registerRoutes(
   app.get(
     "/api/sales/stats",
     requireAuth,
-    requirePermission("pos:view", "reports:view"),
+    requirePermission("reports:view"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -979,7 +980,7 @@ export async function registerRoutes(
   app.get(
     "/api/sales/:id",
     requireAuth,
-    requirePermission("pos:view", "reports:view"),
+    requirePermission("reports:view"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -1017,6 +1018,7 @@ export async function registerRoutes(
   const paymentAuthorizeSchema = z.object({
     amount: z.number().positive(),
     method: z.enum(["pix", "credito", "debito"]),
+    posTerminalId: z.number().int().positive().optional(),
   });
   const pixQrSchema = z.object({
     amount: z.number().positive(),
@@ -1033,6 +1035,30 @@ export async function registerRoutes(
   const mpCancelSchema = z.object({
     providerReference: z.string().min(1),
   });
+  const userCanAccessTerminal = async (
+    req: any,
+    companyId: number,
+    terminalId: number,
+  ) => {
+    const terminal = await storage.getPosTerminal(terminalId, companyId);
+    if (!terminal) {
+      return { ok: false as const, status: 404, error: "Terminal PDV nao encontrado", terminal: null };
+    }
+    const currentUserId = String(req.session?.userId || "");
+    const userPerms = (req.session?.userPermissions || []) as string[];
+    const isAdminOverride =
+      userPerms.includes("users:manage") || userPerms.includes("settings:edit");
+    const assignedUserId = String((terminal as any).assignedUserId || "").trim();
+    if (assignedUserId && assignedUserId !== currentUserId && !isAdminOverride) {
+      return {
+        ok: false as const,
+        status: 403,
+        error: "Este terminal PDV esta vinculado a outro usuario",
+        terminal,
+      };
+    }
+    return { ok: true as const, status: 200, error: null, terminal };
+  };
   const stoneValidationSchema = z.object({
     clientId: z.string().min(1),
     clientSecret: z.string().min(1),
@@ -1379,12 +1405,69 @@ export async function registerRoutes(
         if (!companyId)
           return res.status(401).json({ error: "Nao autenticado" });
 
-        const { amount, method } = paymentAuthorizeSchema.parse(req.body);
+        const { amount, method, posTerminalId } = paymentAuthorizeSchema.parse(
+          req.body
+        );
         const settings = await storage.getCompanySettings(companyId);
+        let effectiveSettings = settings;
+
+        if (posTerminalId) {
+          const terminalAccess = await userCanAccessTerminal(
+            req,
+            companyId,
+            posTerminalId
+          );
+          if (!terminalAccess.ok) {
+            return res.status(terminalAccess.status).json({ error: terminalAccess.error });
+          }
+          const posTerminal = terminalAccess.terminal!;
+
+          let linkedMachine: any = null;
+          if (posTerminal.paymentMachineId) {
+            const [machine] = await db
+              .select()
+              .from(paymentMachines)
+              .where(
+                and(
+                  eq(paymentMachines.id, posTerminal.paymentMachineId),
+                  eq(paymentMachines.companyId, companyId),
+                  eq(paymentMachines.isActive, true)
+                )
+              )
+              .limit(1);
+            linkedMachine = machine || null;
+          }
+
+          effectiveSettings = {
+            ...(settings || {}),
+            mpTerminalId:
+              linkedMachine?.mpTerminalId ||
+              posTerminal.mpTerminalId ||
+              settings?.mpTerminalId ||
+              "",
+            stoneTerminalId:
+              linkedMachine?.stoneTerminalId ||
+              posTerminal.stoneTerminalId ||
+              settings?.stoneTerminalId ||
+              "",
+          } as any;
+
+          const resolvedProvider =
+            linkedMachine?.provider || posTerminal.paymentProvider || "company_default";
+
+          if (resolvedProvider === "mercadopago") {
+            (effectiveSettings as any).mpEnabled = true;
+            (effectiveSettings as any).stoneEnabled = false;
+          } else if (resolvedProvider === "stone") {
+            (effectiveSettings as any).stoneEnabled = true;
+            (effectiveSettings as any).mpEnabled = false;
+          }
+        }
+
         const result = await authorizePayment({
           amount,
           method,
-          settings,
+          settings: effectiveSettings,
           description: `Venda PDV ${companyId}`,
         });
         res.json(result);
@@ -1651,8 +1734,8 @@ export async function registerRoutes(
     "etiquetas",
   ]);
   const referenceTableSchema = z.object({
-    code: z.string().optional(),
     name: z.string().min(1),
+    code: z.string().optional(),
     description: z.string().optional(),
     isActive: z.boolean().optional(),
   });
@@ -3251,6 +3334,7 @@ export async function registerRoutes(
   const openCashRegisterSchema = z.object({
     openingAmount: z.string(),
     notes: z.string().optional(),
+    terminalId: z.number().int().positive().optional(),
   });
 
   app.post(
@@ -3269,13 +3353,27 @@ export async function registerRoutes(
           return res.status(400).json({ error: "Já existe um caixa aberto" });
         }
 
-        const { openingAmount, notes } = openCashRegisterSchema.parse(req.body);
+        const { openingAmount, notes, terminalId } = openCashRegisterSchema.parse(
+          req.body
+        );
+
+        if (terminalId) {
+          const terminalAccess = await userCanAccessTerminal(
+            req,
+            companyId,
+            terminalId
+          );
+          if (!terminalAccess.ok) {
+            return res.status(terminalAccess.status).json({ error: terminalAccess.error });
+          }
+        }
 
         const user = await storage.getUser(userId);
         const userName = user?.name || "Operador";
 
         const register = await storage.openCashRegister({
           companyId,
+          terminalId: terminalId || null,
           userId,
           userName,
           openingAmount,
@@ -3441,6 +3539,22 @@ export async function registerRoutes(
   // POS TERMINALS ROUTES: Terminais PDV
   // ============================================
 
+  const buildNextPosTerminalCode = (existing: Array<{ code: string | null }>) => {
+    const used = new Set(
+      existing.map((t) => String(t.code || "").trim().toUpperCase()).filter(Boolean)
+    );
+    for (let i = 1; i <= 9999; i++) {
+      const candidate = `CX${String(i).padStart(2, "0")}`;
+      if (!used.has(candidate)) return candidate;
+    }
+    return `CX${Date.now().toString().slice(-4)}`;
+  };
+
+  const normalizePosTerminalCode = (value?: string | null) =>
+    String(value || "")
+      .trim()
+      .toUpperCase();
+
   app.get("/api/pos-terminals", requireAuth, async (req, res) => {
     try {
       const companyId = getCompanyId(req);
@@ -3456,7 +3570,18 @@ export async function registerRoutes(
 
   const posTerminalSchema = z.object({
     name: z.string().min(1, "Nome é obrigatório"),
-    description: z.string().optional(),
+    code: z.string().optional().nullable(),
+    description: z.string().optional().nullable(),
+    assignedUserId: z.string().optional().nullable(),
+    paymentProvider: z
+      .enum(["company_default", "mercadopago", "stone"])
+      .optional()
+      .nullable(),
+    mpTerminalId: z.string().optional().nullable(),
+    stoneTerminalId: z.string().optional().nullable(),
+    isAutonomous: z.boolean().optional(),
+    requiresSangria: z.boolean().optional(),
+    requiresSuprimento: z.boolean().optional(),
     requiresOpening: z.boolean().default(true),
     requiresClosing: z.boolean().default(true),
     isActive: z.boolean().default(true),
@@ -3473,8 +3598,13 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const validated = posTerminalSchema.parse(req.body);
+        const normalizedCode = normalizePosTerminalCode(validated.code);
+        const finalCode = normalizedCode
+          ? normalizedCode
+          : buildNextPosTerminalCode(await storage.getAllPosTerminals(companyId));
         const terminal = await storage.createPosTerminal({
           ...validated,
+          code: finalCode,
           companyId,
         });
         res.status(201).json(terminal);
@@ -3500,10 +3630,15 @@ export async function registerRoutes(
 
         const id = parseInt(req.params.id);
         const validated = posTerminalSchema.partial().parse(req.body);
+        const nextData: any = { ...validated };
+        if (Object.prototype.hasOwnProperty.call(validated, "code")) {
+          const normalizedCode = normalizePosTerminalCode(validated.code);
+          nextData.code = normalizedCode || null;
+        }
         const terminal = await storage.updatePosTerminal(
           id,
           companyId,
-          validated
+          nextData
         );
         if (!terminal) {
           return res.status(404).json({ error: "Terminal não encontrado" });
