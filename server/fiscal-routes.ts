@@ -2267,8 +2267,8 @@ router.get("/nfce/:saleId/pdf", async (req, res) => {
       cscId: String(settings.cscId || ""),
       csc: String(settings.cscToken || ""),
       sellerName:
-        typeof (sale as any)?.userName === "string" && (sale as any).userName.trim()
-          ? (sale as any).userName.trim()
+        typeof (sale as any)?.userId === "string" && (sale as any).userId.trim()
+          ? (sale as any).userId.trim()
           : null,
       showSeller: settings?.receiptShowSeller !== false,
       headerText: settings?.receiptHeaderText || null,

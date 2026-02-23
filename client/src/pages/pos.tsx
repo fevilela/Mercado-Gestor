@@ -1923,7 +1923,7 @@ export default function POS() {
             <div className="mt-4 text-center text-xs text-muted-foreground">
               <p>Motivo: Cancelamento solicitado pelo operador</p>
               {settings?.receiptShowSeller !== false ? (
-                <p>Caixa 01 - Operador: {user?.name || "Sistema"}</p>
+                <p>Caixa 01 - Operador ID: {user?.id || "Sistema"}</p>
               ) : null}
               {settings?.receiptFooterText ? (
                 <p className="whitespace-pre-line mt-1">

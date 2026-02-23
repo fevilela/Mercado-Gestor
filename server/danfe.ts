@@ -574,7 +574,7 @@ export async function generateDanfeNFCeThermal(
       ...(opts.showSeller !== false && opts.sellerName
         ? [
             {
-              text: wrapTextLines(`Vendedor: ${opts.sellerName}`, textWrapChars, 2),
+              text: wrapTextLines(`Vendedor ID: ${opts.sellerName}`, textWrapChars, 2),
               margin: [0, 1, 0, 0],
             },
           ]

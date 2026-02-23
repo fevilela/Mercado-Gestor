@@ -1123,8 +1123,38 @@ export default function ManagerOnboarding() {
                             </summary>
                             <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                               {company.users.slice(0, 6).map((u) => (
-                                <div key={u.id}>
-                                  {u.name} ({u.roleName || "Sem perfil"})
+                                <div key={u.id} className="rounded border border-dashed p-2">
+                                  <div>
+                                    {u.name} ({u.roleName || "Sem perfil"})
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <code className="text-[10px] break-all">{u.id}</code>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-2 text-[10px]"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        navigator.clipboard
+                                          .writeText(u.id)
+                                          .then(() =>
+                                            toast({
+                                              title: "ID copiado",
+                                              description: `Usuario: ${u.name}`,
+                                            }),
+                                          )
+                                          .catch(() =>
+                                            toast({
+                                              title: "Falha ao copiar",
+                                              variant: "destructive",
+                                            }),
+                                          );
+                                      }}
+                                    >
+                                      Copiar ID
+                                    </Button>
+                                  </div>
                                 </div>
                               ))}
                               {company.users.length > 6 ? (
@@ -1219,6 +1249,9 @@ export default function ManagerOnboarding() {
               <CardDescription>
                 {userCreateTarget.companyName} ({formatCNPJ(userCreateTarget.cnpj)})
               </CardDescription>
+              <p className="text-xs text-muted-foreground">
+                O ID do novo usuario sera gerado automaticamente ao salvar.
+              </p>
             </CardHeader>
             <form
               onSubmit={(e) => {
@@ -2074,7 +2107,7 @@ export default function ManagerOnboarding() {
                           (companyForm.nfcePrintLayout?.showCustomerDocument !== false)
                             ? "Documento: 000.000.000-00"
                             : "",
-                          companyForm.receiptShowSeller ? "Operador: Joao" : "",
+                          companyForm.receiptShowSeller ? "Operador ID: 2ab3f018-xxxx" : "",
                           (companyForm.nfcePrintLayout?.showPayments !== false)
                             ? "Forma: PIX"
                             : "",
