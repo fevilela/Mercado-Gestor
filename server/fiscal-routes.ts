@@ -28,14 +28,14 @@ import {
 import { getIbgeMunicipioCode } from "./ibge-municipios";
 import { storage } from "./storage";
 import { db } from "./db";
-import { sefazTransmissionLogs } from "@shared/schema";
+import { sefazTransmissionLogs, users } from "@shared/schema";
 import {
   requireAuth,
   getCompanyId,
   requirePermission,
   requireValidFiscalCertificate,
 } from "./middleware";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import * as soap from "soap";
 import * as fs from "fs";
 import * as crypto from "crypto";
@@ -2262,14 +2262,22 @@ router.get("/nfce/:saleId/pdf", async (req, res) => {
       });
     }
 
+    let sellerCode: string | null = null;
+    if (typeof sale.userId === "string" && sale.userId.trim()) {
+      const companyUsers = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.companyId, companyId))
+        .orderBy(asc(users.createdAt), asc(users.name), asc(users.email));
+      const sellerIndex = companyUsers.findIndex((u) => u.id === sale.userId);
+      if (sellerIndex >= 0) sellerCode = String(sellerIndex + 1).padStart(2, "0");
+    }
+
     const pdfBuffer = await generateDanfeNFCeThermal(xmlRecord.xmlContent, {
       sefazUrl: qrBaseUrl,
       cscId: String(settings.cscId || ""),
       csc: String(settings.cscToken || ""),
-      sellerName:
-        typeof (sale as any)?.userId === "string" && (sale as any).userId.trim()
-          ? (sale as any).userId.trim()
-          : null,
+      sellerName: sellerCode,
       showSeller: settings?.receiptShowSeller !== false,
       headerText: settings?.receiptHeaderText || null,
       footerText: settings?.receiptFooterText || null,
@@ -3318,7 +3326,11 @@ router.get("/nfe/:nfeLogId/pdf", requireAuth, requirePermission("fiscal:view"), 
       return res.status(404).json({ error: "XML da NF-e nao encontrado" });
     }
 
-    const pdfBuffer = await generateDanfeNFeA4(xmlContent);
+    const settings = await storage.getCompanySettings(companyId);
+    const pdfBuffer = await generateDanfeNFeA4(xmlContent, {
+      layout: ((settings as any)?.nfeDanfeLayout as Record<string, unknown> | null) || null,
+      logoUrl: (settings as any)?.danfeLogoUrl || null,
+    });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",

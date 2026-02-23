@@ -21,7 +21,7 @@ import {
   type Role,
   type Permission,
 } from "@shared/schema";
-import { eq, and, isNull, desc, ilike, or, ne, inArray } from "drizzle-orm";
+import { eq, and, isNull, desc, ilike, or, ne, inArray, asc } from "drizzle-orm";
 import { z } from "zod";
 import { validateMercadoPagoSettings } from "./payment-service";
 import { validateStoneSettings } from "./stone-connect";
@@ -529,6 +529,19 @@ const managerCreateCompanySchema = z.object({
       showTaxes: z.boolean().optional(),
     })
     .optional(),
+  nfeDanfeLayout: z
+    .object({
+      fontSize: z.enum(["small", "normal"]).optional(),
+      lineSpacing: z.enum(["compact", "normal", "comfortable"]).optional(),
+      itemDescriptionLines: z.coerce.number().int().min(1).max(4).optional(),
+      showAccessKey: z.boolean().optional(),
+      showCustomerDocument: z.boolean().optional(),
+      showTaxes: z.boolean().optional(),
+      headerText: z.string().optional(),
+      footerText: z.string().optional(),
+    })
+    .optional(),
+  danfeLogoUrl: z.string().optional(),
   initialMachines: z
     .array(
       z.object({
@@ -618,6 +631,19 @@ const managerUpdateCompanySchema = z.object({
       showTaxes: z.boolean().optional(),
     })
     .optional(),
+  nfeDanfeLayout: z
+    .object({
+      fontSize: z.enum(["small", "normal"]).optional(),
+      lineSpacing: z.enum(["compact", "normal", "comfortable"]).optional(),
+      itemDescriptionLines: z.coerce.number().int().min(1).max(4).optional(),
+      showAccessKey: z.boolean().optional(),
+      showCustomerDocument: z.boolean().optional(),
+      showTaxes: z.boolean().optional(),
+      headerText: z.string().optional(),
+      footerText: z.string().optional(),
+    })
+    .optional(),
+  danfeLogoUrl: z.string().optional(),
 });
 
 const managerSetCompanyActiveSchema = z.object({
@@ -675,6 +701,18 @@ function getManagerCredentials() {
   const managerPassword = String(process.env.MANAGER_PASSWORD || "").trim();
 
   return { managerEmail, managerPassword };
+}
+
+async function getCompanyUserCodeMap(companyId: number) {
+  const companyUsers = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.companyId, companyId))
+    .orderBy(asc(users.createdAt), asc(users.name), asc(users.email));
+
+  return new Map(
+    companyUsers.map((u, index) => [u.id, String(index + 1).padStart(2, "0")]),
+  );
 }
 
 function ensureManagerSession(req: any, res: any): boolean {
@@ -954,6 +992,8 @@ authRouter.get("/manager/onboarding-users", async (req, res) => {
         receiptFooterText: companySettings.receiptFooterText,
         receiptShowSeller: companySettings.receiptShowSeller,
         nfcePrintLayout: companySettings.nfcePrintLayout,
+        nfeDanfeLayout: companySettings.nfeDanfeLayout,
+        danfeLogoUrl: companySettings.danfeLogoUrl,
       })
       .from(users)
       .innerJoin(companies, eq(users.companyId, companies.id))
@@ -1057,6 +1097,8 @@ authRouter.post("/manager/companies", async (req, res) => {
       receiptShowSeller:
         data.receiptShowSeller === undefined ? true : Boolean(data.receiptShowSeller),
       nfcePrintLayout: data.nfcePrintLayout || null,
+      nfeDanfeLayout: data.nfeDanfeLayout || null,
+      danfeLogoUrl: data.danfeLogoUrl || null,
     });
 
     const initialMachineIdByKey = new Map<string, number>();
@@ -1475,6 +1517,8 @@ authRouter.patch("/manager/company", async (req, res) => {
         receiptShowSeller:
           data.receiptShowSeller === undefined ? true : Boolean(data.receiptShowSeller),
         nfcePrintLayout: data.nfcePrintLayout || null,
+        nfeDanfeLayout: data.nfeDanfeLayout || null,
+        danfeLogoUrl: data.danfeLogoUrl || null,
       })
       .where(eq(companySettings.companyId, data.companyId));
 
@@ -1809,6 +1853,7 @@ authRouter.post("/login", async (req, res) => {
       .limit(1);
 
     const userPermissions = await getUserPermissions(user.id);
+    const userCodeMap = await getCompanyUserCodeMap(user.companyId);
 
     await db
       .update(users)
@@ -1823,6 +1868,7 @@ authRouter.post("/login", async (req, res) => {
     res.json({
       user: {
         id: user.id,
+        displayCode: userCodeMap.get(user.id) || "00",
         name: user.name,
         email: user.email,
         role,
@@ -1882,10 +1928,12 @@ authRouter.get("/me", async (req, res) => {
       .limit(1);
 
     const userPermissions = await getUserPermissions(user.id);
+    const userCodeMap = await getCompanyUserCodeMap(user.companyId);
 
     res.json({
       user: {
         id: user.id,
+        displayCode: userCodeMap.get(user.id) || "00",
         name: user.name,
         email: user.email,
         role,
@@ -1949,9 +1997,14 @@ authRouter.get("/users", async (req, res) => {
       })
       .from(users)
       .leftJoin(roles, eq(users.roleId, roles.id))
-      .where(eq(users.companyId, req.session.companyId));
-
-    res.json(companyUsers);
+      .where(eq(users.companyId, req.session.companyId))
+      .orderBy(asc(users.createdAt), asc(users.name), asc(users.email));
+    res.json(
+      companyUsers.map((user, index) => ({
+        ...user,
+        displayCode: String(index + 1).padStart(2, "0"),
+      })),
+    );
   } catch (error) {
     res.status(500).json({ error: "Erro ao buscar usuários" });
   }

@@ -161,17 +161,53 @@ function createPdf(docDefinition: any): Promise<Buffer> {
   });
 }
 
-export async function generateDanfeNFeA4(xmlContent: string): Promise<Buffer> {
+async function imageUrlToDataUrl(url: string): Promise<string | null> {
+  const raw = String(url || "").trim();
+  if (!raw) return null;
+  if (raw.startsWith("data:image/")) return raw;
+  if (!/^https?:\/\//i.test(raw)) return null;
+  try {
+    const response = await fetch(raw);
+    if (!response.ok) return null;
+    const contentType = String(response.headers.get("content-type") || "image/png");
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    return `data:${contentType};base64,${base64}`;
+  } catch {
+    return null;
+  }
+}
+
+export async function generateDanfeNFeA4(
+  xmlContent: string,
+  opts?: {
+    layout?: Record<string, unknown> | null;
+    logoUrl?: string | null;
+  },
+): Promise<Buffer> {
   const { ide, emit, dest, total, det, chave } = await parseNFe(xmlContent);
+  const layout = (opts?.layout || {}) as Record<string, any>;
+  const fontSize = layout.fontSize === "small" ? 8 : 9;
+  const lineHeight =
+    layout.lineSpacing === "compact" ? 1.0 : layout.lineSpacing === "comfortable" ? 1.35 : 1.15;
+  const itemDescriptionLines = Math.min(4, Math.max(1, Number(layout.itemDescriptionLines || 2)));
+  const showAccessKey = layout.showAccessKey !== false;
+  const showCustomerDocument = layout.showCustomerDocument !== false;
+  const showTaxes = layout.showTaxes !== false;
+  const headerText = String(layout.headerText || "").trim();
+  const footerText = String(layout.footerText || "").trim();
+  const logoDataUrl = await imageUrlToDataUrl(String(opts?.logoUrl || ""));
   const totalTributos = numberString(total.vTotTrib);
   const totalsBody = [
     ["Valor Produtos", formatCurrency(numberString(total.vProd))],
-    ["ICMS", formatCurrency(numberString(total.vICMS))],
-    ["IPI", formatCurrency(numberString(total.vIPI))],
-    ["PIS", formatCurrency(numberString(total.vPIS))],
-    ["COFINS", formatCurrency(numberString(total.vCOFINS))],
   ];
-  if (totalTributos > 0) {
+  if (showTaxes) {
+    totalsBody.push(["ICMS", formatCurrency(numberString(total.vICMS))]);
+    totalsBody.push(["IPI", formatCurrency(numberString(total.vIPI))]);
+    totalsBody.push(["PIS", formatCurrency(numberString(total.vPIS))]);
+    totalsBody.push(["COFINS", formatCurrency(numberString(total.vCOFINS))]);
+  }
+  if (showTaxes && totalTributos > 0) {
     totalsBody.push(["Tributos (IBPT)", formatCurrency(totalTributos)]);
   }
   totalsBody.push(["Valor NF-e", formatCurrency(numberString(total.vNF))]);
@@ -179,10 +215,14 @@ export async function generateDanfeNFeA4(xmlContent: string): Promise<Buffer> {
   const docDefinition = {
     pageSize: "A4",
     pageMargins: [40, 40, 40, 40],
-    defaultStyle: { font: "Roboto", fontSize: 9 },
+    defaultStyle: { font: "Roboto", fontSize, lineHeight },
     content: [
+      ...(logoDataUrl
+        ? [{ image: logoDataUrl, fit: [120, 60], alignment: "center", margin: [0, 0, 0, 8] as [number, number, number, number] }]
+        : []),
       { text: "DANFE - Documento Auxiliar da NF-e", style: "title" },
-      { text: `Chave: ${chave}`, style: "small" },
+      ...(headerText ? [{ text: headerText, alignment: "center", margin: [0, 0, 0, 8] as [number, number, number, number] }] : []),
+      ...(showAccessKey ? [{ text: `Chave: ${chave}`, style: "small" }] : []),
       {
         columns: [
           { width: "50%", text: `Emitente: ${emit.xNome ?? ""}` },
@@ -193,7 +233,10 @@ export async function generateDanfeNFeA4(xmlContent: string): Promise<Buffer> {
       {
         columns: [
           { width: "50%", text: `Destinatario: ${dest.xNome ?? "N/I"}` },
-          { width: "50%", text: `Documento: ${dest.CNPJ ?? dest.CPF ?? ""}` },
+          {
+            width: "50%",
+            text: showCustomerDocument ? `Documento: ${dest.CNPJ ?? dest.CPF ?? ""}` : "",
+          },
         ],
         margin: [0, 2, 0, 10],
       },
@@ -204,7 +247,7 @@ export async function generateDanfeNFeA4(xmlContent: string): Promise<Buffer> {
             ["#", "Descricao", "Qtde", "Un", "Vlr Unit", "Vlr Total"],
             ...det.map((item) => [
               item.idx,
-              item.desc,
+              wrapTextLines(String(item.desc || ""), 38, itemDescriptionLines),
               item.qty,
               item.unit,
               formatCurrency(numberString(item.unitPrice)),
@@ -232,6 +275,7 @@ export async function generateDanfeNFeA4(xmlContent: string): Promise<Buffer> {
         text: `Data emissao: ${ide.dhEmi ?? ide.dEmi ?? ""}`,
         margin: [0, 10, 0, 0],
       },
+      ...(footerText ? [{ text: footerText, margin: [0, 10, 0, 0] as [number, number, number, number], alignment: "center" }] : []),
     ],
     styles: {
       title: {
@@ -240,8 +284,8 @@ export async function generateDanfeNFeA4(xmlContent: string): Promise<Buffer> {
         alignment: "center",
         margin: [0, 0, 0, 10],
       },
-      subtitle: { fontSize: 11, bold: true, margin: [0, 0, 0, 6] },
-      small: { fontSize: 8, margin: [0, 0, 0, 4] },
+      subtitle: { fontSize: fontSize + 2, bold: true, margin: [0, 0, 0, 6], lineHeight },
+      small: { fontSize: Math.max(7, fontSize - 1), margin: [0, 0, 0, 4], lineHeight },
     },
   };
 
@@ -574,7 +618,7 @@ export async function generateDanfeNFCeThermal(
       ...(opts.showSeller !== false && opts.sellerName
         ? [
             {
-              text: wrapTextLines(`Vendedor ID: ${opts.sellerName}`, textWrapChars, 2),
+              text: wrapTextLines(`Vendedor: ${opts.sellerName}`, textWrapChars, 2),
               margin: [0, 1, 0, 0],
             },
           ]

@@ -24,6 +24,7 @@ interface Company {
 
 interface User {
   id: string;
+  displayCode?: string;
   name: string;
   email: string;
   role: Role;

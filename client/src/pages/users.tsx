@@ -65,6 +65,7 @@ interface Permission {
 
 interface UserData {
   id: string;
+  displayCode?: string;
   name: string;
   email: string;
   username: string;
@@ -537,6 +538,7 @@ export default function Users() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead>ID</TableHead>
                       <TableHead>Nome</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Perfil</TableHead>
@@ -553,6 +555,9 @@ export default function Users() {
                         key={user.id}
                         data-testid={`row-user-${user.id}`}
                       >
+                        <TableCell>
+                          <Badge variant="outline">{user.displayCode || "--"}</Badge>
+                        </TableCell>
                         <TableCell className="font-medium">
                           {user.name}
                         </TableCell>

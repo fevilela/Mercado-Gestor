@@ -82,6 +82,17 @@ type OnboardingUserRow = {
     showCustomerDocument?: boolean;
     showTaxes?: boolean;
   } | null;
+  nfeDanfeLayout: {
+    fontSize?: "small" | "normal";
+    lineSpacing?: "compact" | "normal" | "comfortable";
+    itemDescriptionLines?: number;
+    showAccessKey?: boolean;
+    showCustomerDocument?: boolean;
+    showTaxes?: boolean;
+    headerText?: string;
+    footerText?: string;
+  } | null;
+  danfeLogoUrl: string | null;
 };
 
 export default function ManagerOnboarding() {
@@ -197,6 +208,17 @@ export default function ManagerOnboarding() {
       showCustomerDocument: true,
       showTaxes: true,
     },
+    nfeDanfeLayout: {
+      fontSize: "normal",
+      lineSpacing: "normal",
+      itemDescriptionLines: 2,
+      showAccessKey: true,
+      showCustomerDocument: true,
+      showTaxes: true,
+      headerText: "",
+      footerText: "",
+    },
+    danfeLogoUrl: "",
   });
 
   const loadUsers = async (query = "") => {
@@ -436,7 +458,9 @@ export default function ManagerOnboarding() {
           receiptHeaderText: data.receiptHeaderText,
           receiptFooterText: data.receiptFooterText,
           receiptShowSeller: data.receiptShowSeller,
-          nfcePrintLayout: data.nfcePrintLayout,
+        nfcePrintLayout: data.nfcePrintLayout,
+        nfeDanfeLayout: data.nfeDanfeLayout,
+        danfeLogoUrl: data.danfeLogoUrl,
         }),
       });
 
@@ -656,6 +680,17 @@ export default function ManagerOnboarding() {
         showCustomerDocument: true,
         showTaxes: true,
       },
+      nfeDanfeLayout: {
+        fontSize: "normal",
+        lineSpacing: "normal",
+        itemDescriptionLines: 2,
+        showAccessKey: true,
+        showCustomerDocument: true,
+        showTaxes: true,
+        headerText: "",
+        footerText: "",
+      },
+      danfeLogoUrl: "",
     });
     setInitialTerminals([
       {
@@ -776,6 +811,22 @@ export default function ManagerOnboarding() {
             ? true
             : Boolean(row.nfcePrintLayout.showTaxes),
       },
+      nfeDanfeLayout: {
+        fontSize: row.nfeDanfeLayout?.fontSize || "normal",
+        lineSpacing: row.nfeDanfeLayout?.lineSpacing || "normal",
+        itemDescriptionLines: Number(row.nfeDanfeLayout?.itemDescriptionLines || 2) || 2,
+        showAccessKey:
+          row.nfeDanfeLayout?.showAccessKey === undefined ? true : Boolean(row.nfeDanfeLayout.showAccessKey),
+        showCustomerDocument:
+          row.nfeDanfeLayout?.showCustomerDocument === undefined
+            ? true
+            : Boolean(row.nfeDanfeLayout.showCustomerDocument),
+        showTaxes:
+          row.nfeDanfeLayout?.showTaxes === undefined ? true : Boolean(row.nfeDanfeLayout.showTaxes),
+        headerText: String(row.nfeDanfeLayout?.headerText || ""),
+        footerText: String(row.nfeDanfeLayout?.footerText || ""),
+      },
+      danfeLogoUrl: row.danfeLogoUrl || "",
     });
     setShowCreateForm(true);
   };
@@ -2107,7 +2158,7 @@ export default function ManagerOnboarding() {
                           (companyForm.nfcePrintLayout?.showCustomerDocument !== false)
                             ? "Documento: 000.000.000-00"
                             : "",
-                          companyForm.receiptShowSeller ? "Operador ID: 2ab3f018-xxxx" : "",
+                          companyForm.receiptShowSeller ? "Operador: 01" : "",
                           (companyForm.nfcePrintLayout?.showPayments !== false)
                             ? "Forma: PIX"
                             : "",
@@ -2123,6 +2174,153 @@ export default function ManagerOnboarding() {
                         ]
                           .filter(Boolean)
                           .join("\n")}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border p-4 space-y-4 bg-muted/10">
+                    <div>
+                      <h4 className="font-medium">Layout do DANFE NF-e (A4)</h4>
+                      <p className="text-xs text-muted-foreground">
+                        Configure visual do PDF da NF-e e informe uma URL de logo.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="danfeLogoUrl">Logo (URL da imagem)</Label>
+                      <Input
+                        id="danfeLogoUrl"
+                        value={companyForm.danfeLogoUrl || ""}
+                        onChange={(e) =>
+                          setCompanyForm((prev) => ({ ...prev, danfeLogoUrl: e.target.value }))
+                        }
+                        placeholder="https://.../logo.png"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label>Fonte</Label>
+                        <select
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.nfeDanfeLayout?.fontSize || "normal"}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfeDanfeLayout: {
+                                ...(prev.nfeDanfeLayout || {}),
+                                fontSize: e.target.value as "small" | "normal",
+                              },
+                            }))
+                          }
+                        >
+                          <option value="small">Pequena</option>
+                          <option value="normal">Normal</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Espacamento</Label>
+                        <select
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.nfeDanfeLayout?.lineSpacing || "normal"}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfeDanfeLayout: {
+                                ...(prev.nfeDanfeLayout || {}),
+                                lineSpacing: e.target.value as
+                                  | "compact"
+                                  | "normal"
+                                  | "comfortable",
+                              },
+                            }))
+                          }
+                        >
+                          <option value="compact">Compacto</option>
+                          <option value="normal">Normal</option>
+                          <option value="comfortable">Confortavel</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Linhas descricao item</Label>
+                        <select
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={String(companyForm.nfeDanfeLayout?.itemDescriptionLines || 2)}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfeDanfeLayout: {
+                                ...(prev.nfeDanfeLayout || {}),
+                                itemDescriptionLines: Number(e.target.value),
+                              },
+                            }))
+                          }
+                        >
+                          <option value="1">1</option>
+                          <option value="2">2</option>
+                          <option value="3">3</option>
+                          <option value="4">4</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      {[
+                        ["showAccessKey", "Mostrar chave de acesso"],
+                        ["showCustomerDocument", "Mostrar doc. destinatario"],
+                        ["showTaxes", "Mostrar impostos nos totais"],
+                      ].map(([key, label]) => (
+                        <label key={key} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={(companyForm.nfeDanfeLayout as any)?.[key] !== false}
+                            onChange={(e) =>
+                              setCompanyForm((prev) => ({
+                                ...prev,
+                                nfeDanfeLayout: {
+                                  ...(prev.nfeDanfeLayout || {}),
+                                  [key]: e.target.checked,
+                                },
+                              }))
+                            }
+                          />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Cabecalho personalizado (A4)</Label>
+                        <textarea
+                          className="w-full min-h-[70px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.nfeDanfeLayout?.headerText || ""}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfeDanfeLayout: {
+                                ...(prev.nfeDanfeLayout || {}),
+                                headerText: e.target.value,
+                              },
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Rodape personalizado (A4)</Label>
+                        <textarea
+                          className="w-full min-h-[70px] rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.nfeDanfeLayout?.footerText || ""}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfeDanfeLayout: {
+                                ...(prev.nfeDanfeLayout || {}),
+                                footerText: e.target.value,
+                              },
+                            }))
+                          }
+                        />
                       </div>
                     </div>
                   </div>

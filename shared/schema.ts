@@ -501,6 +501,8 @@ export const companySettings = pgTable("company_settings", {
   receiptFooterText: text("receipt_footer_text"),
   receiptShowSeller: boolean("receipt_show_seller").default(true),
   nfcePrintLayout: jsonb("nfce_print_layout"),
+  nfeDanfeLayout: jsonb("nfe_danfe_layout"),
+  danfeLogoUrl: text("danfe_logo_url"),
   barcodeScannerEnabled: boolean("barcode_scanner_enabled").default(true),
   barcodeScannerAutoAdd: boolean("barcode_scanner_auto_add").default(true),
   barcodeScannerBeep: boolean("barcode_scanner_beep").default(true),
