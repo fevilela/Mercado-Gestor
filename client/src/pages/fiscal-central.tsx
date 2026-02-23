@@ -40,6 +40,23 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+type HybridPrinterBridge = {
+  printPdfUrl?: (url: string, meta?: { fileName?: string }) => Promise<boolean> | boolean;
+  printPdfBase64?: (
+    base64: string,
+    meta?: { fileName?: string },
+  ) => Promise<boolean> | boolean;
+};
+
+declare global {
+  interface Window {
+    MercadoGestorPrinterBridge?: HybridPrinterBridge;
+    AndroidPrinter?: HybridPrinterBridge;
+    MiniPDVPrinter?: HybridPrinterBridge;
+    Android?: HybridPrinterBridge;
+  }
+}
+
 interface NFeHistoryRecord {
   id: number;
   documentKey: string;
@@ -190,6 +207,166 @@ export default function FiscalCentralPage() {
   });
 
   const sefazUf = String(settings?.sefazUf || settings?.state || "MG").toUpperCase();
+
+  const getPdfBlob = async (url: string, errorMessage: string) => {
+    const res = await fetch(url, { credentials: "include" });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      throw new Error(payload?.error || errorMessage);
+    }
+    return res.blob();
+  };
+
+  const openPdfBlobInNewTab = (blob: Blob) => {
+    const objectUrl = URL.createObjectURL(blob);
+    window.open(objectUrl, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  };
+
+  const blobToBase64 = (blob: Blob) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = String(reader.result || "");
+        const base64 = result.includes(",") ? result.split(",")[1] : "";
+        if (!base64) {
+          reject(new Error("Falha ao converter PDF para base64"));
+          return;
+        }
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error("Falha ao ler PDF"));
+      reader.readAsDataURL(blob);
+    });
+
+  const tryNativeOrBridgePrint = async (
+    pdfUrl: string,
+    blob: Blob,
+    fileName: string,
+  ): Promise<boolean> => {
+    const bridges: HybridPrinterBridge[] = [
+      window.MercadoGestorPrinterBridge,
+      window.MiniPDVPrinter,
+      window.AndroidPrinter,
+      window.Android,
+    ].filter(Boolean) as HybridPrinterBridge[];
+
+    for (const bridge of bridges) {
+      try {
+        if (typeof bridge.printPdfUrl === "function") {
+          const ok = await bridge.printPdfUrl(pdfUrl, { fileName });
+          if (ok !== false) return true;
+        }
+        if (typeof bridge.printPdfBase64 === "function") {
+          const base64 = await blobToBase64(blob);
+          const ok = await bridge.printPdfBase64(base64, { fileName });
+          if (ok !== false) return true;
+        }
+      } catch {
+        // Fallback para proxima estrategia
+      }
+    }
+
+    return false;
+  };
+
+  const tryBrowserPrint = async (blob: Blob): Promise<boolean> =>
+    new Promise((resolve) => {
+      try {
+        const objectUrl = URL.createObjectURL(blob);
+        const iframe = document.createElement("iframe");
+        let finished = false;
+        const finish = (ok: boolean) => {
+          if (finished) return;
+          finished = true;
+          setTimeout(() => {
+            iframe.remove();
+            URL.revokeObjectURL(objectUrl);
+          }, 3000);
+          resolve(ok);
+        };
+
+        iframe.style.position = "fixed";
+        iframe.style.right = "0";
+        iframe.style.bottom = "0";
+        iframe.style.width = "0";
+        iframe.style.height = "0";
+        iframe.style.border = "0";
+        iframe.src = objectUrl;
+        iframe.onload = () => {
+          setTimeout(() => {
+            try {
+              if (!iframe.contentWindow) {
+                finish(false);
+                return;
+              }
+              iframe.contentWindow.focus();
+              iframe.contentWindow.print();
+              finish(true);
+            } catch {
+              finish(false);
+            }
+          }, 500);
+        };
+        iframe.onerror = () => finish(false);
+        document.body.appendChild(iframe);
+        setTimeout(() => finish(false), 5000);
+      } catch {
+        resolve(false);
+      }
+    });
+
+  const printPdfHybrid = async ({
+    url,
+    pdfErrorMessage,
+    manualActionLabel,
+    fileName,
+  }: {
+    url: string;
+    pdfErrorMessage: string;
+    manualActionLabel: string;
+    fileName: string;
+  }) => {
+    const blob = await getPdfBlob(url, pdfErrorMessage);
+    const printerEnabled = Boolean(settings?.printerEnabled);
+    const printerModel = String(settings?.printerModel || "").toLowerCase();
+    const isAndroidDevice = /android/i.test(navigator.userAgent || "");
+    const preferNativeFirst = isAndroidDevice || printerModel.includes("escpos");
+
+    const nativeFirst = async () => {
+      if (await tryNativeOrBridgePrint(url, blob, fileName)) return "native";
+      if (await tryBrowserPrint(blob)) return "browser";
+      return "manual";
+    };
+
+    const browserFirst = async () => {
+      if (await tryBrowserPrint(blob)) return "browser";
+      if (await tryNativeOrBridgePrint(url, blob, fileName)) return "native";
+      return "manual";
+    };
+
+    const result = preferNativeFirst ? await nativeFirst() : await browserFirst();
+
+    if (result === "manual") {
+      openPdfBlobInNewTab(blob);
+      toast({
+        title: "Impressao em modo hibrido",
+        description:
+          printerEnabled && isAndroidDevice
+            ? "Nao foi possivel imprimir automaticamente neste terminal. O PDF foi aberto para impressao manual."
+            : `Nao foi possivel imprimir automaticamente. O PDF foi aberto para ${manualActionLabel}.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (result === "native") {
+      toast({
+        title: "Impressao enviada",
+        description: "Impressao enviada via integracao/bridge.",
+      });
+    }
+  };
 
   const { data: accessoryHistory = [], isLoading: loadingAccessoryHistory } = useQuery<
     AccessoryHistoryRecord[]
@@ -774,15 +951,8 @@ export default function FiscalCentralPage() {
   const openNfcePdf = async (saleId: number) => {
     const url = `/api/fiscal/nfce/${saleId}/pdf`;
     try {
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload?.error || "Falha ao carregar PDF da NFC-e");
-      }
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      window.open(objectUrl, "_blank", "noopener,noreferrer");
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      const blob = await getPdfBlob(url, "Falha ao carregar PDF da NFC-e");
+      openPdfBlobInNewTab(blob);
     } catch (error) {
       toast({
         title: "Nao foi possivel abrir o PDF",
@@ -796,40 +966,12 @@ export default function FiscalCentralPage() {
   const reprintNfce = async (saleId: number) => {
     const url = `/api/fiscal/nfce/${saleId}/pdf`;
     try {
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload?.error || "Falha ao carregar PDF da NFC-e");
-      }
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const iframe = document.createElement("iframe");
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      iframe.style.width = "0";
-      iframe.style.height = "0";
-      iframe.style.border = "0";
-      iframe.src = objectUrl;
-      iframe.onload = () => {
-        setTimeout(() => {
-          try {
-            iframe.contentWindow?.focus();
-            iframe.contentWindow?.print();
-          } catch (_error) {
-            toast({
-              title: "Nao foi possivel imprimir automaticamente",
-              description: "Use a opcao Ver PDF para imprimir manualmente.",
-              variant: "destructive",
-            });
-          }
-          setTimeout(() => {
-            iframe.remove();
-            URL.revokeObjectURL(objectUrl);
-          }, 3000);
-        }, 500);
-      };
-      document.body.appendChild(iframe);
+      await printPdfHybrid({
+        url,
+        pdfErrorMessage: "Falha ao carregar PDF da NFC-e",
+        manualActionLabel: "impressao manual",
+        fileName: `nfce-${saleId}.pdf`,
+      });
     } catch (error) {
       toast({
         title: "Nao foi possivel reimprimir",
@@ -854,15 +996,8 @@ export default function FiscalCentralPage() {
   const openNfePdf = async (nfeLogId: number) => {
     const url = `/api/fiscal/nfe/${nfeLogId}/pdf`;
     try {
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload?.error || "Falha ao carregar DANFE da NF-e");
-      }
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      window.open(objectUrl, "_blank", "noopener,noreferrer");
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      const blob = await getPdfBlob(url, "Falha ao carregar DANFE da NF-e");
+      openPdfBlobInNewTab(blob);
     } catch (error) {
       toast({
         title: "Nao foi possivel abrir o DANFE",
@@ -876,40 +1011,12 @@ export default function FiscalCentralPage() {
   const printNfeDanfe = async (nfeLogId: number) => {
     const url = `/api/fiscal/nfe/${nfeLogId}/pdf`;
     try {
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        throw new Error(payload?.error || "Falha ao carregar DANFE da NF-e");
-      }
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const iframe = document.createElement("iframe");
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      iframe.style.width = "0";
-      iframe.style.height = "0";
-      iframe.style.border = "0";
-      iframe.src = objectUrl;
-      iframe.onload = () => {
-        setTimeout(() => {
-          try {
-            iframe.contentWindow?.focus();
-            iframe.contentWindow?.print();
-          } catch (_error) {
-            toast({
-              title: "Nao foi possivel imprimir automaticamente",
-              description: "Use a opcao Ver DANFE (PDF) para imprimir manualmente.",
-              variant: "destructive",
-            });
-          }
-          setTimeout(() => {
-            iframe.remove();
-            URL.revokeObjectURL(objectUrl);
-          }, 3000);
-        }, 500);
-      };
-      document.body.appendChild(iframe);
+      await printPdfHybrid({
+        url,
+        pdfErrorMessage: "Falha ao carregar DANFE da NF-e",
+        manualActionLabel: "imprimir manualmente",
+        fileName: `danfe-${nfeLogId}.pdf`,
+      });
     } catch (error) {
       toast({
         title: "Nao foi possivel imprimir DANFE",

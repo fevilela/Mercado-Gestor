@@ -2266,6 +2266,10 @@ router.get("/nfce/:saleId/pdf", async (req, res) => {
       sefazUrl: qrBaseUrl,
       cscId: String(settings.cscId || ""),
       csc: String(settings.cscToken || ""),
+      sellerName:
+        typeof (sale as any)?.userName === "string" && (sale as any).userName.trim()
+          ? (sale as any).userName.trim()
+          : null,
     });
 
     res.setHeader("Content-Type", "application/pdf");

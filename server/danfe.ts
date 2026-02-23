@@ -251,7 +251,7 @@ function buildNFCeQrUrl(params: {
 
 export async function generateDanfeNFCeThermal(
   xmlContent: string,
-  opts: { sefazUrl: string; cscId: string; csc: string },
+  opts: { sefazUrl: string; cscId: string; csc: string; sellerName?: string | null },
 ): Promise<Buffer> {
   const { ide, emit, dest, total, det, detPag, chave, protocolo, inf, nfeRoot } =
     await parseNFe(xmlContent);
@@ -427,6 +427,14 @@ export async function generateDanfeNFCeThermal(
         text: `Documento: ${dest.CNPJ ?? dest.CPF ?? "Nao informado"}`,
         margin: [0, 1, 0, 0],
       },
+      ...(opts.sellerName
+        ? [
+            {
+              text: `Vendedor: ${opts.sellerName}`,
+              margin: [0, 1, 0, 0],
+            },
+          ]
+        : []),
     ],
     styles: {
       title: { fontSize: 10, bold: true, alignment: "center" },

@@ -31,6 +31,7 @@ type ReportRow = Record<string, CsvValue>;
 interface Sale {
   id: number;
   userId: string | null;
+  userName?: string | null;
   customerName: string;
   total: string;
   itemsCount: number;
@@ -427,7 +428,7 @@ export default function Reports() {
             Documento: `Venda #${sale.id}`,
             Tipo: String(sale.status || "").toLowerCase().includes("devol") ? "Devolucao" : "Cancelamento",
             Motivo: sale.nfceStatus || sale.status || "Nao informado",
-            Usuario: sale.userId || "-",
+            Usuario: sale.userName || sale.userId || "-",
             DataHora: fmtDate(sale.createdAt),
           }));
 
@@ -770,7 +771,7 @@ export default function Reports() {
       }
       case "pdv_vendas_vendedor": {
         const grouped = context.filteredSales.reduce<Record<string, { qty: number; total: number }>>((acc, sale) => {
-          const key = sale.userId || "Sem identificacao";
+          const key = sale.userName || sale.userId || "Sem identificacao";
           const current = acc[key] || { qty: 0, total: 0 };
           current.qty += 1;
           current.total += toNumber(sale.total);

@@ -1557,6 +1557,14 @@ export default function ManagerOnboarding() {
                           setCompanyForm((prev) => ({
                             ...prev,
                             printerModel: e.target.value,
+                            printerPort:
+                              e.target.value === "minipdv-m10-integrated"
+                                ? ""
+                                : prev.printerPort,
+                            printerColumns:
+                              e.target.value === "minipdv-m10-integrated"
+                                ? "32"
+                                : prev.printerColumns,
                           }))
                         }
                       >
@@ -1568,6 +1576,9 @@ export default function ManagerOnboarding() {
                         <option value="daruma-dr800">Daruma DR800</option>
                         <option value="sweda-si-300">Sweda SI-300</option>
                         <option value="generic-escpos">Generica ESC/POS</option>
+                        <option value="minipdv-m10-integrated">
+                          MiniPDV M10 (integrada)
+                        </option>
                       </select>
                     </div>
 
@@ -1577,6 +1588,7 @@ export default function ManagerOnboarding() {
                         id="printerPort"
                         className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
                         value={companyForm.printerPort}
+                        disabled={companyForm.printerModel === "minipdv-m10-integrated"}
                         onChange={(e) =>
                           setCompanyForm((prev) => ({
                             ...prev,
@@ -1593,6 +1605,11 @@ export default function ManagerOnboarding() {
                         <option value="LPT1">LPT1 (Paralela)</option>
                         <option value="network">Rede (IP)</option>
                       </select>
+                      {companyForm.printerModel === "minipdv-m10-integrated" && (
+                        <p className="text-xs text-muted-foreground">
+                          Impressora integrada: porta nao se aplica.
+                        </p>
+                      )}
                     </div>
                   </div>
 

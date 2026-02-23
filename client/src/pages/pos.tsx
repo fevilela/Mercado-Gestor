@@ -80,6 +80,23 @@ type PosTerminalConfig = {
   stoneTerminalId?: string | null;
 };
 
+type HybridPrinterBridge = {
+  printPdfUrl?: (url: string, meta?: { fileName?: string }) => Promise<boolean> | boolean;
+  printPdfBase64?: (
+    base64: string,
+    meta?: { fileName?: string },
+  ) => Promise<boolean> | boolean;
+};
+
+declare global {
+  interface Window {
+    MercadoGestorPrinterBridge?: HybridPrinterBridge;
+    AndroidPrinter?: HybridPrinterBridge;
+    MiniPDVPrinter?: HybridPrinterBridge;
+    Android?: HybridPrinterBridge;
+  }
+}
+
 export default function POS() {
   const [, setLocation] = useLocation();
   const [cart, setCart] = useState<{ product: any; qty: number }[]>([]);
@@ -327,6 +344,124 @@ export default function POS() {
   const isScannerEnabled = settings?.barcodeScannerEnabled !== false;
   const isScannerAutoAdd = settings?.barcodeScannerAutoAdd !== false;
   const isScannerBeep = settings?.barcodeScannerBeep !== false;
+
+  const getPdfBlob = async (url: string, errorMessage: string) => {
+    const res = await fetch(url, { credentials: "include" });
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}));
+      throw new Error(payload?.error || errorMessage);
+    }
+    return res.blob();
+  };
+
+  const blobToBase64 = (blob: Blob) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = String(reader.result || "");
+        const base64 = result.includes(",") ? result.split(",")[1] : "";
+        if (!base64) {
+          reject(new Error("Falha ao converter PDF"));
+          return;
+        }
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error("Falha ao ler PDF"));
+      reader.readAsDataURL(blob);
+    });
+
+  const tryBridgePrintPdf = async (url: string, blob: Blob, fileName: string) => {
+    const bridges: HybridPrinterBridge[] = [
+      window.MercadoGestorPrinterBridge,
+      window.MiniPDVPrinter,
+      window.AndroidPrinter,
+      window.Android,
+    ].filter(Boolean) as HybridPrinterBridge[];
+
+    for (const bridge of bridges) {
+      try {
+        if (typeof bridge.printPdfUrl === "function") {
+          const ok = await bridge.printPdfUrl(url, { fileName });
+          if (ok !== false) return true;
+        }
+        if (typeof bridge.printPdfBase64 === "function") {
+          const base64 = await blobToBase64(blob);
+          const ok = await bridge.printPdfBase64(base64, { fileName });
+          if (ok !== false) return true;
+        }
+      } catch {
+        // tenta o proximo bridge
+      }
+    }
+    return false;
+  };
+
+  const tryBrowserPrintPdf = async (blob: Blob): Promise<boolean> =>
+    new Promise((resolve) => {
+      try {
+        const objectUrl = URL.createObjectURL(blob);
+        const iframe = document.createElement("iframe");
+        let done = false;
+        const finish = (ok: boolean) => {
+          if (done) return;
+          done = true;
+          setTimeout(() => {
+            iframe.remove();
+            URL.revokeObjectURL(objectUrl);
+          }, 3000);
+          resolve(ok);
+        };
+
+        iframe.style.position = "fixed";
+        iframe.style.right = "0";
+        iframe.style.bottom = "0";
+        iframe.style.width = "0";
+        iframe.style.height = "0";
+        iframe.style.border = "0";
+        iframe.src = objectUrl;
+        iframe.onload = () => {
+          setTimeout(() => {
+            try {
+              iframe.contentWindow?.focus();
+              iframe.contentWindow?.print();
+              finish(true);
+            } catch {
+              finish(false);
+            }
+          }, 500);
+        };
+        iframe.onerror = () => finish(false);
+        document.body.appendChild(iframe);
+        setTimeout(() => finish(false), 5000);
+      } catch {
+        resolve(false);
+      }
+    });
+
+  const printPdfHybrid = async (url: string, fileName: string) => {
+    const blob = await getPdfBlob(url, "Falha ao carregar PDF para impressao");
+    const isAndroidDevice = /android/i.test(navigator.userAgent || "");
+    const printerModel = String(settings?.printerModel || "").toLowerCase();
+    const preferBridgeFirst = isAndroidDevice || printerModel.includes("escpos");
+
+    const printed = preferBridgeFirst
+      ? ((await tryBridgePrintPdf(url, blob, fileName)) ||
+          (await tryBrowserPrintPdf(blob)))
+      : ((await tryBrowserPrintPdf(blob)) ||
+          (await tryBridgePrintPdf(url, blob, fileName)));
+
+    if (printed) return true;
+
+    const objectUrl = URL.createObjectURL(blob);
+    window.open(objectUrl, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    toast({
+      title: "Impressao em modo hibrido",
+      description: "Impressao automatica indisponivel. PDF aberto para impressao manual.",
+      variant: "destructive",
+    });
+    return false;
+  };
 
   const {
     data: pdvLoad,
@@ -957,28 +1092,13 @@ export default function POS() {
       },
     };
 
-    const autoPrintFiscalCoupon = (saleId: number) => {
+    const autoPrintFiscalCoupon = async (saleId: number) => {
       if (!Number.isFinite(saleId) || saleId <= 0) return;
-      const iframe = document.createElement("iframe");
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      iframe.style.width = "0";
-      iframe.style.height = "0";
-      iframe.style.border = "0";
-      iframe.src = `/api/fiscal/nfce/${saleId}/pdf`;
-      iframe.onload = () => {
-        setTimeout(() => {
-          try {
-            iframe.contentWindow?.focus();
-            iframe.contentWindow?.print();
-          } catch (_error) {
-            // If browser blocks iframe print for PDF, user can still reprint from Fiscal Central.
-          }
-          setTimeout(() => iframe.remove(), 3000);
-        }, 500);
-      };
-      document.body.appendChild(iframe);
+      try {
+        await printPdfHybrid(`/api/fiscal/nfce/${saleId}/pdf`, `nfce-${saleId}.pdf`);
+      } catch {
+        // usuario ainda pode reimprimir no Fiscal Central
+      }
     };
 
     try {
@@ -1009,7 +1129,7 @@ export default function POS() {
         }
         setFiscalStatus("success");
         if (result.sale?.id) {
-          autoPrintFiscalCoupon(Number(result.sale.id));
+          void autoPrintFiscalCoupon(Number(result.sale.id));
         }
         toast({
           title: "Envio Fiscal Iniciado",
@@ -1802,7 +1922,7 @@ export default function POS() {
 
             <div className="mt-4 text-center text-xs text-muted-foreground">
               <p>Motivo: Cancelamento solicitado pelo operador</p>
-              <p>Caixa 01 • Operador: Sistema</p>
+              <p>Caixa 01 - Operador: {user?.name || "Sistema"}</p>
             </div>
           </div>
           <DialogFooter className="gap-2">
@@ -1815,7 +1935,15 @@ export default function POS() {
             </Button>
             <Button
               onClick={() => {
-                window.print();
+                try {
+                  window.print();
+                } catch {
+                  toast({
+                    title: "Nao foi possivel imprimir automaticamente",
+                    description: "Use o menu do navegador/dispositivo para imprimir.",
+                    variant: "destructive",
+                  });
+                }
               }}
               className="flex-1"
               data-testid="button-print-cancel-receipt"
@@ -2052,3 +2180,4 @@ export default function POS() {
     </div>
   );
 }
+

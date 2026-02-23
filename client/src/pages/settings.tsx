@@ -906,6 +906,9 @@ export default function Settings() {
     setSettings((prev) => applySefazDefaults(value, prev));
   };
 
+  const isIntegratedMiniPdvPrinter =
+    settings.printerModel === "minipdv-m10-integrated";
+
   if (loading) {
     return (
       <Layout>
@@ -1940,9 +1943,13 @@ export default function Settings() {
                     <Label>Modelo da Impressora</Label>
                     <Select
                       value={settings.printerModel || ""}
-                      onValueChange={(value) =>
-                        updateSetting("printerModel", value)
-                      }
+                      onValueChange={(value) => {
+                        updateSetting("printerModel", value);
+                        if (value === "minipdv-m10-integrated") {
+                          updateSetting("printerPort", "");
+                          updateSetting("printerColumns", 32);
+                        }
+                      }}
                     >
                       <SelectTrigger data-testid="select-printer-model">
                         <SelectValue placeholder="Selecione o modelo" />
@@ -1967,6 +1974,9 @@ export default function Settings() {
                         <SelectItem value="generic-escpos">
                           Genérica ESC/POS
                         </SelectItem>
+                        <SelectItem value="minipdv-m10-integrated">
+                          MiniPDV M10 (integrada)
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1974,6 +1984,7 @@ export default function Settings() {
                     <Label>Porta de Comunicação</Label>
                     <Select
                       value={settings.printerPort || ""}
+                      disabled={isIntegratedMiniPdvPrinter}
                       onValueChange={(value) =>
                         updateSetting("printerPort", value)
                       }
@@ -1991,6 +2002,11 @@ export default function Settings() {
                         <SelectItem value="network">Rede (IP)</SelectItem>
                       </SelectContent>
                     </Select>
+                    {isIntegratedMiniPdvPrinter && (
+                      <p className="text-xs text-muted-foreground">
+                        Impressora integrada: porta fisica nao se aplica.
+                      </p>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
