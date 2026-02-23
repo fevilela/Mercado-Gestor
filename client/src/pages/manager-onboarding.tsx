@@ -71,6 +71,7 @@ type OnboardingUserRow = {
   nfcePrintLayout: {
     paperWidth?: "auto" | "58mm" | "80mm";
     fontSize?: "auto" | "small" | "normal";
+    lineSpacing?: "compact" | "normal" | "comfortable";
     compactItems?: boolean;
     itemDescriptionLines?: number;
     showProtocol?: boolean;
@@ -185,6 +186,7 @@ export default function ManagerOnboarding() {
     nfcePrintLayout: {
       paperWidth: "auto",
       fontSize: "auto",
+      lineSpacing: "normal",
       compactItems: true,
       itemDescriptionLines: 2,
       showProtocol: true,
@@ -643,6 +645,7 @@ export default function ManagerOnboarding() {
       nfcePrintLayout: {
         paperWidth: "auto",
         fontSize: "auto",
+        lineSpacing: "normal",
         compactItems: true,
         itemDescriptionLines: 2,
         showProtocol: true,
@@ -737,6 +740,7 @@ export default function ManagerOnboarding() {
       nfcePrintLayout: {
         paperWidth: row.nfcePrintLayout?.paperWidth || "auto",
         fontSize: row.nfcePrintLayout?.fontSize || "auto",
+        lineSpacing: row.nfcePrintLayout?.lineSpacing || "normal",
         compactItems:
           row.nfcePrintLayout?.compactItems === undefined
             ? true
@@ -1913,6 +1917,30 @@ export default function ManagerOnboarding() {
                           <option value="normal">Normal</option>
                         </select>
                       </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="nfceLineSpacing">Espacamento entre linhas</Label>
+                        <select
+                          id="nfceLineSpacing"
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.nfcePrintLayout?.lineSpacing || "normal"}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfcePrintLayout: {
+                                ...(prev.nfcePrintLayout || {}),
+                                lineSpacing: e.target.value as
+                                  | "compact"
+                                  | "normal"
+                                  | "comfortable",
+                              },
+                            }))
+                          }
+                        >
+                          <option value="compact">Compacto</option>
+                          <option value="normal">Normal</option>
+                          <option value="comfortable">Confortavel</option>
+                        </select>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2024,7 +2052,17 @@ export default function ManagerOnboarding() {
 
                     <div className="space-y-2">
                       <Label>Preview rapido</Label>
-                      <div className="rounded-md border bg-white p-3 text-xs font-mono whitespace-pre-line leading-5">
+                      <div
+                        className="rounded-md border bg-white p-3 text-xs font-mono whitespace-pre-line"
+                        style={{
+                          lineHeight:
+                            companyForm.nfcePrintLayout?.lineSpacing === "compact"
+                              ? 1.15
+                              : companyForm.nfcePrintLayout?.lineSpacing === "comfortable"
+                                ? 1.5
+                                : 1.3,
+                        }}
+                      >
                         {[
                           `PREVIEW NFC-e (${companyForm.nfcePrintLayout?.paperWidth || "auto"})`,
                           companyForm.receiptHeaderText?.trim() || "",

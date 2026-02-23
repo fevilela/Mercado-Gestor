@@ -517,6 +517,7 @@ const managerCreateCompanySchema = z.object({
     .object({
       paperWidth: z.enum(["auto", "58mm", "80mm"]).optional(),
       fontSize: z.enum(["auto", "small", "normal"]).optional(),
+      lineSpacing: z.enum(["compact", "normal", "comfortable"]).optional(),
       compactItems: z.boolean().optional(),
       itemDescriptionLines: z.coerce.number().int().min(1).max(3).optional(),
       showProtocol: z.boolean().optional(),
@@ -605,6 +606,7 @@ const managerUpdateCompanySchema = z.object({
     .object({
       paperWidth: z.enum(["auto", "58mm", "80mm"]).optional(),
       fontSize: z.enum(["auto", "small", "normal"]).optional(),
+      lineSpacing: z.enum(["compact", "normal", "comfortable"]).optional(),
       compactItems: z.boolean().optional(),
       itemDescriptionLines: z.coerce.number().int().min(1).max(3).optional(),
       showProtocol: z.boolean().optional(),

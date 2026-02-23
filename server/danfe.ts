@@ -319,6 +319,7 @@ export async function generateDanfeNFCeThermal(
         : "80mm";
   const isNarrow = paperWidth === "58mm";
   const configuredFontSize = String(rawLayout.fontSize || "auto");
+  const configuredLineSpacing = String(rawLayout.lineSpacing || "normal");
   const compactItems = rawLayout.compactItems !== false || isNarrow;
   const itemDescriptionLines = Math.min(
     3,
@@ -335,6 +336,12 @@ export async function generateDanfeNFCeThermal(
   const pageMargins: [number, number, number, number] = isNarrow ? [6, 8, 6, 8] : [10, 10, 10, 10];
   const baseFont =
     configuredFontSize === "small" ? 7 : configuredFontSize === "normal" ? 8 : isNarrow ? 7 : 8;
+  const lineHeight =
+    configuredLineSpacing === "compact"
+      ? 1.0
+      : configuredLineSpacing === "comfortable"
+        ? 1.3
+        : 1.15;
   const smallFont = Math.max(6, baseFont - 1);
   const titleFont = baseFont + (isNarrow ? 1 : 2);
   const qrFit = isNarrow ? [92, 92] : [120, 120];
@@ -435,7 +442,7 @@ export async function generateDanfeNFCeThermal(
   const docDefinition = {
     pageSize: { width: pageWidth, height: 1200 },
     pageMargins,
-    defaultStyle: { font: "Roboto", fontSize: baseFont },
+    defaultStyle: { font: "Roboto", fontSize: baseFont, lineHeight },
     content: [
       { text: emit.xNome ?? "", style: "title" },
       ...(opts.headerText
@@ -583,14 +590,15 @@ export async function generateDanfeNFCeThermal(
         : []),
     ],
     styles: {
-      title: { fontSize: titleFont, bold: true, alignment: "center" },
+      title: { fontSize: titleFont, bold: true, alignment: "center", lineHeight },
       subtitle: {
         fontSize: baseFont,
         bold: true,
         alignment: "center",
         margin: [0, 2, 0, 4],
+        lineHeight,
       },
-      small: { fontSize: smallFont },
+      small: { fontSize: smallFont, lineHeight },
     },
   };
 
