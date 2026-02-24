@@ -3322,14 +3322,43 @@ router.get("/nfe/:nfeLogId/pdf", requireAuth, requirePermission("fiscal:view"), 
 
     const responsePayload = (log.responsePayload || {}) as any;
     const xmlContent = String(responsePayload?.xml || "").trim();
+    const documentKey = resolveDocumentKeyFromLog(log);
+    let protocolFallback = String(responsePayload?.protocol || "").trim();
     if (!xmlContent) {
       return res.status(404).json({ error: "XML da NF-e nao encontrado" });
+    }
+
+    if (!protocolFallback && documentKey) {
+      const submitLogs = await db
+        .select()
+        .from(sefazTransmissionLogs)
+        .where(
+          and(
+            eq(sefazTransmissionLogs.companyId, companyId),
+            eq(sefazTransmissionLogs.action, "submit"),
+          ),
+        )
+        .orderBy(desc(sefazTransmissionLogs.createdAt))
+        .limit(500);
+
+      const matchingSubmit = submitLogs.find((submitLog) => {
+        if (!submitLog?.success) return false;
+        return resolveDocumentKeyFromLog(submitLog) === documentKey;
+      });
+      const submitPayload = (matchingSubmit?.responsePayload || {}) as any;
+      protocolFallback = String(
+        submitPayload?.protocol ||
+          submitPayload?.nProt ||
+          submitPayload?.infProt?.nProt ||
+          "",
+      ).trim();
     }
 
     const settings = await storage.getCompanySettings(companyId);
     const pdfBuffer = await generateDanfeNFeA4(xmlContent, {
       layout: ((settings as any)?.nfeDanfeLayout as Record<string, unknown> | null) || null,
       logoUrl: (settings as any)?.danfeLogoUrl || null,
+      protocolOverride: protocolFallback || null,
     });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(

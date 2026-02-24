@@ -86,6 +86,7 @@ type OnboardingUserRow = {
     fontSize?: "small" | "normal";
     lineSpacing?: "compact" | "normal" | "comfortable";
     itemDescriptionLines?: number;
+    logoFit?: "contain" | "cover" | "pad";
     showAccessKey?: boolean;
     showCustomerDocument?: boolean;
     showTaxes?: boolean;
@@ -212,6 +213,7 @@ export default function ManagerOnboarding() {
       fontSize: "normal",
       lineSpacing: "normal",
       itemDescriptionLines: 2,
+      logoFit: "contain",
       showAccessKey: true,
       showCustomerDocument: true,
       showTaxes: true,
@@ -684,6 +686,7 @@ export default function ManagerOnboarding() {
         fontSize: "normal",
         lineSpacing: "normal",
         itemDescriptionLines: 2,
+        logoFit: "contain",
         showAccessKey: true,
         showCustomerDocument: true,
         showTaxes: true,
@@ -815,6 +818,12 @@ export default function ManagerOnboarding() {
         fontSize: row.nfeDanfeLayout?.fontSize || "normal",
         lineSpacing: row.nfeDanfeLayout?.lineSpacing || "normal",
         itemDescriptionLines: Number(row.nfeDanfeLayout?.itemDescriptionLines || 2) || 2,
+        logoFit:
+          row.nfeDanfeLayout?.logoFit === "cover"
+            ? "cover"
+            : row.nfeDanfeLayout?.logoFit === "pad"
+              ? "pad"
+              : "contain",
         showAccessKey:
           row.nfeDanfeLayout?.showAccessKey === undefined ? true : Boolean(row.nfeDanfeLayout.showAccessKey),
         showCustomerDocument:
@@ -885,6 +894,124 @@ export default function ManagerOnboarding() {
           variant: "destructive",
         });
       });
+  };
+
+  const handleDanfeLogoFileChange = (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Arquivo invalido",
+        description: "Selecione uma imagem (PNG, JPG, SVG, etc.)",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const maxBytes = 2 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      toast({
+        title: "Imagem muito grande",
+        description: "Use uma imagem de ate 2 MB para evitar PDF pesado.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const resizeLogoDataUrl = async (dataUrl: string) => {
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Falha ao processar imagem"));
+        img.src = dataUrl;
+      });
+
+      const logoFitMode =
+        companyForm.nfeDanfeLayout?.logoFit === "cover"
+          ? "cover"
+          : companyForm.nfeDanfeLayout?.logoFit === "pad"
+            ? "pad"
+            : "contain";
+      const maxWidth = 600;
+      const maxHeight = 220;
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas indisponivel");
+      if (logoFitMode === "cover") {
+        canvas.width = maxWidth;
+        canvas.height = maxHeight;
+        const targetRatio = maxWidth / maxHeight;
+        const sourceRatio = img.width / img.height;
+        let sx = 0;
+        let sy = 0;
+        let sw = img.width;
+        let sh = img.height;
+
+        if (sourceRatio > targetRatio) {
+          sw = Math.max(1, Math.round(img.height * targetRatio));
+          sx = Math.max(0, Math.floor((img.width - sw) / 2));
+        } else if (sourceRatio < targetRatio) {
+          sh = Math.max(1, Math.round(img.width / targetRatio));
+          sy = Math.max(0, Math.floor((img.height - sh) / 2));
+        }
+
+        ctx.clearRect(0, 0, maxWidth, maxHeight);
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, maxWidth, maxHeight);
+      } else if (logoFitMode === "pad") {
+        canvas.width = maxWidth;
+        canvas.height = maxHeight;
+        const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const dx = Math.floor((maxWidth - width) / 2);
+        const dy = Math.floor((maxHeight - height) / 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, maxWidth, maxHeight);
+        ctx.drawImage(img, dx, dy, width, height);
+      } else {
+        const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        canvas.width = width;
+        canvas.height = height;
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+      }
+
+      const preferredType =
+        file.type === "image/jpeg" || file.type === "image/jpg"
+          ? "image/jpeg"
+          : "image/png";
+      return canvas.toDataURL(preferredType, 0.92);
+    };
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const result = String(reader.result || "");
+      if (!result.startsWith("data:image/")) {
+        toast({
+          title: "Falha ao ler imagem",
+          variant: "destructive",
+        });
+        return;
+      }
+      try {
+        const resized = await resizeLogoDataUrl(result);
+        setCompanyForm((prev) => ({ ...prev, danfeLogoUrl: resized }));
+        toast({
+          title: "Logo carregada",
+          description: `${file.name} (redimensionada para caber no DANFE)`,
+        });
+      } catch {
+        setCompanyForm((prev) => ({ ...prev, danfeLogoUrl: result }));
+        toast({
+          title: "Logo carregada",
+          description: `${file.name} (sem redimensionamento)`,
+        });
+      }
+    };
+    reader.onerror = () =>
+      toast({ title: "Falha ao ler imagem", variant: "destructive" });
+    reader.readAsDataURL(file);
   };
 
   const handleValidateMercadoPago = () => {
@@ -2182,20 +2309,81 @@ export default function ManagerOnboarding() {
                     <div>
                       <h4 className="font-medium">Layout do DANFE NF-e (A4)</h4>
                       <p className="text-xs text-muted-foreground">
-                        Configure visual do PDF da NF-e e informe uma URL de logo.
+                        Configure visual do PDF da NF-e e envie a logo por arquivo.
                       </p>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="danfeLogoUrl">Logo (URL da imagem)</Label>
-                      <Input
-                        id="danfeLogoUrl"
-                        value={companyForm.danfeLogoUrl || ""}
-                        onChange={(e) =>
-                          setCompanyForm((prev) => ({ ...prev, danfeLogoUrl: e.target.value }))
-                        }
-                        placeholder="https://.../logo.png"
-                      />
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label>Ajuste da logo</Label>
+                        <select
+                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={companyForm.nfeDanfeLayout?.logoFit || "contain"}
+                          onChange={(e) =>
+                            setCompanyForm((prev) => ({
+                              ...prev,
+                              nfeDanfeLayout: {
+                                ...(prev.nfeDanfeLayout || {}),
+                                logoFit: e.target.value as "contain" | "cover" | "pad",
+                              },
+                            }))
+                          }
+                        >
+                          <option value="contain">Ajustar (sem cortar)</option>
+                          <option value="cover">Preencher (corta para caber)</option>
+                          <option value="pad">Centralizar em fundo branco</option>
+                        </select>
+                        <p className="text-xs text-muted-foreground">
+                          A logo enviada sera redimensionada conforme este ajuste.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="danfeLogoFile">Logo (arquivo do computador)</Label>
+                        <Input
+                          id="danfeLogoFile"
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleDanfeLogoFileChange(e.target.files?.[0] || null)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          A imagem e salva em base64 nas configuracoes da empresa.
+                        </p>
+                      </div>
+                      {companyForm.danfeLogoUrl ? (
+                        <div className="rounded-md border p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-muted-foreground">
+                              Logo carregada
+                            </span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setCompanyForm((prev) => ({ ...prev, danfeLogoUrl: "" }))
+                              }
+                            >
+                              Remover logo
+                            </Button>
+                          </div>
+                          {String(companyForm.danfeLogoUrl).startsWith("data:image/") ? (
+                            <img
+                              src={String(companyForm.danfeLogoUrl)}
+                              alt="Preview da logo DANFE"
+                              className="max-h-20 object-contain border rounded bg-white p-2"
+                            />
+                          ) : (
+                            <Input
+                              value={companyForm.danfeLogoUrl || ""}
+                              onChange={(e) =>
+                                setCompanyForm((prev) => ({ ...prev, danfeLogoUrl: e.target.value }))
+                              }
+                              placeholder="URL opcional"
+                            />
+                          )}
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
