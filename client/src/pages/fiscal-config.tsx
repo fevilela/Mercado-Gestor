@@ -1017,7 +1017,7 @@ export default function FiscalConfig() {
                           <SelectItem value="revenda">Revenda</SelectItem>
                           <SelectItem value="contribuinte">Contribuinte</SelectItem>
                           <SelectItem value="nao_contribuinte">
-                            Nao contribuinte
+                            Isento
                           </SelectItem>
                         </SelectContent>
                       </Select>

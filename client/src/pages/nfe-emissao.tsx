@@ -129,7 +129,7 @@ export default function NFEEmissao() {
   const [customerDocument, setCustomerDocument] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
   const [customerZip, setCustomerZip] = useState("");
-  const [customerIeIndicator, setCustomerIeIndicator] = useState("nao_contribuinte");
+  const [customerIeIndicator, setCustomerIeIndicator] = useState("isento");
   const [selectedCustomerId, setSelectedCustomerId] = useState("__none__");
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
@@ -231,7 +231,7 @@ export default function NFEEmissao() {
     setCustomerZip(String(selected.zipCode || ""));
     const typeToken = String(selected.personType || "").toLowerCase();
     setCustomerType(typeToken.includes("jur") ? "pj" : "pf");
-    setCustomerIeIndicator(selected.isIcmsContributor ? "contribuinte" : "nao_contribuinte");
+    setCustomerIeIndicator(selected.isIcmsContributor ? "contribuinte" : "isento");
   }, [selectedCustomerId, customers]);
 
   const filteredCustomers = useMemo(() => {

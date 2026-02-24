@@ -66,7 +66,7 @@ import {
   type InsertSefazTransmissionLog,
   type FiscalTaxRule,
 } from "@shared/schema";
-import { eq, and, desc, sql, ilike, getTableColumns } from "drizzle-orm";
+import { eq, and, or, desc, sql, ilike, getTableColumns } from "drizzle-orm";
 
 export const storage = {
   async getFiscalDataByProductName(name: string, companyId: number) {
@@ -157,6 +157,11 @@ export const storage = {
         id: customers.id,
         name: customers.name,
         cpfCnpj: customers.cpfCnpj,
+        email: customers.email,
+        address: customers.address,
+        city: customers.city,
+        state: customers.state,
+        zipCode: customers.zipCode,
         personType: customers.personType,
         isIcmsContributor: customers.isIcmsContributor,
       })
@@ -164,7 +169,10 @@ export const storage = {
       .where(
         and(
           eq(customers.companyId, companyId),
-          ilike(customers.name, `%${query}%`)
+          or(
+            ilike(customers.name, `%${query}%`),
+            ilike(customers.cpfCnpj, `%${query}%`)
+          )
         )
       )
       .limit(limit);

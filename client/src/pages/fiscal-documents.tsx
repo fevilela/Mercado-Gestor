@@ -71,6 +71,9 @@ interface Customer {
   cpfCnpj?: string;
   email?: string | null;
   address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
   personType?: string;
   isIcmsContributor?: boolean;
 }
@@ -962,15 +965,65 @@ export default function FiscalDocuments() {
   };
 
   const handleSelectCustomer = (customer: Customer) => {
+    const addressParts = [
+      customer.address?.trim(),
+      [customer.city?.trim(), customer.state?.trim()].filter(Boolean).join("/"),
+      customer.zipCode?.trim() ? `CEP ${customer.zipCode.trim()}` : "",
+    ].filter(Boolean);
+
     setSelectedCustomer(customer);
-    setFormData({
-      ...formData,
+    setFormData((prev) => ({
+      ...prev,
       customerId: String(customer.id),
       customerCPFCNPJ: customer.cpfCnpj || "",
-    });
+    }));
+    setNfeDestExtra((prev) => ({
+      ...prev,
+      email: customer.email || "",
+      address: addressParts.join(" - "),
+      ieIndicator: customer.isIcmsContributor ? "contribuinte" : "isento",
+    }));
     setCustomerSearch("");
     setCustomerSearchOpen(false);
     toast.success(`Cliente ${customer.name} selecionado!`);
+  };
+
+  const handleSearchCustomerByDocument = async () => {
+    const rawDoc = formData.customerCPFCNPJ?.trim() || "";
+    const normalizedDoc = rawDoc.replace(/\D/g, "");
+
+    if (!normalizedDoc) {
+      toast.error("Informe o CPF/CNPJ para buscar o cliente.");
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `/api/customers/search/${encodeURIComponent(rawDoc)}`
+      );
+
+      if (!res.ok) {
+        throw new Error("Falha ao buscar cliente");
+      }
+
+      const results: Customer[] = await res.json();
+      const exactMatch =
+        results.find(
+          (customer) =>
+            String(customer.cpfCnpj || "").replace(/\D/g, "") === normalizedDoc
+        ) || null;
+
+      const customer = exactMatch || results[0] || null;
+
+      if (!customer) {
+        toast.error("Cliente nao encontrado.");
+        return;
+      }
+
+      handleSelectCustomer(customer);
+    } catch (error) {
+      toast.error("Erro ao buscar cliente.");
+    }
   };
 
   const handleAddItem = () => {
@@ -1817,7 +1870,7 @@ export default function FiscalDocuments() {
                   <TabsContent value="destinatario" className="mt-4 space-y-4">
                     <div className="grid gap-4 md:grid-cols-3">
                       <div className="md:col-span-2"><Label>CPF/CNPJ</Label><Input value={formData.customerCPFCNPJ} onChange={(e) => setFormData((p) => ({ ...p, customerCPFCNPJ: e.target.value }))} /></div>
-                      <div className="flex items-end"><Button className="w-full" variant="outline" onClick={() => setCustomerSearchOpen(true)}>Buscar Cliente</Button></div>
+                      <div className="flex items-end"><Button className="w-full" variant="outline" onClick={handleSearchCustomerByDocument}>Buscar Cliente</Button></div>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div><Label>Nome / Razao Social</Label><Input value={selectedCustomer?.name || ""} readOnly /></div>

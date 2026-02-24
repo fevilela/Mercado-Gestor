@@ -665,7 +665,7 @@ export async function registerRoutes(
   app.get(
     "/api/customers/search/:query",
     requireAuth,
-    requirePermission("customers:view"),
+    requirePermission("customers:view", "fiscal:emit_nfe"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -689,7 +689,7 @@ export async function registerRoutes(
   app.get(
     "/api/customers",
     requireAuth,
-    requirePermission("customers:view"),
+    requirePermission("customers:view", "fiscal:emit_nfe"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
