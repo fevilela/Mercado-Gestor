@@ -73,8 +73,27 @@ function formatCurrency(value: number) {
   return `R$ ${value.toFixed(2)}`;
 }
 
+function normalizeDisplayText(value: unknown) {
+  let text = String(value ?? "");
+  if (!text) return "";
+
+  // Corrige textos que chegaram com UTF-8 interpretado como latin1 (ex.: "Ã§", "Ã£", "â€¦").
+  if (/[ÃÂâ]/.test(text)) {
+    try {
+      const decoded = Buffer.from(text, "latin1").toString("utf8");
+      if (decoded && !decoded.includes("\uFFFD")) {
+        text = decoded;
+      }
+    } catch {
+      // Mantem texto original se a heuristica falhar.
+    }
+  }
+
+  return text;
+}
+
 function wrapLongToken(value: string, chunkSize: number) {
-  const text = String(value || "").trim();
+  const text = normalizeDisplayText(value).trim();
   if (!text) return "";
   const chunks: string[] = [];
   for (let i = 0; i < text.length; i += chunkSize) {
@@ -84,7 +103,7 @@ function wrapLongToken(value: string, chunkSize: number) {
 }
 
 function wrapTextLines(value: string, maxChars: number, maxLines: number) {
-  const raw = String(value || "").replace(/\s+/g, " ").trim();
+  const raw = normalizeDisplayText(value).replace(/\s+/g, " ").trim();
   if (!raw) return "";
   const words = raw.split(" ");
   const lines: string[] = [];
@@ -112,7 +131,7 @@ function wrapTextLines(value: string, maxChars: number, maxLines: number) {
   if (lines.length > maxLines) lines.length = maxLines;
   if (raw.length > lines.join(" ").length && lines.length > 0) {
     const last = lines[lines.length - 1];
-    lines[lines.length - 1] = last.length >= 1 ? `${last.slice(0, Math.max(0, maxChars - 1))}â€¦` : "â€¦";
+    lines[lines.length - 1] = last.length >= 1 ? `${last.slice(0, Math.max(0, maxChars - 3))}...` : "...";
   }
   return lines.join("\n");
 }
@@ -146,7 +165,7 @@ async function parseNFe(xmlContent: string) {
     return {
       idx: index + 1,
       code: prod.cProd ?? "",
-      desc: prod.xProd ?? "",
+      desc: normalizeDisplayText(prod.xProd ?? ""),
       ncm: prod.NCM ?? "",
       cfop: prod.CFOP ?? "",
       cst: icmsNode?.orig !== undefined && (icmsNode?.CST || icmsNode?.CSOSN)
