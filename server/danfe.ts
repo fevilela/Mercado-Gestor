@@ -853,7 +853,8 @@ export async function generateDanfeNFCeThermal(
   }
 
   const docDefinition = {
-    pageSize: { width: pageWidth, height: 1200 },
+    // Use automatic height for thermal receipts to avoid large blank paper output.
+    pageSize: { width: pageWidth, height: "auto" },
     pageMargins,
     defaultStyle: { font: "Roboto", fontSize: baseFont, lineHeight },
     content: [
