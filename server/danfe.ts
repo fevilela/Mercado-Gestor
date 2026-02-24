@@ -842,13 +842,14 @@ export async function generateDanfeNFCeThermal(
       ...(opts.headerText
         ? [{ text: opts.headerText, alignment: "center", margin: [0, 0, 0, 4] as [number, number, number, number] }]
         : []),
-      { text: `CNPJ: ${emit.CNPJ ?? ""}`, margin: [0, 2, 0, 2] },
+      { text: `CNPJ: ${emit.CNPJ ?? ""}`, alignment: "center", margin: [0, 2, 0, 2] },
       {
         text: wrapTextLines(
           emit.enderEmit?.xLgr ? `${emit.enderEmit.xLgr}, ${emit.enderEmit.nro}` : "",
           textWrapChars,
           2,
         ),
+        alignment: "center",
       },
       {
         text: wrapTextLines(
@@ -856,6 +857,7 @@ export async function generateDanfeNFCeThermal(
           textWrapChars,
           2,
         ),
+        alignment: "center",
       },
       {
         text: wrapTextLines(
@@ -863,6 +865,7 @@ export async function generateDanfeNFCeThermal(
           textWrapChars,
           1,
         ),
+        alignment: "center",
         margin: [0, 0, 0, 6],
       },
       {
