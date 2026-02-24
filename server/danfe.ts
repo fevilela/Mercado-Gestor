@@ -691,6 +691,7 @@ export async function generateDanfeNFCeThermal(
     sefazUrl: string;
     cscId: string;
     csc: string;
+    protocolOverride?: string | null;
     sellerName?: string | null;
     showSeller?: boolean;
     headerText?: string | null;
@@ -701,6 +702,7 @@ export async function generateDanfeNFCeThermal(
 ): Promise<Buffer> {
   const { ide, emit, dest, total, det, detPag, chave, protocolo, inf, nfeRoot } =
     await parseNFe(xmlContent);
+  const resolvedProtocol = String(opts.protocolOverride || protocolo || "").trim();
   const rawLayout = (opts.layout || {}) as Record<string, any>;
   const configuredPaperWidth = String(rawLayout.paperWidth || "auto");
   const paperWidth =
@@ -869,12 +871,14 @@ export async function generateDanfeNFCeThermal(
       },
       {
         text: `Numero: ${ide.nNF ?? ""} Serie: ${ide.serie ?? ""}`,
+        alignment: "center",
         margin: [0, 2, 0, 4],
       },
       ...(showProtocol
         ? [
             {
-              text: `Protocolo de autorizacao: ${protocolo || "N/A"}`,
+              text: `Protocolo de autorizacao: ${resolvedProtocol || "N/A"}`,
+              alignment: "center",
               margin: [0, 0, 0, 2],
             },
           ]
@@ -884,6 +888,7 @@ export async function generateDanfeNFCeThermal(
             {
               text: `Chave de Acesso:\n${wrapLongToken(String(chave || "").replace(/\s+/g, ""), isNarrow ? 22 : 28)}`,
               style: "small",
+              alignment: "center",
               margin: [0, 0, 0, 6],
             },
           ]

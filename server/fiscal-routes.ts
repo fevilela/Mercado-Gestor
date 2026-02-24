@@ -2277,6 +2277,7 @@ router.get("/nfce/:saleId/pdf", async (req, res) => {
       sefazUrl: qrBaseUrl,
       cscId: String(settings.cscId || ""),
       csc: String(settings.cscToken || ""),
+      protocolOverride: String(sale.nfceProtocol || "").trim() || null,
       sellerName: sellerCode,
       showSeller: settings?.receiptShowSeller !== false,
       headerText: settings?.receiptHeaderText || null,
