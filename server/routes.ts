@@ -665,7 +665,7 @@ export async function registerRoutes(
   app.get(
     "/api/customers/search/:query",
     requireAuth,
-    requirePermission("customers:view", "fiscal:emit_nfe"),
+    requirePermission("customers:view", "fiscal:emit_nfe", "fiscal:view"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -689,7 +689,7 @@ export async function registerRoutes(
   app.get(
     "/api/customers",
     requireAuth,
-    requirePermission("customers:view", "fiscal:emit_nfe"),
+    requirePermission("customers:view", "fiscal:emit_nfe", "fiscal:view"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
@@ -864,9 +864,33 @@ export async function registerRoutes(
   );
 
   app.get(
+    "/api/transporters/search/:query",
+    requireAuth,
+    requirePermission("suppliers:view", "fiscal:emit_nfe", "fiscal:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÃ£o autenticado" });
+
+        const { query } = req.params;
+        const transportersList = await storage.searchTransporters(
+          query,
+          companyId,
+          10
+        );
+        res.json(transportersList);
+      } catch (error) {
+        console.error("Failed to search transporters:", error);
+        res.status(500).json({ error: "Failed to search transporters" });
+      }
+    }
+  );
+
+  app.get(
     "/api/transporters",
     requireAuth,
-    requirePermission("suppliers:view"),
+    requirePermission("suppliers:view", "fiscal:emit_nfe", "fiscal:view"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);

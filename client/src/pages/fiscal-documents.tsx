@@ -86,10 +86,30 @@ interface Supplier {
   address?: string | null;
 }
 
+interface TransporterLookup {
+  id: number;
+  name: string;
+  cnpjCpf?: string | null;
+  ie?: string | null;
+  rntc?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
+}
+
 interface AppSettings {
   cnpj?: string;
   ie?: string;
   razaoSocial?: string;
+  crt?: string;
+  regimeTributario?: string;
+  sefazUf?: string;
+  sefazMunicipioCodigo?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
 }
 
 interface RecipientLookupOption {
@@ -282,6 +302,13 @@ export default function FiscalDocuments() {
   const fallbackCompanyName = "Sua Empresa LTDA";
   const fallbackCompanyCnpj = "00.000.000/0000-00";
   const fallbackCompanyIe = "000.000.000.000";
+  const ufToCode: Record<string, string> = {
+    RO: "11", AC: "12", AM: "13", RR: "14", PA: "15", AP: "16", TO: "17",
+    MA: "21", PI: "22", CE: "23", RN: "24", PB: "25", PE: "26", AL: "27", SE: "28", BA: "29",
+    MG: "31", ES: "32", RJ: "33", SP: "35",
+    PR: "41", SC: "42", RS: "43",
+    MS: "50", MT: "51", GO: "52", DF: "53",
+  };
   const [companyIm] = useState("00000000");
   const [companyRegime] = useState("Simples Nacional");
   const [productSearch, setProductSearch] = useState("");
@@ -692,9 +719,9 @@ export default function FiscalDocuments() {
         : [];
       const totals = data?.totals || {};
       setLastTaxCalculation(data);
-      setFormData((prev) => ({
-        ...prev,
-        items: prev.items.map((item, index) => {
+      let updatedItemsSnapshot: FormItem[] = [];
+      setFormData((prev) => {
+        const updatedItems = prev.items.map((item, index) => {
           const calc = calculations[index] || {};
           const subtotal =
             Math.max(0, toAmount(item.quantity)) * Math.max(0, toAmount(item.unitPrice));
@@ -716,15 +743,18 @@ export default function FiscalDocuments() {
             issValue: String(round2(toAmount(calc.issValue))),
             irrfValue: String(round2(toAmount(calc.irrfValue))),
             totalTaxes: String(
-              round2(
-                toAmount(calc.totalTaxes) + toAmount(item.icmsStValue)
-              )
+              round2(toAmount(calc.totalTaxes) + toAmount(item.icmsStValue))
             ),
           };
-        }),
-      }));
+        });
+        updatedItemsSnapshot = updatedItems;
+        return {
+          ...prev,
+          items: updatedItems,
+        };
+      });
       setHeaderTaxes((prev) =>
-        buildAutoHeaderTotals(formData.items, prev, {
+        buildAutoHeaderTotals(updatedItemsSnapshot, prev, {
           icmsTotal: round2(toAmount(totals.icmsTotal)),
           ipiTotal: round2(toAmount(totals.ipiTotal)),
           pisTotal: round2(toAmount(totals.pisTotal)),
@@ -1023,6 +1053,77 @@ export default function FiscalDocuments() {
       handleSelectCustomer(customer);
     } catch (error) {
       toast.error("Erro ao buscar cliente.");
+    }
+  };
+
+  const handleSearchTransporter = async () => {
+    const rawDoc = nfeTransport.carrierDocument?.trim() || "";
+    const rawName = nfeTransport.carrierName?.trim() || "";
+    const query = rawDoc || rawName;
+    const normalizedDoc = rawDoc.replace(/\D/g, "");
+
+    if (!query) {
+      toast.error("Informe o nome ou CNPJ/CPF da transportadora.");
+      return;
+    }
+
+    try {
+      let results: TransporterLookup[] = [];
+
+      const res = await fetch(
+        `/api/transporters/search/${encodeURIComponent(query)}`
+      );
+
+      if (res.ok) {
+        results = await res.json();
+      } else {
+        // Fallback para ambientes sem a rota nova (backend sem restart) ou sem permissão específica.
+        const allRes = await fetch("/api/transporters");
+        if (!allRes.ok) throw new Error("Falha ao buscar transportadoras");
+        const allTransporters: TransporterLookup[] = await allRes.json();
+        const normalizedQuery = query.toLowerCase();
+        results = allTransporters.filter((item) => {
+          const name = String(item.name || "").toLowerCase();
+          const doc = String(item.cnpjCpf || "");
+          return (
+            name.includes(normalizedQuery) ||
+            doc.toLowerCase().includes(normalizedQuery) ||
+            doc.replace(/\D/g, "").includes(normalizedDoc)
+          );
+        });
+      }
+
+      const transporter =
+        (normalizedDoc
+          ? results.find(
+              (item) =>
+                String(item.cnpjCpf || "").replace(/\D/g, "") === normalizedDoc
+            )
+          : undefined) ||
+        (rawName
+          ? results.find(
+              (item) =>
+                String(item.name || "").trim().toLowerCase() ===
+                rawName.toLowerCase()
+            )
+          : undefined) ||
+        results[0];
+
+      if (!transporter) {
+        toast.error("Transportadora nao encontrada.");
+        return;
+      }
+
+      setNfeTransport((prev) => ({
+        ...prev,
+        carrierName: transporter.name || "",
+        carrierDocument: transporter.cnpjCpf || "",
+        rntc: transporter.rntc || "",
+      }));
+
+      toast.success(`Transportadora ${transporter.name} selecionada!`);
+    } catch {
+      toast.error("Erro ao buscar transportadora.");
     }
   };
 
@@ -1384,6 +1485,59 @@ export default function FiscalDocuments() {
 
   const buildTaxPayload = () => buildTaxPayloadFromItems(formData.items, formData.cfopCode);
 
+  const buildVisualNFeGenerateConfig = () => {
+    const companyUf = String(settings?.sefazUf || settings?.state || "MG").toUpperCase();
+    const companyZip = String(settings?.zipCode || "").replace(/\D/g, "");
+    const customerDoc = String(formData.customerCPFCNPJ || "").replace(/\D/g, "");
+    const customerZip = String(selectedCustomer?.zipCode || "").replace(/\D/g, "");
+
+    return {
+      companyName: String(settings?.razaoSocial || companyName),
+      cnpj: String(settings?.cnpj || companyCnpj).replace(/\D/g, ""),
+      ie: String(settings?.ie || companyIe).replace(/\D/g, ""),
+      ufCode: ufToCode[companyUf] || "31",
+      crt: (String(settings?.crt || "1") as "1" | "2" | "3"),
+      regimeTributario: (String(settings?.regimeTributario || "Simples Nacional") as
+        | "Simples Nacional"
+        | "Lucro Real"
+        | "Lucro Presumido"),
+      companyState: companyUf,
+      companyCityCode: String(settings?.sefazMunicipioCodigo || "3138203"),
+      companyCity: String(settings?.city || "LAVRAS"),
+      companyAddress: String(settings?.address || "RUA NAO INFORMADA"),
+      companyZipCode: companyZip || "37200000",
+      customerName: String(selectedCustomer?.name || "CONSUMIDOR"),
+      customerCNPJ: customerDoc.length === 14 ? customerDoc : undefined,
+      customerCPF: customerDoc.length === 11 ? customerDoc : undefined,
+      customerIE: String(nfeDestExtra.ie || "").trim() || undefined,
+      customerState: String(selectedCustomer?.state || settings?.state || "MG").toUpperCase(),
+      customerCity: String(selectedCustomer?.city || settings?.city || "LAVRAS").trim(),
+      customerAddress:
+        String(selectedCustomer?.address || nfeDestExtra.address || "RUA NAO INFORMADA").trim(),
+      customerZipCode: customerZip || undefined,
+      items: formData.items.map((item, index) => ({
+        productId: Number(item.productId || index + 1),
+        productName: item.productName || item.description || `ITEM ${index + 1}`,
+        ncm: item.ncm || "00000000",
+        cfop: item.cfop || formData.cfopCode || "5102",
+        quantity: Math.max(0.0001, toAmount(item.quantity)),
+        unitPrice: Math.max(0, toAmount(item.unitPrice)),
+        icmsAliquot: Math.max(0, toAmount(item.icmsAliquot)),
+        ipiAliquot: Math.max(0, toAmount(item.ipiAliquot)),
+        pisAliquot: Math.max(0, toAmount(item.pisAliquot)),
+        cofinsAliquot: Math.max(0, toAmount(item.cofinsAliquot)),
+        csosn: item.csosn || "101",
+        cstIcms: item.cstIcms || "00",
+        cstIpi: item.cstIpi || "99",
+        cstPisCofins: item.cstPisCofins || "07",
+        origin: item.origin || "nacional",
+        icmsReduction: Math.max(0, toAmount(item.icmsReduction)),
+        icmsStValue: Math.max(0, toAmount(item.icmsStValue)),
+      })),
+      cfop: formData.cfopCode || formData.items[0]?.cfop || "5102",
+    };
+  };
+
   const queueAutoTaxRecalculation = (items: FormItem[], cfopCode: string) => {
     if (autoTaxRecalcTimeoutRef.current) {
       clearTimeout(autoTaxRecalcTimeoutRef.current);
@@ -1396,7 +1550,10 @@ export default function FiscalDocuments() {
     }, 450);
   };
 
-  const closeNFeNote = async (redirectToFiscalCentral = false) => {
+  const closeNFeNote = async (
+    redirectToFiscalCentral = false,
+    submitToSefaz = false
+  ) => {
     if (isNoteClosed) {
       toast.info("Nota ja fechada. Edite algum campo para recalcular e fechar novamente.");
       return;
@@ -1552,6 +1709,42 @@ export default function FiscalDocuments() {
               toAmount(totals.totalTaxes) + totalsFromItems.icmsStTotal
             ).toFixed(2)}`
       );
+
+      if (submitToSefaz) {
+        const generateConfig = buildVisualNFeGenerateConfig();
+        const generateRes = await fetch("/api/fiscal/nfe/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            config: generateConfig,
+            series: "1",
+          }),
+        });
+
+        const generateData = await generateRes.json().catch(() => ({}));
+        if (!generateRes.ok || !generateData?.xml) {
+          throw new Error(generateData?.error || "Falha ao gerar XML da NF-e");
+        }
+
+        const uf = String(settings?.sefazUf || settings?.state || "MG").toUpperCase();
+        setNfeOps((prev) => ({ ...prev, uf, xmlContent: String(generateData.xml) }));
+
+        const submitData = await submitNfeMutation.mutateAsync({
+          ...nfeOps,
+          uf,
+          xmlContent: String(generateData.xml),
+        });
+
+        const status = String(submitData?.status || "").trim();
+        if (!["100", "150"].includes(status)) {
+          toast.warning(
+            `NF-e enviada para SEFAZ, mas retorno foi ${status || "sem status"} (${submitData?.message || "em processamento"}).`
+          );
+        } else {
+          toast.success(`NF-e aprovada na SEFAZ (cStat ${status}).`);
+        }
+      }
+
       if (redirectToFiscalCentral) {
         window.location.assign("/fiscal-central");
       }
@@ -2023,7 +2216,73 @@ export default function FiscalDocuments() {
                     </div>
                   </TabsContent>
 
-                  <TabsContent value="transporte" className="mt-4"><div className="grid gap-4 md:grid-cols-3"><div><Label>Modalidade Frete</Label><SearchablePopoverSelect value={nfeTransport.freightMode} onValueChange={(value) => setNfeTransport((p) => ({ ...p, freightMode: value }))} options={nfeFreightModeOptions} placeholder="Selecione" searchPlaceholder="Pesquisar modalidade..." /></div><div className="md:col-span-2"><Label>Transportadora</Label><Input value={nfeTransport.carrierName} onChange={(e) => setNfeTransport((p) => ({ ...p, carrierName: e.target.value }))} /></div><div><Label>CNPJ/CPF</Label><Input value={nfeTransport.carrierDocument} onChange={(e) => setNfeTransport((p) => ({ ...p, carrierDocument: e.target.value }))} /></div><div><Label>Placa / UF</Label><Input value={`${nfeTransport.plate}${nfeTransport.plateUf ? ` - ${nfeTransport.plateUf}` : ""}`} readOnly /></div><div><Label>Pesos</Label><Input value={`${nfeTransport.grossWeight || "0"} / ${nfeTransport.netWeight || "0"}`} readOnly /></div></div></TabsContent>
+                  <TabsContent value="transporte" className="mt-4">
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div>
+                        <Label>Modalidade Frete</Label>
+                        <SearchablePopoverSelect
+                          value={nfeTransport.freightMode}
+                          onValueChange={(value) =>
+                            setNfeTransport((p) => ({ ...p, freightMode: value }))
+                          }
+                          options={nfeFreightModeOptions}
+                          placeholder="Selecione"
+                          searchPlaceholder="Pesquisar modalidade..."
+                        />
+                      </div>
+                      <div>
+                        <Label>Transportadora</Label>
+                        <Input
+                          value={nfeTransport.carrierName}
+                          onChange={(e) =>
+                            setNfeTransport((p) => ({ ...p, carrierName: e.target.value }))
+                          }
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <Button
+                          type="button"
+                          className="w-full"
+                          variant="outline"
+                          onClick={handleSearchTransporter}
+                        >
+                          Buscar Transportadora
+                        </Button>
+                      </div>
+                      <div>
+                        <Label>CNPJ/CPF</Label>
+                        <Input
+                          value={nfeTransport.carrierDocument}
+                          onChange={(e) =>
+                            setNfeTransport((p) => ({ ...p, carrierDocument: e.target.value }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>RNTC</Label>
+                        <Input
+                          value={nfeTransport.rntc}
+                          onChange={(e) =>
+                            setNfeTransport((p) => ({ ...p, rntc: e.target.value }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <Label>Placa / UF</Label>
+                        <Input
+                          value={`${nfeTransport.plate}${nfeTransport.plateUf ? ` - ${nfeTransport.plateUf}` : ""}`}
+                          readOnly
+                        />
+                      </div>
+                      <div>
+                        <Label>Pesos</Label>
+                        <Input
+                          value={`${nfeTransport.grossWeight || "0"} / ${nfeTransport.netWeight || "0"}`}
+                          readOnly
+                        />
+                      </div>
+                    </div>
+                  </TabsContent>
 
                   <TabsContent value="pagamento" className="mt-4 space-y-4">
                     <div className="flex items-center justify-between"><p className="text-sm font-medium">Pagamentos</p><Button size="sm" variant="outline" type="button" onClick={addNfePayment}><Plus className="mr-1 h-4 w-4" />Adicionar</Button></div>
@@ -2099,7 +2358,7 @@ export default function FiscalDocuments() {
                       <Button type="button" onClick={handleValidateNFe}>Validar Nota</Button>
                       <Button
                         type="button"
-                        onClick={() => closeNFeNote(true)}
+                        onClick={() => closeNFeNote(true, true)}
                         disabled={!headerValidation.canClose}
                       >
                         Emitir NFe
@@ -3405,6 +3664,3 @@ export default function FiscalDocuments() {
     </Layout>
   );
 }
-
-
-

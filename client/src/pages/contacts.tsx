@@ -863,7 +863,7 @@ export default function Contacts() {
           }
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-h-[85vh] max-w-md overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingCustomer ? "Editar Cliente" : "Novo Cliente"}

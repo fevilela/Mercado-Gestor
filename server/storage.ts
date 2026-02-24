@@ -325,6 +325,32 @@ export const storage = {
       .orderBy(desc(transporters.createdAt));
   },
 
+  async searchTransporters(query: string, companyId: number, limit: number = 10) {
+    return await db
+      .select({
+        id: transporters.id,
+        name: transporters.name,
+        cnpjCpf: transporters.cnpjCpf,
+        ie: transporters.ie,
+        rntc: transporters.rntc,
+        address: transporters.address,
+        city: transporters.city,
+        state: transporters.state,
+        zipCode: transporters.zipCode,
+      })
+      .from(transporters)
+      .where(
+        and(
+          eq(transporters.companyId, companyId),
+          or(
+            ilike(transporters.name, `%${query}%`),
+            ilike(transporters.cnpjCpf, `%${query}%`)
+          )
+        )
+      )
+      .limit(limit);
+  },
+
   async createTransporter(data: InsertTransporter) {
     const [transporter] = await db.insert(transporters).values(data).returning();
     return transporter;
