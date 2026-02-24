@@ -1031,7 +1031,7 @@ export async function generateDanfeNFCeThermal(
       {
         text: " ",
         fontSize: 1,
-        margin: [0, 6, 0, 23],
+        margin: [0, 6, 0, 30],
       },
     ],
     styles: {
