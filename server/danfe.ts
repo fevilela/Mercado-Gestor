@@ -916,7 +916,7 @@ export async function generateDanfeNFCeThermal(
             {
               text: `Chave de Acesso:\n${wrapLongToken(String(chave || "").replace(/\s+/g, ""), isNarrow ? 22 : 28)}`,
               style: "small",
-              alignment: "right",
+              alignment: "center",
               margin: [0, 0, 0, 6],
             },
           ]
@@ -960,20 +960,34 @@ export async function generateDanfeNFCeThermal(
         ? [
             {
               text: "Consulta via leitor de QR Code",
-              alignment: "right",
+              alignment: "center",
               margin: [0, 4, 0, 4],
             },
             ...(qrCodeDataUrl
               ? [
                   {
-                    image: qrCodeDataUrl,
-                    fit: qrFit,
-                    alignment: "right",
+                    columns: [
+                      {
+                        width: "*",
+                        text: wrapLongToken(qrUrl, isNarrow ? 16 : 24),
+                        style: "small",
+                        alignment: "left",
+                        margin: [0, 4, 6, 0],
+                      },
+                      {
+                        width: qrFit[0],
+                        image: qrCodeDataUrl,
+                        fit: qrFit,
+                        alignment: "right",
+                      },
+                    ],
+                    columnGap: 4,
                     margin: [0, 0, 0, 6],
                   },
                 ]
-              : []),
-            { text: wrapLongToken(qrUrl, isNarrow ? 26 : 42), style: "small", alignment: "right" },
+              : [
+                  { text: wrapLongToken(qrUrl, isNarrow ? 26 : 42), style: "small", alignment: "center" },
+                ]),
           ]
         : []),
       {
