@@ -1027,6 +1027,12 @@ export async function generateDanfeNFCeThermal(
             },
           ]
         : []),
+      // Small trailing spacer avoids clipping of the last lines on some thermal drivers.
+      {
+        text: " ",
+        fontSize: 1,
+        margin: [0, 6, 0, 14],
+      },
     ],
     styles: {
       title: { fontSize: titleFont, bold: true, alignment: "center", lineHeight },
