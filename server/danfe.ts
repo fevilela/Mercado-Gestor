@@ -759,6 +759,11 @@ export async function generateDanfeNFCeThermal(
   const titleFont = baseFont + (isNarrow ? 1 : 2);
   const qrFit = isNarrow ? [92, 92] : [120, 120];
   const textWrapChars = isNarrow ? 28 : 42;
+  const chaveDigits = String(chave || "").replace(/\D/g, "");
+  const nfSerieFallback = chaveDigits.length >= 25 ? String(Number(chaveDigits.slice(22, 25))) : "";
+  const nfNumberFallback = chaveDigits.length >= 34 ? String(Number(chaveDigits.slice(25, 34))) : "";
+  const nfSerieDisplay = String(ide?.serie ?? "").trim() || nfSerieFallback;
+  const nfNumberDisplay = String(ide?.nNF ?? "").trim() || nfNumberFallback;
   const totalTributos = numberString(total.vTotTrib);
   const totalsBody = [
     ["Subtotal", formatCurrency(numberString(total.vProd))],
@@ -893,7 +898,7 @@ export async function generateDanfeNFCeThermal(
         style: "subtitle",
       },
       {
-        text: `Numero: ${ide.nNF ?? ""} Serie: ${ide.serie ?? ""}`,
+        text: `Numero: ${nfNumberDisplay} Serie: ${nfSerieDisplay}`,
         alignment: "center",
         margin: [0, 2, 0, 4],
       },
@@ -911,7 +916,7 @@ export async function generateDanfeNFCeThermal(
             {
               text: `Chave de Acesso:\n${wrapLongToken(String(chave || "").replace(/\s+/g, ""), isNarrow ? 22 : 28)}`,
               style: "small",
-              alignment: "center",
+              alignment: "right",
               margin: [0, 0, 0, 6],
             },
           ]
@@ -955,7 +960,7 @@ export async function generateDanfeNFCeThermal(
         ? [
             {
               text: "Consulta via leitor de QR Code",
-              alignment: "center",
+              alignment: "right",
               margin: [0, 4, 0, 4],
             },
             ...(qrCodeDataUrl
@@ -963,12 +968,12 @@ export async function generateDanfeNFCeThermal(
                   {
                     image: qrCodeDataUrl,
                     fit: qrFit,
-                    alignment: "center",
+                    alignment: "right",
                     margin: [0, 0, 0, 6],
                   },
                 ]
               : []),
-            { text: wrapLongToken(qrUrl, isNarrow ? 26 : 42), style: "small", alignment: "center" },
+            { text: wrapLongToken(qrUrl, isNarrow ? 26 : 42), style: "small", alignment: "right" },
           ]
         : []),
       {
