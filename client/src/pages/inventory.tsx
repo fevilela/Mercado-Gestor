@@ -24,6 +24,8 @@ import {
   PackageMinus,
   Loader2,
   Upload,
+  RefreshCw,
+  ReceiptText,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -120,6 +122,47 @@ interface XmlReferenceTotals {
   noteTotal: number;
 }
 
+interface ManifestDocumentRow {
+  id: number;
+  documentKey: string;
+  issuerCnpj: string;
+  receiverCnpj: string;
+  xmlContent: string;
+  downloadedAt: string | null;
+  createdAt: string | null;
+}
+
+interface ManifestNoteSummary extends ManifestDocumentRow {
+  issuerName: string;
+  nfeNumber: string;
+  nfeSeries: string;
+  issuedAt: string | null;
+  noteTotal: number | null;
+}
+
+interface ManifestSyncResult {
+  success?: boolean;
+  status?: string;
+  message?: string;
+  usedUltNSU?: string | null;
+  lastNSU?: string | null;
+  maxNSU?: string | null;
+  documents?: Array<{
+    nsu?: string;
+    schema?: string;
+    documentKey?: string;
+    issuerCnpj?: string;
+    receiverCnpj?: string;
+  }>;
+  batches?: Array<{
+    status?: string;
+    message?: string;
+    lastNSU?: string;
+    maxNSU?: string;
+    documentsCount?: number;
+  }>;
+}
+
 const adjustmentTypes = [
   {
     value: "entrada",
@@ -172,6 +215,18 @@ export default function Inventory() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [isSendingPdvLoad, setIsSendingPdvLoad] = useState(false);
+  const [manifestSearchTerm, setManifestSearchTerm] = useState("");
+  const [selectedManifestNoteId, setSelectedManifestNoteId] = useState<
+    number | null
+  >(null);
+  const [isSyncingManifestNotes, setIsSyncingManifestNotes] = useState(false);
+  const [manifestAccessKeySearch, setManifestAccessKeySearch] = useState("");
+  const [manifestLastSyncResult, setManifestLastSyncResult] =
+    useState<ManifestSyncResult | null>(null);
+  const [manifestModalOpen, setManifestModalOpen] = useState(false);
+  const [manifestPeriodFilter, setManifestPeriodFilter] = useState<
+    "all" | "current_month" | "30d" | "90d"
+  >("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -191,6 +246,45 @@ export default function Inventory() {
   const calcUnitCost = (totalPurchaseValue: number, stockQuantity: number) =>
     stockQuantity > 0 ? totalPurchaseValue / stockQuantity : 0;
 
+  const parseManifestSummary = (
+    docRow: ManifestDocumentRow
+  ): ManifestNoteSummary => {
+    try {
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(docRow.xmlContent || "", "text/xml");
+      const getTag = (scope: Document | Element, tag: string) =>
+        scope.getElementsByTagName(tag)?.[0]?.textContent?.trim() || "";
+      const ide = xml.getElementsByTagName("ide")?.[0] || xml;
+      const emit = xml.getElementsByTagName("emit")?.[0] || xml;
+
+      const nfeNumber = getTag(ide, "nNF");
+      const nfeSeries = getTag(ide, "serie");
+      const issuedAt = getTag(ide, "dhEmi") || getTag(ide, "dEmi") || null;
+      const totalNode = xml.getElementsByTagName("ICMSTot")?.[0] || xml;
+      const noteTotalRaw = getTag(totalNode, "vNF") || getTag(xml, "vNF");
+      const issuerName = getTag(emit, "xNome") || "Fornecedor";
+      const noteTotal = Number(String(noteTotalRaw || "").replace(",", "."));
+
+      return {
+        ...docRow,
+        issuerName,
+        nfeNumber,
+        nfeSeries,
+        issuedAt,
+        noteTotal: Number.isFinite(noteTotal) ? noteTotal : null,
+      };
+    } catch {
+      return {
+        ...docRow,
+        issuerName: "Fornecedor",
+        nfeNumber: "",
+        nfeSeries: "",
+        issuedAt: null,
+        noteTotal: null,
+      };
+    }
+  };
+
   const { data: products = [], isLoading } = useQuery({
     queryKey: ["/api/products"],
     queryFn: async () => {
@@ -200,40 +294,87 @@ export default function Inventory() {
     },
   });
 
-  const handleSendPdvLoad = async () => {
-    setIsSendingPdvLoad(true);
-    try {
-      const response = await fetch("/api/pdv/load", { method: "POST" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.error || "Falha ao enviar carga do PDV");
+  const {
+    data: manifestDocuments = [],
+    isLoading: isLoadingManifestDocuments,
+    error: manifestDocumentsError,
+    refetch: refetchManifestDocuments,
+  } = useQuery<ManifestDocumentRow[]>({
+    queryKey: ["/api/fiscal/manifestation"],
+    queryFn: async () => {
+      const res = await fetch("/api/fiscal/manifestation");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Falha ao listar notas recebidas");
       }
-      toast.success(
-        `Carga PDV enviada: ${data.products ?? 0} produtos e ${data.paymentMethods ?? 0} pagamentos`
-      );
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Erro ao enviar carga do PDV"
-      );
-    } finally {
-      setIsSendingPdvLoad(false);
-    }
-  };
+      return res.json();
+    },
+    retry: false,
+  });
 
-  const handleXmlImport = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const manifestNotes = useMemo(
+    () => manifestDocuments.map(parseManifestSummary),
+    [manifestDocuments]
+  );
 
-    if (!file.name.toLowerCase().endsWith(".xml")) {
-      toast.error("Por favor, selecione um arquivo XML válido");
-      return;
-    }
+  const filteredManifestNotes = useMemo(() => {
+    const search = manifestSearchTerm.trim().toLowerCase();
+    const now = new Date();
+    const startOfCurrentMonth = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0
+    );
+    const cutoffDate =
+      manifestPeriodFilter === "30d"
+        ? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+        : manifestPeriodFilter === "90d"
+        ? new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+        : null;
 
+    return manifestNotes.filter((note) => {
+      const searchable = [
+        note.issuerName,
+        note.nfeNumber,
+        note.nfeSeries,
+        note.documentKey,
+        note.issuerCnpj,
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (search && !searchable.includes(search)) return false;
+
+      const referenceDateRaw = note.issuedAt || note.downloadedAt || note.createdAt;
+      const referenceDate = referenceDateRaw ? new Date(referenceDateRaw) : null;
+      const hasValidDate =
+        referenceDate instanceof Date && !Number.isNaN(referenceDate.getTime());
+
+      if (manifestPeriodFilter === "current_month") {
+        if (!hasValidDate) return false;
+        return referenceDate >= startOfCurrentMonth;
+      }
+
+      if (cutoffDate) {
+        if (!hasValidDate) return false;
+        return referenceDate >= cutoffDate;
+      }
+
+      return true;
+    });
+  }, [manifestNotes, manifestSearchTerm, manifestPeriodFilter]);
+
+  const selectedManifestNote =
+    filteredManifestNotes.find((note) => note.id === selectedManifestNoteId) ||
+    manifestNotes.find((note) => note.id === selectedManifestNoteId) ||
+    null;
+
+  const openXmlPreviewFromContent = async (xmlContent: string) => {
     setIsImporting(true);
     try {
-      const xmlContent = await file.text();
       const res = await fetch("/api/products/preview-xml", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -292,30 +433,17 @@ export default function Inventory() {
             icmsValue: String((product as any).icmsValue || "0"),
             ipiValue: String((product as any).ipiValue || "0"),
             icmsStValue: String((product as any).icmsStValue || "0"),
-            icmsAliquot: Number(
-              (product as any).icmsAliquot || 0
-            ),
-            icmsReduction: Number(
-              (product as any).icmsReduction || 0
-            ),
-            ipiAliquot: Number(
-              (product as any).ipiAliquot || 0
-            ),
-            pisAliquot: Number(
-              (product as any).pisAliquot || 0
-            ),
-            cofinsAliquot: Number(
-              (product as any).cofinsAliquot || 0
-            ),
-            issAliquot: Number(
-              (product as any).issAliquot || 0
-            ),
-            irrfAliquot: Number(
-              (product as any).irrfAliquot || 0
-            ),
+            icmsAliquot: Number((product as any).icmsAliquot || 0),
+            icmsReduction: Number((product as any).icmsReduction || 0),
+            ipiAliquot: Number((product as any).ipiAliquot || 0),
+            pisAliquot: Number((product as any).pisAliquot || 0),
+            cofinsAliquot: Number((product as any).cofinsAliquot || 0),
+            issAliquot: Number((product as any).issAliquot || 0),
+            irrfAliquot: Number((product as any).irrfAliquot || 0),
           };
         }
       );
+
       setXmlPreviewProducts(normalizedProducts);
       if (result.noteTotals) {
         setXmlReferenceTotals({
@@ -330,17 +458,120 @@ export default function Inventory() {
         setXmlReferenceTotals(null);
       }
       setXmlPreviewOpen(true);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleSendPdvLoad = async () => {
+    setIsSendingPdvLoad(true);
+    try {
+      const response = await fetch("/api/pdv/load", { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Falha ao enviar carga do PDV");
+      }
+      toast.success(
+        `Carga PDV enviada: ${data.products ?? 0} produtos e ${data.paymentMethods ?? 0} pagamentos`
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao enviar carga do PDV"
+      );
+    } finally {
+      setIsSendingPdvLoad(false);
+    }
+  };
+
+  const handleXmlImport = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith(".xml")) {
+      toast.error("Por favor, selecione um arquivo XML válido");
+      return;
+    }
+
+    try {
+      const xmlContent = await file.text();
+      await openXmlPreviewFromContent(xmlContent);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Erro ao processar XML"
       );
     } finally {
-      setIsImporting(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
     }
   };
+
+  const handleSyncManifestNotes = async (accessKey?: string) => {
+    setIsSyncingManifestNotes(true);
+    try {
+      const sanitizedAccessKey = String(accessKey || "").replace(/\D/g, "");
+      const res = await fetch("/api/fiscal/manifestation/distribute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          sanitizedAccessKey ? { accessKey: sanitizedAccessKey } : {}
+        ),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setManifestLastSyncResult(result || null);
+        throw new Error(result.error || "Falha ao buscar notas na SEFAZ");
+      }
+      setManifestLastSyncResult(result || null);
+      await refetchManifestDocuments();
+      toast.success(
+        sanitizedAccessKey
+          ? `Consulta por chave concluida: ${result.documents?.length ?? 0} documento(s) retornado(s)`
+          : `Sincronizacao concluida: ${result.documents?.length ?? 0} documento(s) retornado(s)`
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao sincronizar notas"
+      );
+    } finally {
+      setIsSyncingManifestNotes(false);
+    }
+  };
+
+  const handleImportSelectedManifestNote = async () => {
+    if (!selectedManifestNote?.xmlContent) {
+      toast.error("Selecione uma nota para importar");
+      return;
+    }
+    try {
+      await openXmlPreviewFromContent(selectedManifestNote.xmlContent);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Erro ao importar nota"
+      );
+    }
+  };
+
+  const handleSearchManifestByAccessKey = async () => {
+    const sanitized = manifestAccessKeySearch.replace(/\D/g, "");
+    if (sanitized.length !== 44) {
+      toast.error("Informe uma chave de NF-e com 44 digitos");
+      return;
+    }
+    await handleSyncManifestNotes(sanitized);
+  };
+
+  const manifestSchemasSummary = useMemo(() => {
+    const docs = manifestLastSyncResult?.documents || [];
+    const counts = new Map<string, number>();
+    for (const doc of docs) {
+      const schema = String(doc.schema || "desconhecido");
+      counts.set(schema, (counts.get(schema) || 0) + 1);
+    }
+    return Array.from(counts.entries());
+  }, [manifestLastSyncResult]);
 
   const handleConfirmImport = async () => {
     if (xmlTotalsComparison && !xmlTotalsComparison.canImport) {
@@ -877,6 +1108,14 @@ export default function Inventory() {
               )}
               Enviar Carga PDV
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => setManifestModalOpen(true)}
+              data-testid="button-open-manifest-notes"
+            >
+              <ReceiptText className="mr-2 h-4 w-4" />
+              Notas SEFAZ
+            </Button>
             <Button onClick={handleNewProduct}>
               <Plus className="mr-2 h-4 w-4" /> Novo Produto
             </Button>
@@ -1200,6 +1439,259 @@ export default function Inventory() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCategoriesOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={manifestModalOpen} onOpenChange={setManifestModalOpen}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ReceiptText className="h-5 w-5" />
+              Notas emitidas para seu CNPJ
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 overflow-y-auto pr-1">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                Busque notas recebidas via SEFAZ, selecione uma e importe os
+                produtos.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => handleSyncManifestNotes()}
+                  disabled={isSyncingManifestNotes}
+                >
+                  {isSyncingManifestNotes ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  {isSyncingManifestNotes ? "Buscando..." : "Buscar na SEFAZ"}
+                </Button>
+                <Button
+                  onClick={async () => {
+                    await handleImportSelectedManifestNote();
+                    if (selectedManifestNote) setManifestModalOpen(false);
+                  }}
+                  disabled={!selectedManifestNote || isImporting}
+                >
+                  {isImporting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileUp className="mr-2 h-4 w-4" />
+                  )}
+                  Importar produtos da nota
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-col lg:flex-row gap-3">
+              <div className="relative w-full lg:max-w-sm">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por fornecedor, numero, serie, chave..."
+                  className="pl-9"
+                  value={manifestSearchTerm}
+                  onChange={(e) => setManifestSearchTerm(e.target.value)}
+                />
+              </div>
+              <div className="flex w-full lg:max-w-[430px] gap-2">
+                <Input
+                  placeholder="Consultar por chave NF-e (44 digitos)"
+                  value={manifestAccessKeySearch}
+                  onChange={(e) =>
+                    setManifestAccessKeySearch(
+                      e.target.value.replace(/\D/g, "").slice(0, 44)
+                    )
+                  }
+                  className="font-mono"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSearchManifestByAccessKey}
+                  disabled={isSyncingManifestNotes}
+                >
+                  {isSyncingManifestNotes ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="mr-2 h-4 w-4" />
+                  )}
+                  Consultar chave
+                </Button>
+              </div>
+              <Select
+                value={manifestPeriodFilter}
+                onValueChange={(value) =>
+                  setManifestPeriodFilter(
+                    value as "all" | "current_month" | "30d" | "90d"
+                  )
+                }
+              >
+                <SelectTrigger className="w-full lg:w-[220px]">
+                  <SelectValue placeholder="Periodo" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todo periodo</SelectItem>
+                  <SelectItem value="current_month">Este mes</SelectItem>
+                  <SelectItem value="30d">Ultimos 30 dias</SelectItem>
+                  <SelectItem value="90d">Ultimos 90 dias</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="text-sm text-muted-foreground flex items-center">
+                {manifestDocumentsError
+                  ? "Nao foi possivel carregar notas"
+                  : isLoadingManifestDocuments
+                  ? "Carregando notas salvas..."
+                  : `${filteredManifestNotes.length} nota(s) encontrada(s)`}
+              </div>
+            </div>
+
+            <div className="max-h-[360px] overflow-auto rounded-md border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[44px]"></TableHead>
+                    <TableHead>Numero</TableHead>
+                    <TableHead>Fornecedor</TableHead>
+                    <TableHead>Data emissao</TableHead>
+                    <TableHead>Valor</TableHead>
+                    <TableHead>Chave</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {manifestDocumentsError ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-6">
+                        <span className="text-muted-foreground">
+                          {manifestDocumentsError instanceof Error
+                            ? manifestDocumentsError.message
+                            : "Erro ao carregar notas recebidas"}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredManifestNotes.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-6">
+                        <span className="text-muted-foreground">
+                          Nenhuma nota salva. Clique em "Buscar na SEFAZ" para
+                          sincronizar.
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredManifestNotes.map((note) => (
+                      <TableRow
+                        key={note.id}
+                        className="cursor-pointer"
+                        onClick={() => setSelectedManifestNoteId(note.id)}
+                        data-state={
+                          selectedManifestNoteId === note.id
+                            ? "selected"
+                            : undefined
+                        }
+                      >
+                        <TableCell>
+                          <input
+                            type="radio"
+                            checked={selectedManifestNoteId === note.id}
+                            onChange={() => setSelectedManifestNoteId(note.id)}
+                            aria-label={`Selecionar nota ${note.nfeNumber || note.documentKey}`}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {note.nfeSeries || note.nfeNumber
+                            ? `${note.nfeSeries || "-"} / ${note.nfeNumber || "-"}`
+                            : "-"}
+                        </TableCell>
+                        <TableCell className="max-w-[240px] truncate">
+                          {note.issuerName}
+                        </TableCell>
+                        <TableCell>
+                          {note.issuedAt
+                            ? new Date(note.issuedAt).toLocaleDateString("pt-BR")
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          {typeof note.noteTotal === "number"
+                            ? note.noteTotal.toLocaleString("pt-BR", {
+                                style: "currency",
+                                currency: "BRL",
+                              })
+                            : "-"}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {note.documentKey || "-"}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            {manifestLastSyncResult && (
+              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge
+                    variant={
+                      manifestLastSyncResult.success ? "default" : "destructive"
+                    }
+                  >
+                    {manifestLastSyncResult.status || "sem-status"}
+                  </Badge>
+                  <span className="text-sm">
+                    {manifestLastSyncResult.message || "Sem mensagem da SEFAZ"}
+                  </span>
+                </div>
+
+                <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+                  <span>
+                    `usedUltNSU`: {manifestLastSyncResult.usedUltNSU || "-"}
+                  </span>
+                  <span>`lastNSU`: {manifestLastSyncResult.lastNSU || "-"}</span>
+                  <span>`maxNSU`: {manifestLastSyncResult.maxNSU || "-"}</span>
+                  <span>`docs`: {manifestLastSyncResult.documents?.length ?? 0}</span>
+                </div>
+
+                {manifestSchemasSummary.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {manifestSchemasSummary.map(([schema, count]) => (
+                      <Badge key={schema} variant="outline">
+                        {schema}: {count}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+
+                {manifestLastSyncResult.documents &&
+                  manifestLastSyncResult.documents.length > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      {manifestLastSyncResult.documents
+                        .slice(0, 3)
+                        .map((doc) => doc.documentKey || doc.nsu || "-")
+                        .join(" | ")}
+                      {manifestLastSyncResult.documents.length > 3 ? " ..." : ""}
+                    </div>
+                  )}
+
+                {manifestLastSyncResult.batches &&
+                  manifestLastSyncResult.batches.length > 1 && (
+                    <div className="text-xs text-muted-foreground">
+                      Lotes consultados: {manifestLastSyncResult.batches.length}
+                    </div>
+                  )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t pt-4">
+            <Button variant="outline" onClick={() => setManifestModalOpen(false)}>
               Fechar
             </Button>
           </DialogFooter>

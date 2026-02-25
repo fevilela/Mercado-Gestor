@@ -518,6 +518,7 @@ export const companySettings = pgTable("company_settings", {
   sefazMunicipioCodigo: text("sefaz_municipio_codigo"),
   sefazQrCodeUrlHomologacao: text("sefaz_qr_url_homologacao"),
   sefazQrCodeUrlProducao: text("sefaz_qr_url_producao"),
+  manifestLastNsu: text("manifest_last_nsu"),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 

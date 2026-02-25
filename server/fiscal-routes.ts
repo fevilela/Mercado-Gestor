@@ -4384,6 +4384,14 @@ router.post(
       }
 
       const settings = await storage.getCompanySettings(companyId);
+      const requestedUltNsu = String(req.body?.ultNSU || "").replace(/\D/g, "");
+      const storedUltNsu = String(settings?.manifestLastNsu || "").replace(
+        /\D/g,
+        "",
+      );
+      const resolvedUltNsu = requestedUltNsu || storedUltNsu || undefined;
+      const requestedAccessKey =
+        String(req.body?.accessKey || "").replace(/\D/g, "") || undefined;
       const resolvedEnvironment = await resolveSefazEnvironment(companyId);
       const ufNormalized = String(
         req.body?.uf || settings?.sefazUf || company.state || "SP",
@@ -4403,11 +4411,75 @@ router.post(
         cnpj: receiverCnpj,
       });
 
-      const distributeResult = await sefazService.distributeDFe({
-        ultNSU: String(req.body?.ultNSU || "").replace(/\D/g, "") || undefined,
-        accessKey:
-          String(req.body?.accessKey || "").replace(/\D/g, "") || undefined,
+      const distributionBatches: Array<{
+        status?: string;
+        message?: string;
+        lastNSU?: string;
+        maxNSU?: string;
+        documentsCount: number;
+      }> = [];
+      const aggregatedDocuments: Array<{
+        nsu?: string;
+        schema?: string;
+        documentKey?: string;
+        issuerCnpj?: string;
+        receiverCnpj?: string;
+        xmlContent: string;
+      }> = [];
+      const seenDocs = new Set<string>();
+      let distributeResult = await sefazService.distributeDFe({
+        ultNSU: requestedAccessKey
+          ? undefined
+          : resolvedUltNsu || "000000000000000",
+        accessKey: requestedAccessKey,
       });
+
+      distributionBatches.push({
+        status: distributeResult.status,
+        message: distributeResult.message,
+        lastNSU: distributeResult.lastNSU,
+        maxNSU: distributeResult.maxNSU,
+        documentsCount: distributeResult.documents.length,
+      });
+
+      for (const doc of distributeResult.documents) {
+        const identity = `${doc.nsu || ""}|${doc.documentKey || ""}|${doc.schema || ""}`;
+        if (seenDocs.has(identity)) continue;
+        seenDocs.add(identity);
+        aggregatedDocuments.push(doc);
+      }
+
+      if (!requestedAccessKey) {
+        let nextUltNsu = distributeResult.lastNSU;
+        let batches = 1;
+        while (
+          distributeResult.success &&
+          nextUltNsu &&
+          distributeResult.maxNSU &&
+          nextUltNsu !== distributeResult.maxNSU &&
+          batches < 20
+        ) {
+          const nextResult = await sefazService.distributeDFe({
+            ultNSU: nextUltNsu,
+          });
+          distributeResult = nextResult;
+          distributionBatches.push({
+            status: nextResult.status,
+            message: nextResult.message,
+            lastNSU: nextResult.lastNSU,
+            maxNSU: nextResult.maxNSU,
+            documentsCount: nextResult.documents.length,
+          });
+          for (const doc of nextResult.documents) {
+            const identity = `${doc.nsu || ""}|${doc.documentKey || ""}|${doc.schema || ""}`;
+            if (seenDocs.has(identity)) continue;
+            seenDocs.add(identity);
+            aggregatedDocuments.push(doc);
+          }
+          nextUltNsu = nextResult.lastNSU;
+          batches += 1;
+        }
+      }
 
       const eventType = String(req.body?.eventType || "").trim() as
         | "ciencia_da_operacao"
@@ -4448,7 +4520,7 @@ router.post(
         eventId?: string;
       }> = [];
 
-      for (const doc of distributeResult.documents) {
+      for (const doc of aggregatedDocuments) {
         const documentKey = String(doc.documentKey || "").replace(/\D/g, "");
         const issuerCnpj = String(doc.issuerCnpj || "").replace(/\D/g, "");
         const xmlContent = String(doc.xmlContent || "");
@@ -4495,12 +4567,19 @@ router.post(
         }
       }
 
+      if (distributeResult.lastNSU) {
+        await storage.updateCompanySettings(companyId, {
+          manifestLastNsu: String(distributeResult.lastNSU).replace(/\D/g, ""),
+        });
+      }
+
       await logSefazTransmission({
         companyId,
         action: "manifestation-distribute",
         environment: resolvedEnvironment,
         requestPayload: {
-          ultNSU: req.body?.ultNSU || null,
+          ultNSU: resolvedUltNsu || null,
+          ultNSUSource: requestedUltNsu ? "request" : storedUltNsu ? "stored" : "none",
           accessKey: req.body?.accessKey || null,
           autoManifest: runAutoManifest,
           eventType: normalizedEventType,
@@ -4510,7 +4589,8 @@ router.post(
           message: distributeResult.message,
           lastNSU: distributeResult.lastNSU,
           maxNSU: distributeResult.maxNSU,
-          documentsCount: distributeResult.documents.length,
+          documentsCount: aggregatedDocuments.length,
+          batches: distributionBatches,
           persistedCount: persisted.filter((item) => item.saved).length,
           manifestations,
         },
@@ -4521,15 +4601,17 @@ router.post(
         success: distributeResult.success,
         status: distributeResult.status,
         message: distributeResult.message,
+        usedUltNSU: resolvedUltNsu || null,
         lastNSU: distributeResult.lastNSU,
         maxNSU: distributeResult.maxNSU,
-        documents: distributeResult.documents.map((doc) => ({
+        documents: aggregatedDocuments.map((doc) => ({
           nsu: doc.nsu,
           schema: doc.schema,
           documentKey: doc.documentKey,
           issuerCnpj: doc.issuerCnpj,
           receiverCnpj: doc.receiverCnpj,
         })),
+        batches: distributionBatches,
         persisted,
         manifestations,
       });

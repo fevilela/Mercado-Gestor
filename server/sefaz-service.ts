@@ -374,7 +374,10 @@ export class SefazService {
     this.config = config;
   }
 
-  private buildTools(mod: "55" | "65") {
+  private buildTools(
+    mod: "55" | "65",
+    options?: { skipXmllint?: boolean }
+  ) {
     patchPemPkcs12ReaderWithForge();
 
     const resolveOpenSSLPath = () => {
@@ -452,9 +455,12 @@ export class SefazService {
       timeout:
         this.config.timeout ??
         Number(process.env.SEFAZ_REQUEST_TIMEOUT_SECONDS || "60"),
-      xmllint: this.config.xmllintPath ?? process.env.XMLLINT_PATH ?? "xmllint",
       CNPJ: this.config.cnpj ?? "",
     };
+    if (!options?.skipXmllint) {
+      toolsConfig.xmllint =
+        this.config.xmllintPath ?? process.env.XMLLINT_PATH ?? "xmllint";
+    }
     const opensslPath = resolveOpenSSLPath();
     if (opensslPath) {
       toolsConfig.openssl = opensslPath;
@@ -1065,12 +1071,94 @@ export class SefazService {
     accessKey?: string;
   }): Promise<DistributionResult> {
     try {
-      const tools = this.buildTools("55");
-      const response = await tools.sefazDistDFe({
-        ultNSU: params?.ultNSU,
-        chNFe: params?.accessKey,
+      const accessKey = String(params?.accessKey || "").replace(/\D/g, "") || undefined;
+      const ultNSU = String(params?.ultNSU || "").replace(/\D/g, "") || undefined;
+      if (!accessKey && !ultNSU) {
+        throw new Error("Informe ultNSU ou chave de acesso para distribuicao DF-e");
+      }
+
+      const envKey = this.config.environment === "producao" ? "producao" : "homologacao";
+      const eventEndpoints = resolveSefazEventEndpoints("AN", "4.00");
+      const distEndpoint =
+        eventEndpoints?.mod55?.[envKey]?.NFeDistribuicaoDFe ||
+        (envKey === "producao"
+          ? "https://www1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx"
+          : "https://hom.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx");
+      if (!distEndpoint) {
+        throw new Error("Endpoint NFeDistribuicaoDFe nao encontrado");
+      }
+
+      const certTools = this.buildTools("55", { skipXmllint: true });
+      const cert = (await certTools.getCertificado()) as {
+        key?: string;
+        cert?: string;
+        ca?: string[];
+      };
+
+      const ufToCode: Record<string, string> = {
+        RO: "11", AC: "12", AM: "13", RR: "14", PA: "15", AP: "16", TO: "17",
+        MA: "21", PI: "22", CE: "23", RN: "24", PB: "25", PE: "26", AL: "27",
+        SE: "28", BA: "29", MG: "31", ES: "32", RJ: "33", SP: "35", PR: "41",
+        SC: "42", RS: "43", MS: "50", MT: "51", GO: "52", DF: "53",
+      };
+      const cUFAutor = ufToCode[String(this.config.uf || "").toUpperCase()] || "35";
+      const tpAmb = this.config.environment === "producao" ? "1" : "2";
+      const cnpj = String(this.config.cnpj || "").replace(/\D/g, "");
+      if (cnpj.length !== 14) {
+        throw new Error("CNPJ da empresa invalido para distribuicao DF-e");
+      }
+
+      const distSelector = accessKey
+        ? `<consChNFe><chNFe>${accessKey}</chNFe></consChNFe>`
+        : `<distNSU><ultNSU>${String(ultNSU).padStart(15, "0")}</ultNSU></distNSU>`;
+
+      const body =
+        `<?xml version="1.0" encoding="utf-8"?>` +
+        `<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">` +
+        `<soap:Body>` +
+        `<nfeDistDFeInteresse xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">` +
+        `<nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">` +
+        `<distDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">` +
+        `<tpAmb>${tpAmb}</tpAmb>` +
+        `<cUFAutor>${cUFAutor}</cUFAutor>` +
+        `<CNPJ>${cnpj}</CNPJ>` +
+        distSelector +
+        `</distDFeInt>` +
+        `</nfeDadosMsg>` +
+        `</nfeDistDFeInteresse>` +
+        `</soap:Body>` +
+        `</soap:Envelope>`;
+
+      const xml = await new Promise<string>((resolve, reject) => {
+        const req = https.request(
+          distEndpoint,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/soap+xml; charset=utf-8",
+              "Content-Length": Buffer.byteLength(body),
+            },
+            rejectUnauthorized: false,
+            key: cert?.key,
+            cert: cert?.cert,
+            ca: cert?.ca,
+          },
+          (res) => {
+            let data = "";
+            res.on("data", (chunk) => {
+              data += String(chunk);
+            });
+            res.on("end", () => resolve(String(data || "")));
+          },
+        );
+        req.setTimeout((this.config.timeout ?? 60) * 1000, () => {
+          req.destroy(new Error("Timeout na distribuicao DF-e"));
+        });
+        req.on("error", reject);
+        req.write(body);
+        req.end();
       });
-      const xml = String(response || "");
+
       const status = extractTag("cStat", xml) || "0";
       const message = extractTag("xMotivo", xml) || "Resposta sem xMotivo";
       const lastNSU = extractTag("ultNSU", xml) || undefined;
@@ -1110,12 +1198,24 @@ export class SefazService {
         rawResponse: xml,
       };
     } catch (error) {
+      let detailedMessage = "Erro na distribuicao de DF-e";
+      if (error instanceof Error) {
+        detailedMessage = error.message || detailedMessage;
+      } else if (typeof error === "string" && error.trim()) {
+        detailedMessage = error.trim();
+      } else if (error && typeof error === "object") {
+        try {
+          const serialized = JSON.stringify(error);
+          if (serialized && serialized !== "{}") {
+            detailedMessage = serialized;
+          }
+        } catch {
+          // keep fallback message
+        }
+      }
       return {
         success: false,
-        message:
-          error instanceof Error
-            ? error.message
-            : "Erro na distribuicao de DF-e",
+        message: detailedMessage,
         documents: [],
       };
     }
@@ -1132,7 +1232,7 @@ export class SefazService {
     sequence?: number;
   }): Promise<ManifestationResult> {
     try {
-      const tools = this.buildTools("55");
+      const tools = this.buildTools("55", { skipXmllint: true });
       const eventMap: Record<string, string> = {
         ciencia_da_operacao: "210210",
         confirmacao_da_operacao: "210200",
