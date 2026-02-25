@@ -65,7 +65,7 @@ interface NFeHistoryRecord {
   environment: "homologacao" | "producao";
   xmlContent: string;
   protocol: string;
-  status: "gerada" | "processando" | "autorizada" | "cancelada";
+  status: "rascunho" | "gerada" | "processando" | "autorizada" | "cancelada";
   canSend: boolean;
   canCancel: boolean;
   createdAt: string;
@@ -1211,6 +1211,7 @@ export default function FiscalCentralPage() {
                           const rowCanSend = canSendNfe(doc);
                           const rowCanCancel = canCancelNfe(doc);
                           const rowCanCce = canCceNfe(doc);
+                          const rowHasDanfe = String(doc.status || "").toLowerCase() !== "rascunho";
                           return (
                             <TableRow key={doc.id}>
                               <TableCell>
@@ -1264,11 +1265,13 @@ export default function FiscalCentralPage() {
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() => openNfePdf(doc.id)}
+                                      disabled={!rowHasDanfe}
                                     >
                                       Ver DANFE (PDF)
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() => printNfeDanfe(doc.id)}
+                                      disabled={!rowHasDanfe}
                                     >
                                       Imprimir DANFE
                                     </DropdownMenuItem>

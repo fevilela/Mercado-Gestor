@@ -2009,6 +2009,51 @@ router.post("/nfse/validate", async (req, res) => {
   }
 });
 
+router.post("/nfe/draft", requireAuth, async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ error: "Empresa nao identificada" });
+    }
+
+    const environment = await resolveSefazEnvironment(companyId);
+    const { summary = {}, snapshot = {} } = req.body || {};
+
+    const [draftLog] = await db
+      .insert(sefazTransmissionLogs)
+      .values({
+        companyId,
+        action: "draft",
+        environment,
+        requestPayload: {
+          snapshot,
+        },
+        responsePayload: {
+          draft: true,
+          summary: {
+            nfeNumber: summary?.nfeNumber ?? null,
+            nfeSeries: summary?.nfeSeries ?? "1",
+            customerName: summary?.customerName ?? null,
+            noteTotal: summary?.noteTotal ?? null,
+          },
+        },
+        success: true,
+      })
+      .returning();
+
+    return res.json({
+      success: true,
+      id: draftLog?.id ?? null,
+      message: "Rascunho de NF-e salvo",
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error:
+        error instanceof Error ? error.message : "Erro ao salvar rascunho de NF-e",
+    });
+  }
+});
+
 router.post(
   "/nfse/emit",
   requireAuth,
@@ -3189,7 +3234,7 @@ router.post(
   },
 );
 
-// Historico de NF-e geradas/submetidas/canceladas
+// Historico de NF-e (rascunhos/geradas/submetidas/canceladas)
 router.get("/nfe/history", requireAuth, async (req, res) => {
   try {
     const companyId = getCompanyId(req);
@@ -3204,6 +3249,18 @@ router.get("/nfe/history", requireAuth, async (req, res) => {
         and(
           eq(sefazTransmissionLogs.companyId, companyId),
           eq(sefazTransmissionLogs.action, "generate"),
+        ),
+      )
+      .orderBy(desc(sefazTransmissionLogs.createdAt))
+      .limit(200);
+
+    const draftLogs = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(
+        and(
+          eq(sefazTransmissionLogs.companyId, companyId),
+          eq(sefazTransmissionLogs.action, "draft"),
         ),
       )
       .orderBy(desc(sefazTransmissionLogs.createdAt))
@@ -3248,7 +3305,7 @@ router.get("/nfe/history", requireAuth, async (req, res) => {
       latestCancelByKey.set(key, log);
     }
 
-    const history = logs.map((log) => {
+    const generatedHistory = logs.map((log) => {
       const responsePayload = (log.responsePayload || {}) as any;
       const documentKey = resolveDocumentKeyFromLog(log);
       const xmlContent = String(responsePayload?.xml || "");
@@ -3282,6 +3339,31 @@ router.get("/nfe/history", requireAuth, async (req, res) => {
         updatedAt:
           cancel?.createdAt || submit?.createdAt || log.createdAt || new Date(),
       };
+    });
+    const draftsHistory = draftLogs.map((log) => {
+      const responsePayload = (log.responsePayload || {}) as any;
+      const summary = (responsePayload?.summary || {}) as any;
+
+      return {
+        id: log.id,
+        documentKey: null,
+        nfeNumber: summary?.nfeNumber ? String(summary.nfeNumber) : null,
+        nfeSeries: summary?.nfeSeries ? String(summary.nfeSeries) : "1",
+        environment: log.environment,
+        xmlContent: "",
+        protocol: "",
+        status: "rascunho",
+        canSend: false,
+        canCancel: false,
+        createdAt: log.createdAt,
+        updatedAt: log.createdAt || new Date(),
+      };
+    });
+
+    const history = [...draftsHistory, ...generatedHistory].sort((a, b) => {
+      const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return bTime - aTime;
     });
 
     res.json(history);

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Layout from "@/components/layout";
 import {
@@ -77,6 +77,37 @@ interface Customer {
   personType?: string;
   isIcmsContributor?: boolean;
 }
+
+const NFE_DRAFT_STORAGE_KEY = "mercado-gestor:nfe-draft:v1";
+const BRAZIL_UF_BY_NAME: Record<string, string> = {
+  ACRE: "AC",
+  ALAGOAS: "AL",
+  AMAPA: "AP",
+  AMAZONAS: "AM",
+  BAHIA: "BA",
+  CEARA: "CE",
+  "DISTRITO FEDERAL": "DF",
+  "ESPIRITO SANTO": "ES",
+  GOIAS: "GO",
+  MARANHAO: "MA",
+  "MATO GROSSO": "MT",
+  "MATO GROSSO DO SUL": "MS",
+  "MINAS GERAIS": "MG",
+  PARA: "PA",
+  PARAIBA: "PB",
+  PARANA: "PR",
+  PERNAMBUCO: "PE",
+  PIAUI: "PI",
+  "RIO DE JANEIRO": "RJ",
+  "RIO GRANDE DO NORTE": "RN",
+  "RIO GRANDE DO SUL": "RS",
+  RONDONIA: "RO",
+  RORAIMA: "RR",
+  "SANTA CATARINA": "SC",
+  "SAO PAULO": "SP",
+  SERGIPE: "SE",
+  TOCANTINS: "TO",
+};
 
 interface Supplier {
   id: number;
@@ -417,6 +448,11 @@ export default function FiscalDocuments() {
     contribuinte: "",
   });
   const [productPickerDialogOpen, setProductPickerDialogOpen] = useState(false);
+  const [nfeActionDebug, setNfeActionDebug] = useState("");
+  const setNfeActionStatus = (message: string) => {
+    setNfeActionDebug(message);
+    console.log(`[NFE UI] ${message}`);
+  };
   const [nfeResponsibleTech, setNfeResponsibleTech] = useState({
     cnpj: "",
     name: "",
@@ -524,6 +560,21 @@ export default function FiscalDocuments() {
   };
 
   const round2 = (value: number) => Number(value.toFixed(2));
+  const normalizeUf = (value: unknown, fallback = "MG") => {
+    const raw = String(value || "")
+      .trim()
+      .toUpperCase();
+    if (/^[A-Z]{2}$/.test(raw)) return raw;
+    const normalizedName = raw
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ");
+    return BRAZIL_UF_BY_NAME[normalizedName] || fallback;
+  };
+  const extractCfopCode = (value: unknown) => {
+    const match = String(value || "").match(/\b(\d{4})\b/);
+    return match?.[1] || "";
+  };
   const addDaysToDateString = (baseDate: string, days: number) => {
     const safeBase = /^\d{4}-\d{2}-\d{2}$/.test(baseDate) ? baseDate : currentDate;
     const [year, month, day] = safeBase.split("-").map(Number);
@@ -691,13 +742,19 @@ export default function FiscalDocuments() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const jsonError = await res.json().catch(() => null);
+        if (jsonError?.error) throw new Error(String(jsonError.error));
+        throw new Error(await res.text());
+      }
       return res.json();
     },
     onSuccess: () => {
+      setNfeActionStatus("NF-e validada com sucesso");
       toast.success("NF-e validada com sucesso!");
     },
     onError: (error) => {
+      setNfeActionStatus(`Erro na validacao: ${error.message}`);
       toast.error("Erro ao validar NF-e: " + error.message);
     },
   });
@@ -1485,6 +1542,55 @@ export default function FiscalDocuments() {
 
   const buildTaxPayload = () => buildTaxPayloadFromItems(formData.items, formData.cfopCode);
 
+  const saveNfeDraftToLocal = async (redirectToFiscalCentral = false) => {
+    try {
+      if (typeof window === "undefined") return;
+      const payload = {
+        savedAt: new Date().toISOString(),
+        formData,
+        headerTaxes,
+        nfeOps,
+        nfeIdentification,
+        nfeDestExtra,
+        nfeTransport,
+        nfePayments,
+        nfeAdditionalFields,
+        nfeResponsibleTech,
+        selectedCustomer,
+      };
+      window.localStorage.setItem(NFE_DRAFT_STORAGE_KEY, JSON.stringify(payload));
+
+      const draftRes = await fetch("/api/fiscal/nfe/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          summary: {
+            nfeSeries: "1",
+            customerName: selectedCustomer?.name || null,
+            noteTotal: round2(toAmount(headerTaxes.noteTotal)),
+          },
+          snapshot: payload,
+        }),
+      });
+
+      if (!draftRes.ok) {
+        const err = await draftRes.json().catch(() => ({}));
+        throw new Error(err?.error || "Falha ao salvar rascunho no servidor");
+      }
+
+      toast.success("Rascunho salvo com sucesso");
+      if (redirectToFiscalCentral) {
+        window.location.assign("/fiscal-central");
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? `Falha ao salvar rascunho: ${error.message}`
+          : "Falha ao salvar rascunho"
+      );
+    }
+  };
+
   const buildVisualNFeGenerateConfig = () => {
     const companyUf = String(settings?.sefazUf || settings?.state || "MG").toUpperCase();
     const companyZip = String(settings?.zipCode || "").replace(/\D/g, "");
@@ -1554,19 +1660,26 @@ export default function FiscalDocuments() {
     redirectToFiscalCentral = false,
     submitToSefaz = false
   ) => {
+    const effectiveCfopCode =
+      formData.cfopCode || extractCfopCode(nfeIdentification.naturezaOperacao);
+    setNfeActionStatus("Iniciando fechamento/emissao...");
     if (isNoteClosed) {
+      setNfeActionStatus("Bloqueado: nota ja fechada");
       toast.info("Nota ja fechada. Edite algum campo para recalcular e fechar novamente.");
       return;
     }
     if (!formData.customerId) {
+      setNfeActionStatus("Bloqueado: selecione um cliente");
       toast.error("Selecione um cliente para fechar a nota");
       return;
     }
-    if (!formData.cfopCode) {
+    if (!effectiveCfopCode) {
+      setNfeActionStatus("Bloqueado: selecione um CFOP");
       toast.error("Selecione um CFOP para fechar a nota");
       return;
     }
     if (formData.items.length === 0 || formData.items.some((i) => i.productId <= 0)) {
+      setNfeActionStatus("Bloqueado: itens sem produto selecionado");
       toast.error("Todos os itens precisam ter produto selecionado");
       return;
     }
@@ -1584,20 +1697,26 @@ export default function FiscalDocuments() {
       return aliquots.some((value) => toAmount(value) < 0);
     });
     if (invalidAliquots) {
+      setNfeActionStatus("Bloqueado: aliquotas invalidas");
       toast.error("Existem alíquotas inválidas na tributação dos itens");
       return;
     }
     if (toAmount(headerTaxes.productsTotal) < 0 || toAmount(headerTaxes.noteTotal) < 0) {
+      setNfeActionStatus("Bloqueado: totais invalidos");
       toast.error("Valores de total do cabeçalho inválidos");
       return;
     }
     if (!headerValidation.canClose) {
+      setNfeActionStatus("Bloqueado: divergencia na capa da nota");
       toast.error("A capa da nota possui divergências acima de 0,01");
       return;
     }
 
     try {
-      const calculation = await calculateTaxesMutation.mutateAsync(buildTaxPayload());
+      setNfeActionStatus("Calculando tributos...");
+      const calculation = await calculateTaxesMutation.mutateAsync(
+        buildTaxPayloadFromItems(formData.items, effectiveCfopCode)
+      );
       const totals = calculation?.totals || {};
       const expectedByHeader = {
         productsTotal: round2(toAmount(headerTaxes.productsTotal)),
@@ -1736,6 +1855,13 @@ export default function FiscalDocuments() {
         });
 
         const status = String(submitData?.status || "").trim();
+        try {
+          if (typeof window !== "undefined") {
+            window.localStorage.removeItem(NFE_DRAFT_STORAGE_KEY);
+          }
+        } catch {
+          // noop
+        }
         if (!["100", "150"].includes(status)) {
           toast.warning(
             `NF-e enviada para SEFAZ, mas retorno foi ${status || "sem status"} (${submitData?.message || "em processamento"}).`
@@ -1800,48 +1926,124 @@ export default function FiscalDocuments() {
     setNfseItems((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleValidateNFe = () => {
-    if (!formData.customerId) {
-      toast.error("Selecione um cliente");
-      return;
-    }
-    if (!formData.cfopCode) {
-      toast.error("Selecione um CFOP");
-      return;
-    }
-    if (formData.items.length === 0 || formData.items[0].productId === 0) {
-      toast.error("Adicione pelo menos um produto");
-      return;
-    }
+  const handleValidateNFe = async () => {
+    try {
+      const effectiveCfopCode =
+        formData.cfopCode || extractCfopCode(nfeIdentification.naturezaOperacao);
+      setNfeActionStatus("Iniciando validacao...");
+      if (!formData.customerId) {
+        setNfeActionStatus("Bloqueado: selecione um cliente");
+        toast.error("Selecione um cliente");
+        return;
+      }
+      if (!effectiveCfopCode) {
+        setNfeActionStatus("Bloqueado: selecione um CFOP");
+        toast.error("Selecione um CFOP");
+        return;
+      }
+      if (formData.items.length === 0 || formData.items[0].productId === 0) {
+        setNfeActionStatus("Bloqueado: adicione pelo menos um produto");
+        toast.error("Adicione pelo menos um produto");
+        return;
+      }
 
-    validateNFeMutation.mutate({
-      customerId: parseInt(formData.customerId),
-      customerType: "contribuinte",
-      originState: "SP",
-      destinyState: formData.scope === "interestadual" ? "RJ" : "SP",
-      scope: formData.scope,
-      cfopCode: formData.cfopCode,
-      items: formData.items.map((item) => ({
-        productId: item.productId,
-        description: item.description,
-        ncm: item.ncm,
-        cfop: item.cfop || formData.cfopCode,
-        csosn: item.csosn,
-        cstIcms: item.cstIcms,
-        cstIpi: item.cstIpi,
-        cstPisCofins: item.cstPisCofins,
-        quantity: parseInt(item.quantity),
-        unit: item.origin || "UN",
-        unitPrice: parseFloat(item.unitPrice),
-        totalValue: parseFloat(item.unitPrice) * parseInt(item.quantity),
-        icmsValue: 0,
-        icmsAliquot: 18,
-        piValue: 0,
-        cofinsValue: 0,
-        ipiValue: 0,
-      })),
-    });
+      const originState = normalizeUf(settings?.sefazUf || settings?.state || "MG", "MG");
+      const destinyStateBase = normalizeUf(selectedCustomer?.state || originState, originState);
+      const destinyState =
+        formData.scope === "interestadual" && destinyStateBase === originState
+          ? originState === "SP"
+            ? "RJ"
+            : "SP"
+          : destinyStateBase;
+      const isPf =
+        String(selectedCustomer?.personType || "")
+          .trim()
+          .toLowerCase() === "pf";
+      const customerType: "contribuinte" | "nao-contribuinte" | "consumidor" = isPf
+        ? "consumidor"
+        : selectedCustomer?.isIcmsContributor || nfeDestExtra.ieIndicator === "contribuinte"
+          ? "contribuinte"
+          : "nao-contribuinte";
+
+      const invalidItem = formData.items.find((item) => {
+        const ncm = String(item.ncm || "").replace(/\D/g, "");
+        return (
+          item.productId <= 0 ||
+          ncm.length !== 8 ||
+          toAmount(item.quantity) <= 0 ||
+          toAmount(item.unitPrice) <= 0
+        );
+      });
+
+      if (invalidItem) {
+        setNfeActionStatus("Bloqueado: item invalido (NCM/Qtd/Valor)");
+        toast.error(
+          "Preencha produto, NCM (8 digitos), quantidade e valor unitario antes de validar"
+        );
+        return;
+      }
+
+      setNfeActionStatus("Validando NF-e na API...");
+      toast.info("Validando NF-e...");
+
+      await validateNFeMutation.mutateAsync({
+        customerId: parseInt(formData.customerId),
+        customerType,
+        originState,
+        destinyState,
+        scope: formData.scope,
+        cfopCode: effectiveCfopCode,
+        items: formData.items.map((item) => ({
+          productId: item.productId,
+          description: item.description,
+          ncm: String(item.ncm || "").replace(/\D/g, ""),
+          cfop: item.cfop || effectiveCfopCode,
+          csosn: item.csosn || "101",
+          cstIcms: item.cstIcms || "00",
+          cstIpi: item.cstIpi || "99",
+          cstPisCofins: item.cstPisCofins || "07",
+          quantity: toAmount(item.quantity),
+          unit: "UN",
+          unitPrice: toAmount(item.unitPrice),
+          totalValue: round2(toAmount(item.unitPrice) * toAmount(item.quantity)),
+          icmsValue: 0,
+          icmsAliquot: Math.max(0, toAmount(item.icmsAliquot)),
+          piValue: 0,
+          cofinsValue: 0,
+          ipiValue: 0,
+        })),
+      });
+    } catch (error) {
+      setNfeActionStatus(
+        error instanceof Error ? `Falha ao acionar validacao: ${error.message}` : "Falha ao acionar validacao"
+      );
+      toast.error(
+        error instanceof Error ? `Falha ao acionar validacao: ${error.message}` : "Falha ao acionar validacao"
+      );
+    }
   };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(NFE_DRAFT_STORAGE_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (draft?.formData) setFormData(draft.formData);
+      if (draft?.headerTaxes) setHeaderTaxes(draft.headerTaxes);
+      if (draft?.nfeOps) setNfeOps(draft.nfeOps);
+      if (draft?.nfeIdentification) setNfeIdentification(draft.nfeIdentification);
+      if (draft?.nfeDestExtra) setNfeDestExtra(draft.nfeDestExtra);
+      if (draft?.nfeTransport) setNfeTransport(draft.nfeTransport);
+      if (Array.isArray(draft?.nfePayments)) setNfePayments(draft.nfePayments);
+      if (draft?.nfeAdditionalFields) setNfeAdditionalFields(draft.nfeAdditionalFields);
+      if (draft?.nfeResponsibleTech) setNfeResponsibleTech(draft.nfeResponsibleTech);
+      if (draft?.selectedCustomer) setSelectedCustomer(draft.selectedCustomer);
+      toast.info("Rascunho de NF-e carregado");
+    } catch {
+      // noop
+    }
+  }, []);
 
   const handleCalculateTaxes = () => {
     if (formData.items.length === 0) {
@@ -1986,12 +2188,18 @@ export default function FiscalDocuments() {
                   <TabsContent value="identificacao" className="mt-4 space-y-4">
                     <div>
                       <Label>Natureza da Operacao</Label>
-                      <SearchablePopoverSelect
-                        value={nfeIdentification.naturezaOperacao}
-                        onValueChange={(value) =>
-                          setNfeIdentification((p) => ({ ...p, naturezaOperacao: value }))
-                        }
-                        placeholder="Selecione um CFOP"
+                        <SearchablePopoverSelect
+                          value={nfeIdentification.naturezaOperacao}
+                          onValueChange={(value) =>
+                          {
+                            setNfeIdentification((p) => ({ ...p, naturezaOperacao: value }));
+                            const extractedCfop = extractCfopCode(value);
+                            if (extractedCfop) {
+                              setFormData((p) => ({ ...p, cfopCode: extractedCfop }));
+                            }
+                          }
+                          }
+                          placeholder="Selecione um CFOP"
                         searchPlaceholder="Pesquisar CFOP..."
                         options={
                           cfopCodes.length > 0
@@ -2338,27 +2546,69 @@ export default function FiscalDocuments() {
                   </TabsContent>
                 </Tabs>
 
-                <div className="rounded-lg border bg-muted/20 p-4">
+                <div className="sticky bottom-0 z-30 rounded-lg border bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Fluxo ideal: Identificacao, Destinatario, Produtos, Totais, Pagamento, Emitir</p>
                       <p className="text-sm font-semibold">Valor Total: R$ {toAmount(headerTaxes.noteTotal).toFixed(2)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Status acao: {nfeActionDebug || "Aguardando clique"}
+                      </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="pointer-events-auto flex flex-wrap gap-2">
+                      <span className="sr-only" aria-live="polite">
+                        {nfeActionDebug}
+                      </span>
                       <Button
                         type="button"
                         variant="outline"
+                        className="relative z-40"
+                        onMouseDown={() => {
+                          const msg = `mousedown rascunho ${new Date().toISOString()}`;
+                          setNfeActionDebug(msg);
+                          console.log(msg);
+                        }}
                         onClick={() => {
-                          toast.info("Rascunho salvo. Redirecionando para Central Fiscal...");
-                          window.location.assign("/fiscal-central");
+                          const msg = `click rascunho ${new Date().toISOString()}`;
+                          setNfeActionDebug(msg);
+                          console.log(msg);
+                          void saveNfeDraftToLocal(true);
                         }}
                       >
                         Salvar Rascunho
                       </Button>
-                      <Button type="button" onClick={handleValidateNFe}>Validar Nota</Button>
+                      <button
+                        type="button"
+                        className="relative z-40 inline-flex h-10 items-center justify-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                        onMouseDown={() => {
+                          const msg = `mousedown validar ${new Date().toISOString()}`;
+                          setNfeActionDebug(msg);
+                          console.log(msg);
+                        }}
+                        onClick={() => {
+                          const msg = `click validar ${new Date().toISOString()}`;
+                          setNfeActionDebug(msg);
+                          console.log(msg);
+                          void handleValidateNFe();
+                        }}
+                        disabled={validateNFeMutation.isPending}
+                      >
+                        {validateNFeMutation.isPending ? "Validando..." : "Validar Nota"}
+                      </button>
                       <Button
                         type="button"
-                        onClick={() => closeNFeNote(true, true)}
+                        className="relative z-40"
+                        onMouseDown={() => {
+                          const msg = `mousedown emitir ${new Date().toISOString()}`;
+                          setNfeActionDebug(msg);
+                          console.log(msg);
+                        }}
+                        onClick={() => {
+                          const msg = `click emitir ${new Date().toISOString()}`;
+                          setNfeActionDebug(msg);
+                          console.log(msg);
+                          void closeNFeNote(true, true);
+                        }}
                         disabled={!headerValidation.canClose}
                       >
                         Emitir NFe
