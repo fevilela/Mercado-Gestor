@@ -1600,15 +1600,21 @@ authRouter.post("/manager/company/set-active", async (req, res) => {
   try {
     const data = managerSetCompanyActiveSchema.parse(req.body);
 
-    await db
-      .update(companies)
-      .set({ isActive: data.isActive })
-      .where(eq(companies.id, data.companyId));
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+      );
 
-    await db
-      .update(users)
-      .set({ isActive: data.isActive })
-      .where(eq(users.companyId, data.companyId));
+      await tx
+        .update(companies)
+        .set({ isActive: data.isActive })
+        .where(eq(companies.id, data.companyId));
+
+      await tx
+        .update(users)
+        .set({ isActive: data.isActive })
+        .where(eq(users.companyId, data.companyId));
+    });
 
     res.json({
       message: data.isActive
@@ -2375,4 +2381,3 @@ authRouter.put("/roles/:id/permissions", async (req, res) => {
 });
 
 export { authRouter, getUserPermissions, initializePermissions };
-

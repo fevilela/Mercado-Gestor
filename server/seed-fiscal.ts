@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { cfopCodes, cstCodes, companies, fiscalTaxRules } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 export async function seedFiscalData() {
   try {
@@ -520,24 +520,29 @@ export async function seedFiscalData() {
       },
     ];
 
-    await db.insert(cfopCodes).values(cfopData).onConflictDoNothing();
-    await db.insert(cstCodes).values(cstData).onConflictDoNothing();
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ role: "service_role" })}, true)`,
+      );
 
-    // Seed baseline tax rules per company only if company has no custom rules yet.
-    const allCompanies = await db.select({ id: companies.id }).from(companies);
+      await tx.insert(cfopCodes).values(cfopData).onConflictDoNothing();
+      await tx.insert(cstCodes).values(cstData).onConflictDoNothing();
 
-    for (const company of allCompanies) {
-      const existingRule = await db
-        .select({ id: fiscalTaxRules.id })
-        .from(fiscalTaxRules)
-        .where(eq(fiscalTaxRules.companyId, company.id))
-        .limit(1);
+      // Seed baseline tax rules per company only if company has no custom rules yet.
+      const allCompanies = await tx.select({ id: companies.id }).from(companies);
 
-      if (existingRule.length > 0) {
-        continue;
-      }
+      for (const company of allCompanies) {
+        const existingRule = await tx
+          .select({ id: fiscalTaxRules.id })
+          .from(fiscalTaxRules)
+          .where(eq(fiscalTaxRules.companyId, company.id))
+          .limit(1);
 
-      await db.insert(fiscalTaxRules).values([
+        if (existingRule.length > 0) {
+          continue;
+        }
+
+        await tx.insert(fiscalTaxRules).values([
         {
           companyId: company.id,
           name: "Venda SN interna consumidor final",
@@ -593,8 +598,9 @@ export async function seedFiscalData() {
           pisAliquot: "1.65",
           cofinsAliquot: "7.60",
         },
-      ]);
-    }
+        ]);
+      }
+    });
 
     console.log("✓ Fiscal data seeded successfully");
   } catch (error) {
