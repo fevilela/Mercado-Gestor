@@ -1765,15 +1765,21 @@ authRouter.post("/complete-invite", async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(data.password, 10);
-    await db
-      .update(users)
-      .set({ password: hashedPassword })
-      .where(eq(users.id, user.id));
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: user.companyId })}, true)`,
+      );
 
-    await db
-      .update(companyOnboardingCodes)
-      .set({ usedAt: new Date() })
-      .where(eq(companyOnboardingCodes.id, invite.id));
+      await tx
+        .update(users)
+        .set({ password: hashedPassword })
+        .where(eq(users.id, user.id));
+
+      await tx
+        .update(companyOnboardingCodes)
+        .set({ usedAt: new Date() })
+        .where(eq(companyOnboardingCodes.id, invite.id));
+    });
 
     res.json({ message: "Senha criada com sucesso. Faca login para continuar." });
   } catch (error) {
@@ -1819,13 +1825,19 @@ authRouter.post("/forgot-password/request", async (req, res) => {
     );
     const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
 
-    await db.insert(passwordResetCodes).values({
-      companyId: company.id,
-      userId: user.id,
-      email: user.email,
-      cnpj: company.cnpj,
-      codeHash,
-      expiresAt,
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: company.id })}, true)`,
+      );
+
+      await tx.insert(passwordResetCodes).values({
+        companyId: company.id,
+        userId: user.id,
+        email: user.email,
+        cnpj: company.cnpj,
+        codeHash,
+        expiresAt,
+      });
     });
 
     const emailResult = await sendPasswordResetCodeEmail({
@@ -1893,15 +1905,21 @@ authRouter.post("/forgot-password/reset", async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(data.password, 10);
-    await db
-      .update(users)
-      .set({ password: hashedPassword })
-      .where(eq(users.id, user.id));
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: user.companyId })}, true)`,
+      );
 
-    await db
-      .update(passwordResetCodes)
-      .set({ usedAt: new Date() })
-      .where(eq(passwordResetCodes.id, resetCode.id));
+      await tx
+        .update(users)
+        .set({ password: hashedPassword })
+        .where(eq(users.id, user.id));
+
+      await tx
+        .update(passwordResetCodes)
+        .set({ usedAt: new Date() })
+        .where(eq(passwordResetCodes.id, resetCode.id));
+    });
 
     res.json({ message: "Senha redefinida com sucesso. Faca login para continuar." });
   } catch (error) {
@@ -1960,10 +1978,16 @@ authRouter.post("/login", async (req, res) => {
     const userPermissions = await getUserPermissions(user.id);
     const userCodeMap = await getCompanyUserCodeMap(user.companyId);
 
-    await db
-      .update(users)
-      .set({ lastLogin: new Date() })
-      .where(eq(users.id, user.id));
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: user.companyId })}, true)`,
+      );
+
+      await tx
+        .update(users)
+        .set({ lastLogin: new Date() })
+        .where(eq(users.id, user.id));
+    });
 
     req.session.userId = user.id;
     req.session.companyId = user.companyId;
