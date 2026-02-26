@@ -1525,62 +1525,68 @@ authRouter.patch("/manager/company", async (req, res) => {
       return res.status(400).json({ error: "Email do responsavel ja usado por outro usuario" });
     }
 
-    await db
-      .update(companies)
-      .set({
-        cnpj: normalizedCnpj,
-        razaoSocial: data.razaoSocial,
-        nomeFantasia: data.nomeFantasia || data.razaoSocial,
-        email: data.companyEmail || null,
-        phone: data.companyPhone || null,
-        address: data.address || null,
-        city: data.city || null,
-        state: data.state || null,
-        zipCode: data.zipCode || null,
-      })
-      .where(eq(companies.id, data.companyId));
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+      );
 
-    await db
-      .update(users)
-      .set({
-        name: data.adminName,
-        email: data.adminEmail,
-        username: data.adminEmail.split("@")[0],
-      })
-      .where(and(eq(users.id, data.userId), eq(users.companyId, data.companyId)));
+      await tx
+        .update(companies)
+        .set({
+          cnpj: normalizedCnpj,
+          razaoSocial: data.razaoSocial,
+          nomeFantasia: data.nomeFantasia || data.razaoSocial,
+          email: data.companyEmail || null,
+          phone: data.companyPhone || null,
+          address: data.address || null,
+          city: data.city || null,
+          state: data.state || null,
+          zipCode: data.zipCode || null,
+        })
+        .where(eq(companies.id, data.companyId));
 
-    await db
-      .update(companySettings)
-      .set({
-        cnpj: normalizedCnpj,
-        razaoSocial: data.razaoSocial,
-        nomeFantasia: data.nomeFantasia || data.razaoSocial,
-        stoneEnabled: Boolean(data.stoneEnabled),
-        stoneClientId: data.stoneClientId || null,
-        stoneClientSecret: data.stoneClientSecret || null,
-        stoneTerminalId: data.stoneTerminalId || null,
-        stoneEnvironment: data.stoneEnvironment || "producao",
-        mpEnabled: Boolean(data.mpEnabled),
-        mpAccessToken: data.mpAccessToken || null,
-        mpTerminalId: data.mpTerminalId || null,
-        printerEnabled: Boolean(data.printerEnabled),
-        printerModel: data.printerModel || null,
-        printerPort: data.printerPort || null,
-        printerBaudRate: data.printerBaudRate ?? 9600,
-        printerColumns: data.printerColumns ?? 48,
-        printerCutCommand:
-          data.printerCutCommand === undefined ? true : Boolean(data.printerCutCommand),
-        printerBeepOnSale:
-          data.printerBeepOnSale === undefined ? true : Boolean(data.printerBeepOnSale),
-        receiptHeaderText: data.receiptHeaderText || null,
-        receiptFooterText: data.receiptFooterText || null,
-        receiptShowSeller:
-          data.receiptShowSeller === undefined ? true : Boolean(data.receiptShowSeller),
-        nfcePrintLayout: data.nfcePrintLayout || null,
-        nfeDanfeLayout: data.nfeDanfeLayout || null,
-        danfeLogoUrl: data.danfeLogoUrl || null,
-      })
-      .where(eq(companySettings.companyId, data.companyId));
+      await tx
+        .update(users)
+        .set({
+          name: data.adminName,
+          email: data.adminEmail,
+          username: data.adminEmail.split("@")[0],
+        })
+        .where(and(eq(users.id, data.userId), eq(users.companyId, data.companyId)));
+
+      await tx
+        .update(companySettings)
+        .set({
+          cnpj: normalizedCnpj,
+          razaoSocial: data.razaoSocial,
+          nomeFantasia: data.nomeFantasia || data.razaoSocial,
+          stoneEnabled: Boolean(data.stoneEnabled),
+          stoneClientId: data.stoneClientId || null,
+          stoneClientSecret: data.stoneClientSecret || null,
+          stoneTerminalId: data.stoneTerminalId || null,
+          stoneEnvironment: data.stoneEnvironment || "producao",
+          mpEnabled: Boolean(data.mpEnabled),
+          mpAccessToken: data.mpAccessToken || null,
+          mpTerminalId: data.mpTerminalId || null,
+          printerEnabled: Boolean(data.printerEnabled),
+          printerModel: data.printerModel || null,
+          printerPort: data.printerPort || null,
+          printerBaudRate: data.printerBaudRate ?? 9600,
+          printerColumns: data.printerColumns ?? 48,
+          printerCutCommand:
+            data.printerCutCommand === undefined ? true : Boolean(data.printerCutCommand),
+          printerBeepOnSale:
+            data.printerBeepOnSale === undefined ? true : Boolean(data.printerBeepOnSale),
+          receiptHeaderText: data.receiptHeaderText || null,
+          receiptFooterText: data.receiptFooterText || null,
+          receiptShowSeller:
+            data.receiptShowSeller === undefined ? true : Boolean(data.receiptShowSeller),
+          nfcePrintLayout: data.nfcePrintLayout || null,
+          nfeDanfeLayout: data.nfeDanfeLayout || null,
+          danfeLogoUrl: data.danfeLogoUrl || null,
+        })
+        .where(eq(companySettings.companyId, data.companyId));
+    });
 
     res.json({ message: "Empresa atualizada com sucesso" });
   } catch (error) {
