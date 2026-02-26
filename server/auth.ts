@@ -436,7 +436,7 @@ async function initializePermissions() {
 async function createDefaultRolesForCompany(tx: any, companyId: number) {
   const allPermissions = await tx.select().from(permissions);
   const permissionMap = new Map(
-    allPermissions.map((p) => [`${p.module}:${p.action}`, p.id])
+    allPermissions.map((p: Permission) => [`${p.module}:${p.action}`, p.id])
   );
 
   for (const [key, template] of Object.entries(ROLE_TEMPLATES)) {
