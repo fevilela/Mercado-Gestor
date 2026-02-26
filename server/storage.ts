@@ -827,8 +827,13 @@ export const storage = {
   },
 
   async openCashRegister(data: InsertCashRegister) {
-    const [register] = await db.insert(cashRegisters).values(data).returning();
-    return register;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+      );
+      const [register] = await tx.insert(cashRegisters).values(data).returning();
+      return register;
+    });
   },
 
   async closeCashRegister(
@@ -847,21 +852,26 @@ export const storage = {
         ? parseFloat(expectedAmount)
         : expectedAmount;
     const difference = closingNum - expectedNum;
-    const [register] = await db
-      .update(cashRegisters)
-      .set({
-        closingAmount: closingNum.toString(),
-        expectedAmount: expectedNum.toString(),
-        difference: difference.toString(),
-        status: "closed",
-        closedAt: new Date(),
-        notes,
-      })
-      .where(
-        and(eq(cashRegisters.id, id), eq(cashRegisters.companyId, companyId))
-      )
-      .returning();
-    return register;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+      );
+      const [register] = await tx
+        .update(cashRegisters)
+        .set({
+          closingAmount: closingNum.toString(),
+          expectedAmount: expectedNum.toString(),
+          difference: difference.toString(),
+          status: "closed",
+          closedAt: new Date(),
+          notes,
+        })
+        .where(
+          and(eq(cashRegisters.id, id), eq(cashRegisters.companyId, companyId))
+        )
+        .returning();
+      return register;
+    });
   },
 
   async getCashMovements(cashRegisterId: number) {
@@ -873,8 +883,13 @@ export const storage = {
   },
 
   async createCashMovement(data: InsertCashMovement) {
-    const [movement] = await db.insert(cashMovements).values(data).returning();
-    return movement;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+      );
+      const [movement] = await tx.insert(cashMovements).values(data).returning();
+      return movement;
+    });
   },
 
   async getUser(userId: string) {
@@ -906,8 +921,13 @@ export const storage = {
   },
 
   async createPosTerminal(data: InsertPosTerminal) {
-    const [terminal] = await db.insert(posTerminals).values(data).returning();
-    return terminal;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+      );
+      const [terminal] = await tx.insert(posTerminals).values(data).returning();
+      return terminal;
+    });
   },
 
   async updatePosTerminal(
@@ -915,22 +935,32 @@ export const storage = {
     companyId: number,
     data: Partial<InsertPosTerminal>
   ) {
-    const [terminal] = await db
-      .update(posTerminals)
-      .set(data)
-      .where(
-        and(eq(posTerminals.id, id), eq(posTerminals.companyId, companyId))
-      )
-      .returning();
-    return terminal;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+      );
+      const [terminal] = await tx
+        .update(posTerminals)
+        .set(data)
+        .where(
+          and(eq(posTerminals.id, id), eq(posTerminals.companyId, companyId))
+        )
+        .returning();
+      return terminal;
+    });
   },
 
   async deletePosTerminal(id: number, companyId: number) {
-    await db
-      .delete(posTerminals)
-      .where(
-        and(eq(posTerminals.id, id), eq(posTerminals.companyId, companyId))
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
       );
+      await tx
+        .delete(posTerminals)
+        .where(
+          and(eq(posTerminals.id, id), eq(posTerminals.companyId, companyId))
+        );
+    });
   },
 
   async getAllCashRegisters(companyId: number) {
@@ -959,20 +989,30 @@ export const storage = {
   },
 
   async createFiscalConfig(data: InsertFiscalConfig) {
-    const [config] = await db.insert(fiscalConfigs).values(data).returning();
-    return config;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+      );
+      const [config] = await tx.insert(fiscalConfigs).values(data).returning();
+      return config;
+    });
   },
 
   async updateFiscalConfig(
     companyId: number,
     data: Partial<InsertFiscalConfig>
   ) {
-    const [config] = await db
-      .update(fiscalConfigs)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(fiscalConfigs.companyId, companyId))
-      .returning();
-    return config;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+      );
+      const [config] = await tx
+        .update(fiscalConfigs)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(fiscalConfigs.companyId, companyId))
+        .returning();
+      return config;
+    });
   },
 
   async getCfopCodeById(id: number) {
