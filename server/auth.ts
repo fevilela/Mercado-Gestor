@@ -496,6 +496,7 @@ const managerCreateCompanySchema = z.object({
   zipCode: z.string().optional(),
   adminName: z.string().min(3),
   adminEmail: z.string().email(),
+  adminPassword: z.string().min(6).optional(),
   stoneEnabled: z.boolean().optional(),
   stoneClientId: z.string().optional(),
   stoneClientSecret: z.string().optional(),
@@ -583,6 +584,7 @@ const managerCreateCompanyUserSchema = z.object({
   name: z.string().min(3),
   email: z.string().email(),
   roleName: z.string().min(2),
+  password: z.string().min(6).optional(),
 });
 
 const managerUpdateCompanySchema = z.object({
@@ -1227,8 +1229,11 @@ authRouter.post("/manager/companies", async (req, res) => {
         throw new Error("Perfil Administrador nao encontrado");
       }
 
-      const temporaryPassword = `invite-pending-${Date.now()}-${Math.random()}`;
-      const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+      const passwordToSet =
+        data.adminPassword && data.adminPassword.trim().length >= 6
+          ? data.adminPassword
+          : `invite-pending-${Date.now()}-${Math.random()}`;
+      const hashedPassword = await bcrypt.hash(passwordToSet, 10);
 
       const [adminUser] = await tx
         .insert(users)
@@ -1241,6 +1246,10 @@ authRouter.post("/manager/companies", async (req, res) => {
           name: data.adminName,
         })
         .returning();
+
+      if (data.adminPassword && data.adminPassword.trim().length >= 6) {
+        return { company, adminUser, passwordDefined: true as const };
+      }
 
       const code = generateOnboardingCode();
       const codeHash = hashOnboardingCode(code);
@@ -1257,19 +1266,23 @@ authRouter.post("/manager/companies", async (req, res) => {
         expiresAt,
       });
 
-      return { company, adminUser, code, expiresAt };
+      return { company, adminUser, code, expiresAt, passwordDefined: false as const };
     });
 
-    const emailResult = await sendOnboardingCodeEmail({
-      to: data.adminEmail,
-      userName: data.adminName,
-      companyName: result.company.nomeFantasia || result.company.razaoSocial,
-      code: result.code,
-    });
+    const emailResult =
+      result.passwordDefined || !("code" in result)
+        ? ({ sent: false as const, reason: "manual_password" as const })
+        : await sendOnboardingCodeEmail({
+            to: data.adminEmail,
+            userName: data.adminName,
+            companyName: result.company.nomeFantasia || result.company.razaoSocial,
+            code: result.code,
+          });
 
     res.json({
-      message:
-        "Empresa cadastrada. O responsavel recebeu um codigo para criar a senha.",
+      message: result.passwordDefined
+        ? "Empresa cadastrada com senha definida para o responsavel."
+        : "Empresa cadastrada. O responsavel recebeu um codigo para criar a senha.",
       adminUser: {
         id: result.adminUser.id,
         name: result.adminUser.name,
@@ -1284,11 +1297,14 @@ authRouter.post("/manager/companies", async (req, res) => {
         phone: result.company.phone,
       },
       onboarding: {
-        emailSent: emailResult.sent,
-        expiresAt: result.expiresAt,
-        ...(process.env.NODE_ENV !== "production" ? { code: result.code } : {}),
-        ...(emailResult.sent ? {} : { emailError: emailResult.reason }),
+        emailSent: result.passwordDefined ? false : emailResult.sent,
+        expiresAt: "expiresAt" in result ? result.expiresAt : null,
+        ...(!result.passwordDefined && process.env.NODE_ENV !== "production" && "code" in result
+          ? { code: result.code }
+          : {}),
+        ...(result.passwordDefined || emailResult.sent ? {} : { emailError: emailResult.reason }),
       },
+      passwordDefined: result.passwordDefined,
     });
   } catch (error) {
     console.error("Manager registration error:", error);
@@ -1416,15 +1432,21 @@ authRouter.post("/manager/company-users", async (req, res) => {
       return res.status(404).json({ error: "Perfil nao encontrado na empresa" });
     }
 
-    const temporaryPassword = `invite-pending-${Date.now()}-${Math.random()}`;
-    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+    const passwordDefined = Boolean(data.password && data.password.trim().length >= 6);
+    const passwordToSet =
+      passwordDefined
+        ? data.password!
+        : `invite-pending-${Date.now()}-${Math.random()}`;
+    const hashedPassword = await bcrypt.hash(passwordToSet, 10);
 
-    const code = generateOnboardingCode();
-    const codeHash = hashOnboardingCode(code);
+    const code = passwordDefined ? null : generateOnboardingCode();
+    const codeHash = code ? hashOnboardingCode(code) : null;
     const expiresInMinutes = Number(
       process.env.ONBOARDING_CODE_TTL_MINUTES || 30,
     );
-    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+    const expiresAt = passwordDefined
+      ? null
+      : new Date(Date.now() + expiresInMinutes * 60 * 1000);
 
     const newUser = await db.transaction(async (tx) => {
       await tx.execute(
@@ -1443,26 +1465,32 @@ authRouter.post("/manager/company-users", async (req, res) => {
         })
         .returning();
 
-      await tx.insert(companyOnboardingCodes).values({
-        companyId: company.id,
-        userId: createdUser.id,
-        email: createdUser.email,
-        codeHash,
-        expiresAt,
-      });
+      if (codeHash && expiresAt) {
+        await tx.insert(companyOnboardingCodes).values({
+          companyId: company.id,
+          userId: createdUser.id,
+          email: createdUser.email,
+          codeHash,
+          expiresAt,
+        });
+      }
 
       return createdUser;
     });
 
-    const emailResult = await sendOnboardingCodeEmail({
-      to: newUser.email,
-      userName: newUser.name,
-      companyName: company.nomeFantasia || company.razaoSocial,
-      code,
-    });
+    const emailResult = code
+      ? await sendOnboardingCodeEmail({
+          to: newUser.email,
+          userName: newUser.name,
+          companyName: company.nomeFantasia || company.razaoSocial,
+          code,
+        })
+      : { sent: false as const, reason: "manual_password" as const };
 
     res.json({
-      message: "Usuario cadastrado e convite gerado",
+      message: passwordDefined
+        ? "Usuario cadastrado com senha definida"
+        : "Usuario cadastrado e convite gerado",
       user: {
         id: newUser.id,
         name: newUser.name,
@@ -1471,11 +1499,12 @@ authRouter.post("/manager/company-users", async (req, res) => {
         roleName: targetRole.name,
       },
       onboarding: {
-        emailSent: emailResult.sent,
+        emailSent: code ? emailResult.sent : false,
         expiresAt,
-        ...(process.env.NODE_ENV !== "production" ? { code } : {}),
-        ...(emailResult.sent ? {} : { emailError: emailResult.reason }),
+        ...(code && process.env.NODE_ENV !== "production" ? { code } : {}),
+        ...(!code || emailResult.sent ? {} : { emailError: emailResult.reason }),
       },
+      passwordDefined,
     });
   } catch (error) {
     console.error("Manager create company user error:", error);

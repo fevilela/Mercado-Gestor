@@ -127,6 +127,7 @@ export default function ManagerOnboarding() {
     name: "",
     email: "",
     roleName: "Caixa",
+    password: "",
   });
 
   const [managerLogin, setManagerLogin] = useState({
@@ -177,6 +178,7 @@ export default function ManagerOnboarding() {
     zipCode: "",
     adminName: "",
     adminEmail: "",
+    adminPassword: "",
     stoneEnabled: false,
     stoneClientId: "",
     stoneClientSecret: "",
@@ -321,6 +323,7 @@ export default function ManagerOnboarding() {
           name: data.name,
           email: data.email,
           roleName: data.roleName,
+          password: String((data as any).password || "").trim() || undefined,
         }),
       });
 
@@ -331,17 +334,24 @@ export default function ManagerOnboarding() {
       return body;
     },
     onSuccess: async (result) => {
+      const passwordDefined = Boolean(result?.passwordDefined);
       const emailSent = result?.onboarding?.emailSent;
       const code = result?.onboarding?.code;
       toast({
-        title: emailSent ? "Usuario cadastrado e convite enviado" : "Usuario cadastrado",
-        description: emailSent
+        title: passwordDefined
+          ? "Usuario cadastrado com senha definida"
+          : emailSent
+            ? "Usuario cadastrado e convite enviado"
+            : "Usuario cadastrado",
+        description: passwordDefined
+          ? "O usuario ja pode acessar com a senha informada"
+          : emailSent
           ? "O usuario deve verificar o email para concluir o acesso"
           : code
             ? `Codigo gerado (dev): ${code}`
             : "Verifique configuracao SMTP no .env",
       });
-      setCompanyUserForm({ name: "", email: "", roleName: "Caixa" });
+      setCompanyUserForm({ name: "", email: "", roleName: "Caixa", password: "" });
       setUserCreateTarget(null);
       await loadUsers(searchQuery);
     },
@@ -358,6 +368,7 @@ export default function ManagerOnboarding() {
     mutationFn: async (data: typeof companyForm) => {
       const payload = {
         ...data,
+        adminPassword: String(data.adminPassword || "").trim() || undefined,
         cnpj: data.cnpj.replace(/\D/g, ""),
         state: data.state.toUpperCase(),
         nfcePrintLayout: data.nfcePrintLayout,
@@ -396,14 +407,19 @@ export default function ManagerOnboarding() {
       return body;
     },
     onSuccess: async (result) => {
+      const passwordDefined = Boolean(result?.passwordDefined);
       const emailSent = result?.onboarding?.emailSent;
       const code = result?.onboarding?.code;
 
       toast({
-        title: emailSent
-          ? "Empresa cadastrada e email enviado"
-          : "Empresa cadastrada (sem envio de email)",
-        description: emailSent
+        title: passwordDefined
+          ? "Empresa cadastrada com senha definida"
+          : emailSent
+            ? "Empresa cadastrada e email enviado"
+            : "Empresa cadastrada (sem envio de email)",
+        description: passwordDefined
+          ? "O responsavel ja pode acessar com a senha informada"
+          : emailSent
           ? "O responsavel deve usar o codigo recebido para criar a senha"
           : code
             ? `Codigo gerado (dev): ${code}`
@@ -650,6 +666,7 @@ export default function ManagerOnboarding() {
       zipCode: "",
       adminName: "",
       adminEmail: "",
+      adminPassword: "",
       stoneEnabled: false,
       stoneClientId: "",
       stoneClientSecret: "",
@@ -728,7 +745,7 @@ export default function ManagerOnboarding() {
   const openCreateUserForm = (row: OnboardingUserRow) => {
     setShowCreateForm(false);
     setEditingTarget(null);
-    setCompanyUserForm({ name: "", email: "", roleName: "Caixa" });
+    setCompanyUserForm({ name: "", email: "", roleName: "Caixa", password: "" });
     setUserCreateTarget({
       companyId: row.companyId,
       companyName: row.nomeFantasia || row.razaoSocial || "Empresa",
@@ -754,6 +771,7 @@ export default function ManagerOnboarding() {
       zipCode: row.zipCode || "",
       adminName: row.name || "",
       adminEmail: row.email || "",
+      adminPassword: "",
       stoneEnabled: Boolean(row.stoneEnabled),
       stoneClientId: row.stoneClientId || "",
       stoneClientSecret: row.stoneClientSecret || "",
@@ -1486,6 +1504,22 @@ export default function ManagerOnboarding() {
                     <option value="Administrador">Administrador</option>
                   </select>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="newUserPassword">Senha inicial (opcional)</Label>
+                  <Input
+                    id="newUserPassword"
+                    type="password"
+                    minLength={6}
+                    value={companyUserForm.password}
+                    onChange={(e) =>
+                      setCompanyUserForm((prev) => ({ ...prev, password: e.target.value }))
+                    }
+                    placeholder="Minimo 6 caracteres"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Se preencher, o usuario acessa direto sem precisar de codigo por email.
+                  </p>
+                </div>
               </CardContent>
               <CardFooter className="flex flex-col gap-3">
                 <Button
@@ -1499,7 +1533,9 @@ export default function ManagerOnboarding() {
                       Cadastrando...
                     </>
                   ) : (
-                    "Cadastrar usuario e enviar convite"
+                    companyUserForm.password.trim().length >= 6
+                      ? "Cadastrar usuario com senha"
+                      : "Cadastrar usuario e enviar convite"
                   )}
                 </Button>
                 <Button
@@ -1712,6 +1748,24 @@ export default function ManagerOnboarding() {
                     />
                   </div>
                 </div>
+                {!editingTarget && (
+                  <div className="space-y-2">
+                    <Label htmlFor="adminPassword">Senha inicial do responsavel (opcional)</Label>
+                    <Input
+                      id="adminPassword"
+                      type="password"
+                      minLength={6}
+                      value={companyForm.adminPassword}
+                      onChange={(e) =>
+                        setCompanyForm((prev) => ({ ...prev, adminPassword: e.target.value }))
+                      }
+                      placeholder="Minimo 6 caracteres"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Se preencher, nao envia codigo por email e o responsavel acessa direto.
+                    </p>
+                  </div>
+                )}
 
                 <div className="rounded-lg border p-4 space-y-4">
                   <div>
