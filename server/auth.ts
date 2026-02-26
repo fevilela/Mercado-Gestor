@@ -1077,37 +1077,72 @@ authRouter.post("/manager/companies", async (req, res) => {
 
       await createDefaultRolesForCompany(tx, company.id);
 
-      await tx.insert(companySettings).values({
-        companyId: company.id,
-        cnpj: company.cnpj,
-        ie: data.ie || null,
-        razaoSocial: company.razaoSocial,
-        nomeFantasia: company.nomeFantasia,
-        stoneEnabled: Boolean(data.stoneEnabled),
-        stoneClientId: data.stoneClientId || null,
-        stoneClientSecret: data.stoneClientSecret || null,
-        stoneTerminalId: data.stoneTerminalId || null,
-        stoneEnvironment: data.stoneEnvironment || "producao",
-        mpEnabled: Boolean(data.mpEnabled),
-        mpAccessToken: data.mpAccessToken || null,
-        mpTerminalId: data.mpTerminalId || null,
-        printerEnabled: Boolean(data.printerEnabled),
-        printerModel: data.printerModel || null,
-        printerPort: data.printerPort || null,
-        printerBaudRate: data.printerBaudRate ?? 9600,
-        printerColumns: data.printerColumns ?? 48,
-        printerCutCommand:
-          data.printerCutCommand === undefined ? true : Boolean(data.printerCutCommand),
-        printerBeepOnSale:
-          data.printerBeepOnSale === undefined ? true : Boolean(data.printerBeepOnSale),
-        receiptHeaderText: data.receiptHeaderText || null,
-        receiptFooterText: data.receiptFooterText || null,
-        receiptShowSeller:
-          data.receiptShowSeller === undefined ? true : Boolean(data.receiptShowSeller),
-        nfcePrintLayout: data.nfcePrintLayout || null,
-        nfeDanfeLayout: data.nfeDanfeLayout || null,
-        danfeLogoUrl: data.danfeLogoUrl || null,
-      });
+      const nfcePrintLayoutSql = data.nfcePrintLayout
+        ? sql`${JSON.stringify(data.nfcePrintLayout)}::jsonb`
+        : sql`null`;
+      const nfeDanfeLayoutSql = data.nfeDanfeLayout
+        ? sql`${JSON.stringify(data.nfeDanfeLayout)}::jsonb`
+        : sql`null`;
+
+      // Compat insert: some production databases may be missing newer columns
+      // (e.g. manifest_last_nsu), and Drizzle can include them in INSERT targets.
+      await tx.execute(sql`
+        INSERT INTO company_settings (
+          company_id,
+          cnpj,
+          ie,
+          razao_social,
+          nome_fantasia,
+          stone_enabled,
+          stone_client_id,
+          stone_client_secret,
+          stone_terminal_id,
+          stone_environment,
+          mp_enabled,
+          mp_access_token,
+          mp_terminal_id,
+          printer_enabled,
+          printer_model,
+          printer_port,
+          printer_baud_rate,
+          printer_columns,
+          printer_cut_command,
+          printer_beep_on_sale,
+          receipt_header_text,
+          receipt_footer_text,
+          receipt_show_seller,
+          nfce_print_layout,
+          nfe_danfe_layout,
+          danfe_logo_url
+        ) VALUES (
+          ${company.id},
+          ${company.cnpj},
+          ${data.ie || null},
+          ${company.razaoSocial},
+          ${company.nomeFantasia},
+          ${Boolean(data.stoneEnabled)},
+          ${data.stoneClientId || null},
+          ${data.stoneClientSecret || null},
+          ${data.stoneTerminalId || null},
+          ${data.stoneEnvironment || "producao"},
+          ${Boolean(data.mpEnabled)},
+          ${data.mpAccessToken || null},
+          ${data.mpTerminalId || null},
+          ${Boolean(data.printerEnabled)},
+          ${data.printerModel || null},
+          ${data.printerPort || null},
+          ${data.printerBaudRate ?? 9600},
+          ${data.printerColumns ?? 48},
+          ${data.printerCutCommand === undefined ? true : Boolean(data.printerCutCommand)},
+          ${data.printerBeepOnSale === undefined ? true : Boolean(data.printerBeepOnSale)},
+          ${data.receiptHeaderText || null},
+          ${data.receiptFooterText || null},
+          ${data.receiptShowSeller === undefined ? true : Boolean(data.receiptShowSeller)},
+          ${nfcePrintLayoutSql},
+          ${nfeDanfeLayoutSql},
+          ${data.danfeLogoUrl || null}
+        )
+      `);
 
       const initialMachineIdByKey = new Map<string, number>();
       if (Array.isArray(data.initialMachines) && data.initialMachines.length > 0) {
