@@ -1232,27 +1232,42 @@ export const storage = {
     const existing = await this.getDigitalCertificate(data.companyId);
 
     if (existing) {
-      const [cert] = await db
-        .update(digitalCertificates)
-        .set({ ...data, isActive: true, updatedAt: new Date() })
-        .where(eq(digitalCertificates.companyId, data.companyId))
-        .returning();
-      return cert;
+      return await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+        );
+        const [cert] = await tx
+          .update(digitalCertificates)
+          .set({ ...data, isActive: true, updatedAt: new Date() })
+          .where(eq(digitalCertificates.companyId, data.companyId))
+          .returning();
+        return cert;
+      });
     } else {
-      const [cert] = await db
-        .insert(digitalCertificates)
-        .values({ ...data, isActive: true })
-        .returning();
-      return cert;
+      return await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+        );
+        const [cert] = await tx
+          .insert(digitalCertificates)
+          .values({ ...data, isActive: true })
+          .returning();
+        return cert;
+      });
     }
   },
 
   async deleteDigitalCertificate(companyId: number) {
-    const [cert] = await db
-      .delete(digitalCertificates)
-      .where(eq(digitalCertificates.companyId, companyId))
-      .returning();
-    return cert;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+      );
+      const [cert] = await tx
+        .delete(digitalCertificates)
+        .where(eq(digitalCertificates.companyId, companyId))
+        .returning();
+      return cert;
+    });
   },
 
   async validateDigitalCertificate(companyId: number): Promise<{

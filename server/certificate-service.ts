@@ -3,7 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { db } from "./db";
 import { digitalCertificates } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 
 export interface CertificateInfo {
   isValid: boolean;
@@ -48,19 +48,25 @@ export class CertificateService {
       // Criptografar certificado antes de armazenar
       const encryptedCert = this.encryptCertificate(certificateBuffer);
 
-      // Salvar no banco
-      await db
-        .delete(digitalCertificates)
-        .where(eq(digitalCertificates.companyId, companyId));
+      // Salvar no banco com contexto tenant (RLS/trigger)
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+        );
 
-      await db.insert(digitalCertificates).values({
-        companyId,
-        cnpj: cnpj.replace(/\D/g, ""),
-        certificateData: encryptedCert.toString("base64"),
-        certificatePassword: this.encryptPassword(password),
-        validFrom: new Date(),
-        validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-        isActive: true,
+        await tx
+          .delete(digitalCertificates)
+          .where(eq(digitalCertificates.companyId, companyId));
+
+        await tx.insert(digitalCertificates).values({
+          companyId,
+          cnpj: cnpj.replace(/\D/g, ""),
+          certificateData: encryptedCert.toString("base64"),
+          certificatePassword: this.encryptPassword(password),
+          validFrom: new Date(),
+          validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+          isActive: true,
+        });
       });
 
       this.certificateCache.delete(companyId);
@@ -117,9 +123,14 @@ export class CertificateService {
         );
       } catch (error) {
         console.error("Erro ao descriptografar certificado:", error);
-        await db
-          .delete(digitalCertificates)
-          .where(eq(digitalCertificates.companyId, companyId));
+        await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+          );
+          await tx
+            .delete(digitalCertificates)
+            .where(eq(digitalCertificates.companyId, companyId));
+        });
         this.clearCache(companyId);
         return null;
       }
@@ -147,9 +158,14 @@ export class CertificateService {
         return this.decryptPassword(cert.certificatePassword);
       } catch (error) {
         console.error("Erro ao descriptografar senha do certificado:", error);
-        await db
-          .delete(digitalCertificates)
-          .where(eq(digitalCertificates.companyId, companyId));
+        await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+          );
+          await tx
+            .delete(digitalCertificates)
+            .where(eq(digitalCertificates.companyId, companyId));
+        });
         this.clearCache(companyId);
         return null;
       }

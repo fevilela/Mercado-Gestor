@@ -5418,25 +5418,34 @@ export async function registerRoutes(
 
         const certBuffer = Buffer.from(certificateData, "base64");
         const certCnpj = String(certInfo.cnpj || cnpj || "");
-        await certificateService.uploadCertificate(
+        const uploadResult = await certificateService.uploadCertificate(
           companyId,
           certBuffer,
           certificatePassword,
           certCnpj
         );
-        await db
-          .update(digitalCertificates)
-          .set({
-            cnpj: certCnpj.replace(/\D/g, ""),
-            certificateType: "e-CNPJ",
-            subjectName: certInfo.subjectName,
-            issuer: certInfo.issuer,
-            validFrom: certInfo.validFrom,
-            validUntil: certInfo.validUntil,
-            isActive: true,
-            updatedAt: new Date(),
-          })
-          .where(eq(digitalCertificates.companyId, companyId));
+        if (!uploadResult.success) {
+          throw new Error(uploadResult.message || "Erro ao salvar certificado");
+        }
+        await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+          );
+
+          await tx
+            .update(digitalCertificates)
+            .set({
+              cnpj: certCnpj.replace(/\D/g, ""),
+              certificateType: "e-CNPJ",
+              subjectName: certInfo.subjectName,
+              issuer: certInfo.issuer,
+              validFrom: certInfo.validFrom,
+              validUntil: certInfo.validUntil,
+              isActive: true,
+              updatedAt: new Date(),
+            })
+            .where(eq(digitalCertificates.companyId, companyId));
+        });
         certificateService.clearCache(companyId);
         const cert = await storage.getDigitalCertificate(companyId);
 
