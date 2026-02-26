@@ -1339,12 +1339,18 @@ authRouter.post("/manager/resend-invite", async (req, res) => {
     );
     const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
 
-    await db.insert(companyOnboardingCodes).values({
-      companyId: company.id,
-      userId: adminUser.id,
-      email: adminUser.email,
-      codeHash,
-      expiresAt,
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: company.id })}, true)`,
+      );
+
+      await tx.insert(companyOnboardingCodes).values({
+        companyId: company.id,
+        userId: adminUser.id,
+        email: adminUser.email,
+        codeHash,
+        expiresAt,
+      });
     });
 
     const emailResult = await sendOnboardingCodeEmail({
@@ -1413,18 +1419,6 @@ authRouter.post("/manager/company-users", async (req, res) => {
     const temporaryPassword = `invite-pending-${Date.now()}-${Math.random()}`;
     const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
 
-    const [newUser] = await db
-      .insert(users)
-      .values({
-        companyId: data.companyId,
-        roleId: targetRole.id,
-        username: data.email.split("@")[0],
-        email: data.email,
-        password: hashedPassword,
-        name: data.name,
-      })
-      .returning();
-
     const code = generateOnboardingCode();
     const codeHash = hashOnboardingCode(code);
     const expiresInMinutes = Number(
@@ -1432,12 +1426,32 @@ authRouter.post("/manager/company-users", async (req, res) => {
     );
     const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
 
-    await db.insert(companyOnboardingCodes).values({
-      companyId: company.id,
-      userId: newUser.id,
-      email: newUser.email,
-      codeHash,
-      expiresAt,
+    const newUser = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: company.id })}, true)`,
+      );
+
+      const [createdUser] = await tx
+        .insert(users)
+        .values({
+          companyId: data.companyId,
+          roleId: targetRole.id,
+          username: data.email.split("@")[0],
+          email: data.email,
+          password: hashedPassword,
+          name: data.name,
+        })
+        .returning();
+
+      await tx.insert(companyOnboardingCodes).values({
+        companyId: company.id,
+        userId: createdUser.id,
+        email: createdUser.email,
+        codeHash,
+        expiresAt,
+      });
+
+      return createdUser;
     });
 
     const emailResult = await sendOnboardingCodeEmail({
