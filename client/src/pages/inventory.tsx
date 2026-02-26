@@ -215,6 +215,10 @@ export default function Inventory() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [isSendingPdvLoad, setIsSendingPdvLoad] = useState(false);
+  const [pdvLoadFeedback, setPdvLoadFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
   const [manifestSearchTerm, setManifestSearchTerm] = useState("");
   const [selectedManifestNoteId, setSelectedManifestNoteId] = useState<
     number | null
@@ -464,6 +468,7 @@ export default function Inventory() {
   };
 
   const handleSendPdvLoad = async () => {
+    setPdvLoadFeedback(null);
     setIsSendingPdvLoad(true);
     try {
       const response = await fetch("/api/pdv/load", { method: "POST" });
@@ -471,12 +476,23 @@ export default function Inventory() {
       if (!response.ok) {
         throw new Error(data.error || "Falha ao enviar carga do PDV");
       }
+      const successMessage = `Carga PDV enviada: ${data.products ?? 0} produtos e ${data.paymentMethods ?? 0} pagamentos`;
+      setPdvLoadFeedback({
+        type: "success",
+        message: successMessage,
+      });
       toast.success(
-        `Carga PDV enviada: ${data.products ?? 0} produtos e ${data.paymentMethods ?? 0} pagamentos`
+        successMessage
       );
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Erro ao enviar carga do PDV";
+      setPdvLoadFeedback({
+        type: "error",
+        message: errorMessage,
+      });
       toast.error(
-        error instanceof Error ? error.message : "Erro ao enviar carga do PDV"
+        errorMessage
       );
     } finally {
       setIsSendingPdvLoad(false);
@@ -1121,6 +1137,18 @@ export default function Inventory() {
             </Button>
           </div>
         </div>
+        {pdvLoadFeedback && (
+          <p
+            className={`text-sm ${
+              pdvLoadFeedback.type === "success"
+                ? "text-emerald-700"
+                : "text-red-600"
+            }`}
+            data-testid="pdv-load-feedback-message"
+          >
+            {pdvLoadFeedback.message}
+          </p>
+        )}
 
         <div className="flex flex-col sm:flex-row gap-4 items-center justify-between bg-card p-4 rounded-lg border border-border shadow-sm">
           <div className="relative w-full sm:w-96">
