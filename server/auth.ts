@@ -601,6 +601,7 @@ const managerUpdateCompanySchema = z.object({
   zipCode: z.string().optional(),
   adminName: z.string().min(3),
   adminEmail: z.string().email(),
+  adminPassword: z.string().min(6).optional(),
   stoneEnabled: z.boolean().optional(),
   stoneClientId: z.string().optional(),
   stoneClientSecret: z.string().optional(),
@@ -1580,6 +1581,9 @@ authRouter.patch("/manager/company", async (req, res) => {
           name: data.adminName,
           email: data.adminEmail,
           username: data.adminEmail.split("@")[0],
+          ...(data.adminPassword && data.adminPassword.trim().length >= 6
+            ? { password: await bcrypt.hash(data.adminPassword, 10) }
+            : {}),
         })
         .where(and(eq(users.id, data.userId), eq(users.companyId, data.companyId)));
 

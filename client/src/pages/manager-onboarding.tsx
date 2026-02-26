@@ -458,6 +458,7 @@ export default function ManagerOnboarding() {
           zipCode: data.zipCode,
           adminName: data.adminName,
           adminEmail: data.adminEmail,
+          adminPassword: String(data.adminPassword || "").trim() || undefined,
           stoneEnabled: data.stoneEnabled,
           stoneClientId: data.stoneClientId,
           stoneClientSecret: data.stoneClientSecret,
@@ -1748,24 +1749,28 @@ export default function ManagerOnboarding() {
                     />
                   </div>
                 </div>
-                {!editingTarget && (
-                  <div className="space-y-2">
-                    <Label htmlFor="adminPassword">Senha inicial do responsavel (opcional)</Label>
-                    <Input
-                      id="adminPassword"
-                      type="password"
-                      minLength={6}
-                      value={companyForm.adminPassword}
-                      onChange={(e) =>
-                        setCompanyForm((prev) => ({ ...prev, adminPassword: e.target.value }))
-                      }
-                      placeholder="Minimo 6 caracteres"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Se preencher, nao envia codigo por email e o responsavel acessa direto.
-                    </p>
-                  </div>
-                )}
+                <div className="space-y-2">
+                  <Label htmlFor="adminPassword">
+                    {editingTarget
+                      ? "Nova senha do responsavel (opcional)"
+                      : "Senha inicial do responsavel (opcional)"}
+                  </Label>
+                  <Input
+                    id="adminPassword"
+                    type="password"
+                    minLength={6}
+                    value={companyForm.adminPassword}
+                    onChange={(e) =>
+                      setCompanyForm((prev) => ({ ...prev, adminPassword: e.target.value }))
+                    }
+                    placeholder="Minimo 6 caracteres"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {editingTarget
+                      ? "Se preencher, atualiza a senha do responsavel."
+                      : "Se preencher, nao envia codigo por email e o responsavel acessa direto."}
+                  </p>
+                </div>
 
                 <div className="rounded-lg border p-4 space-y-4">
                   <div>
