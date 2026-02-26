@@ -510,58 +510,64 @@ export const storage = {
       ...settingsData
     } = data as any;
 
-    // Also update the main company table if relevant fields are present
-    if (
-      data.razaoSocial ||
-      data.nomeFantasia ||
-      data.cnpj ||
-      data.ie ||
-      data.regimeTributario ||
-      data.email ||
-      data.phone ||
-      address ||
-      city ||
-      state ||
-      zipCode ||
-      cnae ||
-      im
-    ) {
-      const companyData: any = {};
-      if (data.razaoSocial) companyData.razaoSocial = data.razaoSocial;
-      if (data.nomeFantasia) companyData.nomeFantasia = data.nomeFantasia;
-      if (data.cnpj) companyData.cnpj = data.cnpj;
-      if (data.ie) companyData.ie = data.ie;
-      if (data.email) companyData.email = data.email;
-      if (data.phone) companyData.phone = data.phone;
-      if (data.regimeTributario)
-        companyData.regimeTributario = data.regimeTributario;
-      if (address) companyData.address = address;
-      if (city) companyData.city = city;
-      if (state) companyData.state = state;
-      if (zipCode) companyData.zipCode = zipCode;
-      if (cnae) companyData.cnae = cnae;
-      if (im) companyData.im = im;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+      );
 
-      await db
-        .update(companies)
-        .set(companyData)
-        .where(eq(companies.id, companyId));
-    }
+      // Also update the main company table if relevant fields are present
+      if (
+        data.razaoSocial ||
+        data.nomeFantasia ||
+        data.cnpj ||
+        data.ie ||
+        data.regimeTributario ||
+        data.email ||
+        data.phone ||
+        address ||
+        city ||
+        state ||
+        zipCode ||
+        cnae ||
+        im
+      ) {
+        const companyData: any = {};
+        if (data.razaoSocial) companyData.razaoSocial = data.razaoSocial;
+        if (data.nomeFantasia) companyData.nomeFantasia = data.nomeFantasia;
+        if (data.cnpj) companyData.cnpj = data.cnpj;
+        if (data.ie) companyData.ie = data.ie;
+        if (data.email) companyData.email = data.email;
+        if (data.phone) companyData.phone = data.phone;
+        if (data.regimeTributario)
+          companyData.regimeTributario = data.regimeTributario;
+        if (address) companyData.address = address;
+        if (city) companyData.city = city;
+        if (state) companyData.state = state;
+        if (zipCode) companyData.zipCode = zipCode;
+        if (cnae) companyData.cnae = cnae;
+        if (im) companyData.im = im;
 
-    if (existing) {
-      const [updated] = await db
-        .update(companySettings)
-        .set({ ...settingsData, updatedAt: new Date() })
-        .where(eq(companySettings.companyId, companyId))
-        .returning();
-      return updated;
-    } else {
-      const [created] = await db
-        .insert(companySettings)
-        .values({ ...settingsData, companyId })
-        .returning();
-      return created;
-    }
+        await tx
+          .update(companies)
+          .set(companyData)
+          .where(eq(companies.id, companyId));
+      }
+
+      if (existing) {
+        const [updated] = await tx
+          .update(companySettings)
+          .set({ ...settingsData, updatedAt: new Date() })
+          .where(eq(companySettings.companyId, companyId))
+          .returning();
+        return updated;
+      } else {
+        const [created] = await tx
+          .insert(companySettings)
+          .values({ ...settingsData, companyId })
+          .returning();
+        return created;
+      }
+    });
   },
 
   async getPaymentMethods(companyId: number) {
