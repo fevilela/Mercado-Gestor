@@ -236,12 +236,18 @@ export const storage = {
     companyId: number,
     quantity: number
   ) {
-    const [product] = await db
-      .update(products)
-      .set({ stock: sql`${products.stock} + ${quantity}` })
-      .where(and(eq(products.id, productId), eq(products.companyId, companyId)))
-      .returning();
-    return product;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+      );
+
+      const [product] = await tx
+        .update(products)
+        .set({ stock: sql`${products.stock} + ${quantity}` })
+        .where(and(eq(products.id, productId), eq(products.companyId, companyId)))
+        .returning();
+      return product;
+    });
   },
 
   async getAllCustomers(companyId: number) {
@@ -786,11 +792,17 @@ export const storage = {
   },
 
   async createInventoryMovement(data: InsertInventoryMovement) {
-    const [movement] = await db
-      .insert(inventoryMovements)
-      .values(data)
-      .returning();
-    return movement;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+      );
+
+      const [movement] = await tx
+        .insert(inventoryMovements)
+        .values(data)
+        .returning();
+      return movement;
+    });
   },
 
   async getOpenCashRegister(companyId: number) {

@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { db } from "./db";
 import {
   products,
+  inventoryMovements,
   productVariations,
   productMedia,
   kitItems,
@@ -33,7 +34,7 @@ import {
   insertSimplesNacionalAliquotSchema,
 } from "@shared/schema";
 import { z } from "zod";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { createHash } from "crypto";
 import { lookupEAN } from "./ean-service";
 import {
@@ -2414,38 +2415,44 @@ export async function registerRoutes(
           )
         );
         if (prodData.isExisting && prodData.existingProductId) {
-          await db
-            .update(products)
-            .set({
-              purchasePrice: prodData.purchasePrice,
-              price: prodData.price,
-              cstIcms: prodData.cstIcms ?? null,
-              cstIpi: prodData.cstIpi ?? null,
-              cstPisCofins: prodData.cstPisCofins ?? null,
-              csosnCode: prodData.csosnCode ?? null,
-              origin: prodData.origin ?? "nacional",
-              cest: prodData.cest ?? null,
-              serviceCode: prodData.serviceCode ?? null,
-              icmsAliquot: Number(prodData.icmsAliquot ?? 0).toFixed(2),
-              icmsReduction: Number(prodData.icmsReduction ?? 0).toFixed(2),
-              ipiAliquot: Number(prodData.ipiAliquot ?? 0).toFixed(2),
-              pisAliquot: Number(prodData.pisAliquot ?? 0).toFixed(2),
-              cofinsAliquot: Number(prodData.cofinsAliquot ?? 0).toFixed(2),
-              issAliquot: Number(prodData.issAliquot ?? 0).toFixed(2),
-              irrfAliquot: Number(prodData.irrfAliquot ?? 0).toFixed(2),
-              margin: Number(
-                Number.isFinite(prodData.marginPercent)
-                  ? prodData.marginPercent
-                  : 0
-              ).toFixed(2),
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(products.id, prodData.existingProductId),
-                eq(products.companyId, companyId)
-              )
+          await db.transaction(async (tx) => {
+            await tx.execute(
+              sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
             );
+
+            await tx
+              .update(products)
+              .set({
+                purchasePrice: prodData.purchasePrice,
+                price: prodData.price,
+                cstIcms: prodData.cstIcms ?? null,
+                cstIpi: prodData.cstIpi ?? null,
+                cstPisCofins: prodData.cstPisCofins ?? null,
+                csosnCode: prodData.csosnCode ?? null,
+                origin: prodData.origin ?? "nacional",
+                cest: prodData.cest ?? null,
+                serviceCode: prodData.serviceCode ?? null,
+                icmsAliquot: Number(prodData.icmsAliquot ?? 0).toFixed(2),
+                icmsReduction: Number(prodData.icmsReduction ?? 0).toFixed(2),
+                ipiAliquot: Number(prodData.ipiAliquot ?? 0).toFixed(2),
+                pisAliquot: Number(prodData.pisAliquot ?? 0).toFixed(2),
+                cofinsAliquot: Number(prodData.cofinsAliquot ?? 0).toFixed(2),
+                issAliquot: Number(prodData.issAliquot ?? 0).toFixed(2),
+                irrfAliquot: Number(prodData.irrfAliquot ?? 0).toFixed(2),
+                margin: Number(
+                  Number.isFinite(prodData.marginPercent)
+                    ? prodData.marginPercent
+                    : 0
+                ).toFixed(2),
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(products.id, prodData.existingProductId),
+                  eq(products.companyId, companyId)
+                )
+              );
+          });
           await storage.updateProductStock(
             prodData.existingProductId,
             companyId,
@@ -2468,40 +2475,46 @@ export async function registerRoutes(
             quantityAdded: quantityToStock,
           });
         } else {
-          const [newProduct] = await db
-            .insert(products)
-            .values({
-              name: prodData.name,
-              ean: prodData.ean,
-              ncm: prodData.ncm,
-              unit: prodData.unit,
-              cstIcms: prodData.cstIcms ?? null,
-              cstIpi: prodData.cstIpi ?? null,
-              cstPisCofins: prodData.cstPisCofins ?? null,
-              csosnCode: prodData.csosnCode ?? null,
-              origin: prodData.origin ?? "nacional",
-              cest: prodData.cest ?? null,
-              serviceCode: prodData.serviceCode ?? null,
-              category: "Importado",
-              price: prodData.price,
-              purchasePrice: prodData.purchasePrice,
-              icmsAliquot: Number(prodData.icmsAliquot ?? 0).toFixed(2),
-              icmsReduction: Number(prodData.icmsReduction ?? 0).toFixed(2),
-              ipiAliquot: Number(prodData.ipiAliquot ?? 0).toFixed(2),
-              pisAliquot: Number(prodData.pisAliquot ?? 0).toFixed(2),
-              cofinsAliquot: Number(prodData.cofinsAliquot ?? 0).toFixed(2),
-              issAliquot: Number(prodData.issAliquot ?? 0).toFixed(2),
-              irrfAliquot: Number(prodData.irrfAliquot ?? 0).toFixed(2),
-              margin: Number(
-                Number.isFinite(prodData.marginPercent)
-                  ? prodData.marginPercent
-                  : 0
-              ).toFixed(2),
-              stock: quantityToStock,
-              isActive: true,
-              companyId,
-            })
-            .returning();
+          const [newProduct] = await db.transaction(async (tx) => {
+            await tx.execute(
+              sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+            );
+
+            return await tx
+              .insert(products)
+              .values({
+                name: prodData.name,
+                ean: prodData.ean,
+                ncm: prodData.ncm,
+                unit: prodData.unit,
+                cstIcms: prodData.cstIcms ?? null,
+                cstIpi: prodData.cstIpi ?? null,
+                cstPisCofins: prodData.cstPisCofins ?? null,
+                csosnCode: prodData.csosnCode ?? null,
+                origin: prodData.origin ?? "nacional",
+                cest: prodData.cest ?? null,
+                serviceCode: prodData.serviceCode ?? null,
+                category: "Importado",
+                price: prodData.price,
+                purchasePrice: prodData.purchasePrice,
+                icmsAliquot: Number(prodData.icmsAliquot ?? 0).toFixed(2),
+                icmsReduction: Number(prodData.icmsReduction ?? 0).toFixed(2),
+                ipiAliquot: Number(prodData.ipiAliquot ?? 0).toFixed(2),
+                pisAliquot: Number(prodData.pisAliquot ?? 0).toFixed(2),
+                cofinsAliquot: Number(prodData.cofinsAliquot ?? 0).toFixed(2),
+                issAliquot: Number(prodData.issAliquot ?? 0).toFixed(2),
+                irrfAliquot: Number(prodData.irrfAliquot ?? 0).toFixed(2),
+                margin: Number(
+                  Number.isFinite(prodData.marginPercent)
+                    ? prodData.marginPercent
+                    : 0
+                ).toFixed(2),
+                stock: quantityToStock,
+                isActive: true,
+                companyId,
+              })
+              .returning();
+          });
 
           if (quantityToStock > 0) {
             await storage.createInventoryMovement({
