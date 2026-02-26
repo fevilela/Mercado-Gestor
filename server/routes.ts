@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import JSZip from "jszip";
 import { storage } from "./storage";
 import { db } from "./db";
 import {
@@ -4405,6 +4406,462 @@ export async function registerRoutes(
         res.status(400).json({
           error:
             error instanceof Error ? error.message : "Falha ao entregar Sintegra",
+        });
+      }
+    },
+  );
+
+  app.get(
+    "/api/fiscal/accountant/export",
+    requireAuth,
+    requirePermission("fiscal:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId) {
+          return res.status(401).json({ error: "Nao autenticado" });
+        }
+
+        const { period, start, end } = parseAccessoryPeriod(req.query.period as string);
+        const formatParam = String(req.query.format || "json").toLowerCase();
+        const format =
+          formatParam === "csv" || formatParam === "zip" ? formatParam : "json";
+        const [settings, allSales, allLogs] = await Promise.all([
+          storage.getCompanySettings(companyId),
+          storage.getAllSales(companyId),
+          db
+            .select()
+            .from(sefazTransmissionLogs)
+            .where(eq(sefazTransmissionLogs.companyId, companyId))
+            .orderBy(desc(sefazTransmissionLogs.createdAt)),
+        ]);
+
+        const salesInPeriod = allSales.filter((sale: any) => {
+          const saleDate = new Date(sale.createdAt);
+          return saleDate >= start && saleDate <= end;
+        });
+        const saleIds = salesInPeriod.map((sale: any) => sale.id);
+        const saleItemsMap = saleIds.length
+          ? await storage.getSaleItemsBatch(saleIds)
+          : new Map<number, any[]>();
+
+        const logsInPeriod = allLogs.filter((log: any) => {
+          const createdAt = new Date(log.createdAt);
+          return createdAt >= start && createdAt <= end;
+        });
+
+        const accessoryLogs = logsInPeriod.filter((log: any) =>
+          ["sped-generate", "sped-deliver", "sintegra-generate", "sintegra-deliver"].includes(
+            String(log.action || ""),
+          ),
+        );
+        const nfeLogs = logsInPeriod.filter((log: any) =>
+          ["generate", "submit", "cancel", "cce", "inutilize"].includes(
+            String(log.action || ""),
+          ),
+        );
+
+        const payload = {
+          exportType: "contador",
+          version: 1,
+          generatedAt: new Date().toISOString(),
+          period,
+          company: {
+            companyId,
+            cnpj: settings?.cnpj || null,
+            razaoSocial: settings?.razaoSocial || null,
+            nomeFantasia: settings?.nomeFantasia || null,
+            ie: settings?.ie || null,
+            regimeTributario: settings?.regimeTributario || null,
+          },
+          summary: {
+            salesCount: salesInPeriod.length,
+            salesTotal: Number(
+              salesInPeriod
+                .reduce(
+                  (acc: number, sale: any) =>
+                    acc + Number(String(sale.total || "0").replace(",", ".")),
+                  0,
+                )
+                .toFixed(2),
+            ),
+            nfeEvents: nfeLogs.length,
+            accessoryEvents: accessoryLogs.length,
+          },
+          sales: salesInPeriod.map((sale: any) => ({
+            ...sale,
+            items: saleItemsMap.get(sale.id) || [],
+          })),
+          fiscalEvents: {
+            nfe: nfeLogs.map((log: any) => ({
+              id: log.id,
+              action: log.action,
+              success: log.success,
+              environment: log.environment,
+              createdAt: log.createdAt,
+              requestPayload: log.requestPayload,
+              responsePayload: log.responsePayload,
+            })),
+            accessory: accessoryLogs.map((log: any) => ({
+              id: log.id,
+              action: log.action,
+              success: log.success,
+              environment: log.environment,
+              createdAt: log.createdAt,
+              requestPayload: log.requestPayload,
+              responsePayload: log.responsePayload,
+            })),
+          },
+        };
+
+        const escapeCsv = (value: unknown) =>
+          `"${String(value ?? "").replace(/"/g, '""')}"`;
+        const csvUnifiedRows: string[] = [];
+        const csvSummaryRows: string[] = [];
+        const csvSalesRows: string[] = [];
+        const csvSaleItemsRows: string[] = [];
+        const csvFiscalEventsRows: string[] = [];
+
+        const buildCsvFiles = () => {
+          csvUnifiedRows.length = 0;
+          csvSummaryRows.length = 0;
+          csvSalesRows.length = 0;
+          csvSaleItemsRows.length = 0;
+          csvFiscalEventsRows.length = 0;
+
+          csvUnifiedRows.push(
+            [
+              "recordType",
+              "period",
+              "saleId",
+              "itemId",
+              "eventId",
+              "eventGroup",
+              "action",
+              "date",
+              "customerName",
+              "productName",
+              "quantity",
+              "unitPrice",
+              "subtotal",
+              "saleTotal",
+              "status",
+              "success",
+              "documentKey",
+              "protocol",
+              "note",
+            ]
+              .map(escapeCsv)
+              .join(";"),
+          );
+          csvSummaryRows.push(
+            ["period", "generatedAt", "salesCount", "salesTotal", "nfeEvents", "accessoryEvents"]
+              .map(escapeCsv)
+              .join(";"),
+          );
+          csvSalesRows.push(
+            [
+              "saleId",
+              "createdAt",
+              "customerName",
+              "saleTotal",
+              "status",
+              "nfceStatus",
+              "nfceKey",
+              "nfceProtocol",
+            ]
+              .map(escapeCsv)
+              .join(";"),
+          );
+          csvSaleItemsRows.push(
+            [
+              "saleId",
+              "itemId",
+              "productId",
+              "productName",
+              "quantity",
+              "unitPrice",
+              "subtotal",
+            ]
+              .map(escapeCsv)
+              .join(";"),
+          );
+          csvFiscalEventsRows.push(
+            [
+              "eventId",
+              "group",
+              "action",
+              "createdAt",
+              "success",
+              "environment",
+              "documentKey",
+              "protocol",
+              "fileName",
+            ]
+              .map(escapeCsv)
+              .join(";"),
+          );
+
+          csvUnifiedRows.push(
+            [
+              "SUMMARY",
+              period,
+              "",
+              "",
+              "",
+              "",
+              "",
+              payload.generatedAt,
+              "",
+              "",
+              "",
+              "",
+              "",
+              payload.summary.salesTotal,
+              "",
+              "",
+              "",
+              "",
+              `sales=${payload.summary.salesCount};nfeEvents=${payload.summary.nfeEvents};accessoryEvents=${payload.summary.accessoryEvents}`,
+            ]
+              .map(escapeCsv)
+              .join(";"),
+          );
+          csvSummaryRows.push(
+            [
+              period,
+              payload.generatedAt,
+              payload.summary.salesCount,
+              payload.summary.salesTotal,
+              payload.summary.nfeEvents,
+              payload.summary.accessoryEvents,
+            ]
+              .map(escapeCsv)
+              .join(";"),
+          );
+
+          for (const sale of payload.sales as any[]) {
+            csvUnifiedRows.push(
+              [
+                "SALE",
+                period,
+                sale.id,
+                "",
+                "",
+                "",
+                "",
+                sale.createdAt,
+                sale.customerName,
+                "",
+                "",
+                "",
+                "",
+                sale.total,
+                sale.nfceStatus || sale.status || "",
+                "",
+                sale.nfceKey || "",
+                sale.nfceProtocol || "",
+                "",
+                ]
+                .map(escapeCsv)
+                .join(";"),
+            );
+            csvSalesRows.push(
+              [
+                sale.id,
+                sale.createdAt,
+                sale.customerName,
+                sale.total,
+                sale.status || "",
+                sale.nfceStatus || "",
+                sale.nfceKey || "",
+                sale.nfceProtocol || "",
+              ]
+                .map(escapeCsv)
+                .join(";"),
+            );
+            for (const item of sale.items || []) {
+              csvUnifiedRows.push(
+                [
+                  "SALE_ITEM",
+                  period,
+                  sale.id,
+                  item.id || "",
+                  "",
+                  "",
+                  "",
+                  sale.createdAt,
+                  sale.customerName,
+                  item.productName || "",
+                  item.quantity || "",
+                  item.unitPrice || "",
+                  item.subtotal || "",
+                  sale.total,
+                  "",
+                  "",
+                  "",
+                  "",
+                  `productId=${item.productId || ""}`,
+                  ]
+                  .map(escapeCsv)
+                  .join(";"),
+              );
+              csvSaleItemsRows.push(
+                [
+                  sale.id,
+                  item.id || "",
+                  item.productId || "",
+                  item.productName || "",
+                  item.quantity || "",
+                  item.unitPrice || "",
+                  item.subtotal || "",
+                ]
+                  .map(escapeCsv)
+                  .join(";"),
+              );
+            }
+          }
+
+          for (const event of payload.fiscalEvents.nfe as any[]) {
+            csvUnifiedRows.push(
+              [
+                "FISCAL_EVENT",
+                period,
+                "",
+                "",
+                event.id,
+                "nfe",
+                event.action,
+                event.createdAt,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                event.success ? "true" : "false",
+                event.responsePayload?.key || "",
+                event.responsePayload?.protocol || "",
+                event.environment || "",
+                ]
+                .map(escapeCsv)
+                .join(";"),
+            );
+            csvFiscalEventsRows.push(
+              [
+                event.id,
+                "nfe",
+                event.action,
+                event.createdAt,
+                event.success ? "true" : "false",
+                event.environment || "",
+                event.responsePayload?.key || "",
+                event.responsePayload?.protocol || "",
+                "",
+              ]
+                .map(escapeCsv)
+                .join(";"),
+            );
+          }
+
+          for (const event of payload.fiscalEvents.accessory as any[]) {
+            csvUnifiedRows.push(
+              [
+                "FISCAL_EVENT",
+                period,
+                "",
+                "",
+                event.id,
+                "accessory",
+                event.action,
+                event.createdAt,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                event.success ? "true" : "false",
+                "",
+                event.responsePayload?.protocol || "",
+                event.responsePayload?.fileName || "",
+                ]
+                .map(escapeCsv)
+                .join(";"),
+            );
+            csvFiscalEventsRows.push(
+              [
+                event.id,
+                "accessory",
+                event.action,
+                event.createdAt,
+                event.success ? "true" : "false",
+                event.environment || "",
+                "",
+                event.responsePayload?.protocol || "",
+                event.responsePayload?.fileName || "",
+              ]
+                .map(escapeCsv)
+                .join(";"),
+            );
+          }
+        };
+        if (format === "csv" || format === "zip") buildCsvFiles();
+
+        const fileName = `EXPORT_CONTADOR_${period.replace("-", "")}_EMP_${companyId}.${format}`;
+        const content =
+          format === "csv"
+            ? csvUnifiedRows.join("\r\n")
+            : JSON.stringify(payload, null, 2);
+
+        await storage.createSefazTransmissionLog({
+          companyId,
+          action: "accountant-export",
+          environment: "producao",
+          requestPayload: { period, format },
+          responsePayload: {
+            fileName,
+            salesCount: payload.summary.salesCount,
+            salesTotal: payload.summary.salesTotal,
+            nfeEvents: payload.summary.nfeEvents,
+            accessoryEvents: payload.summary.accessoryEvents,
+          },
+          success: true,
+        });
+
+        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+        if (format === "zip") {
+          const zip = new JSZip();
+          const folderName = `contador_${period.replace("-", "")}_emp_${companyId}`;
+          const folder = zip.folder(folderName);
+          folder?.file("export_contador.json", JSON.stringify(payload, null, 2));
+          folder?.file("resumo.csv", csvSummaryRows.join("\r\n"));
+          folder?.file("vendas.csv", csvSalesRows.join("\r\n"));
+          folder?.file("itens_venda.csv", csvSaleItemsRows.join("\r\n"));
+          folder?.file("eventos_fiscais.csv", csvFiscalEventsRows.join("\r\n"));
+          folder?.file("exportacao_unificada.csv", csvUnifiedRows.join("\r\n"));
+          const zipBuffer = await zip.generateAsync({
+            type: "nodebuffer",
+            compression: "DEFLATE",
+            compressionOptions: { level: 6 },
+          });
+          res.setHeader("Content-Type", "application/zip");
+          res.send(zipBuffer);
+        } else if (format === "csv") {
+          res.setHeader("Content-Type", "text/csv; charset=utf-8");
+          res.send(content);
+        } else {
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.send(content);
+        }
+      } catch (error) {
+        res.status(400).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Falha ao exportar dados para contador",
         });
       }
     },

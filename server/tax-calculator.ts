@@ -2,6 +2,12 @@
 export interface TaxCalculation {
   icmsValue: number;
   icmsAliquot: number;
+  icmsStValue: number;
+  icmsStAliquot: number;
+  difalValue: number;
+  difalDestAliquot: number;
+  fcpValue: number;
+  fcpAliquot: number;
   ipiValue: number;
   ipiAliquot: number;
   pisValue: number;
@@ -29,6 +35,31 @@ export class TaxCalculator {
     return (baseValue * effectiveAliquot) / 100;
   }
 
+  static calculateICMSST(
+    baseValue: number,
+    aliquot: number,
+    ownIcmsValue: number = 0,
+  ): number {
+    // Simplificado: ST complementar sobre a mesma base, abatendo ICMS próprio já destacado.
+    const grossSt = (baseValue * aliquot) / 100;
+    return Math.max(0, grossSt - ownIcmsValue);
+  }
+
+  static calculateDIFAL(
+    baseValue: number,
+    aliquotInter: number,
+    aliquotDest: number,
+    fcpAliquot: number = 0,
+  ) {
+    const diffRate = Math.max(0, aliquotDest - aliquotInter);
+    const difalValue = (baseValue * diffRate) / 100;
+    const fcpValue = (baseValue * Math.max(0, fcpAliquot)) / 100;
+    return {
+      difalValue,
+      fcpValue,
+    };
+  }
+
   static calculateIPI(baseValue: number, aliquot: number): number {
     return (baseValue * aliquot) / 100;
   }
@@ -54,15 +85,23 @@ export class TaxCalculator {
     unitPrice: number,
     icmsAliquot: number = 0,
     icmsReduction: number = 0,
+    icmsStAliquot: number = 0,
     ipiAliquot: number = 0,
     pisAliquot: number = 0,
     cofinsAliquot: number = 0,
     issAliquot: number = 0,
     irrfAliquot: number = 0,
+    difalDestAliquot: number = 0,
+    fcpAliquot: number = 0,
+    applyDifal: boolean = false,
   ): TaxCalculation {
     const subtotal = quantity * unitPrice;
 
     const icmsValue = this.calculateICMS(subtotal, icmsAliquot, icmsReduction);
+    const icmsStValue = this.calculateICMSST(subtotal, icmsStAliquot, icmsValue);
+    const difal = applyDifal
+      ? this.calculateDIFAL(subtotal, icmsAliquot, difalDestAliquot, fcpAliquot)
+      : { difalValue: 0, fcpValue: 0 };
     const ipiValue = this.calculateIPI(subtotal, ipiAliquot);
     const pisValue = this.calculatePIS(subtotal, pisAliquot);
     const cofinsValue = this.calculateCOFINS(subtotal, cofinsAliquot);
@@ -72,6 +111,12 @@ export class TaxCalculator {
     return {
       icmsValue: this.round2(icmsValue),
       icmsAliquot,
+      icmsStValue: this.round2(icmsStValue),
+      icmsStAliquot,
+      difalValue: this.round2(difal.difalValue),
+      difalDestAliquot,
+      fcpValue: this.round2(difal.fcpValue),
+      fcpAliquot,
       ipiValue: this.round2(ipiValue),
       ipiAliquot,
       pisValue: this.round2(pisValue),
@@ -83,7 +128,15 @@ export class TaxCalculator {
       irrfValue: this.round2(irrfValue),
       irrfAliquot,
       totalTaxes: this.round2(
-        icmsValue + ipiValue + pisValue + cofinsValue + issValue + irrfValue,
+        icmsValue +
+          icmsStValue +
+          difal.difalValue +
+          difal.fcpValue +
+          ipiValue +
+          pisValue +
+          cofinsValue +
+          issValue +
+          irrfValue,
       ),
     };
   }

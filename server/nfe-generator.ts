@@ -20,6 +20,12 @@ export interface NFEItem {
   origin?: string;
   icmsReduction?: number;
   icmsStValue?: number;
+  icmsStAliquot?: number;
+  destinationIcmsAliquot?: number;
+  fcpAliquot?: number;
+  cBenef?: string;
+  motDesIcms?: string;
+  icmsDesonValue?: number;
 }
 
 export interface NFEConfig {
@@ -47,6 +53,8 @@ export interface NFEConfig {
   customerNumber?: string;
   customerNeighborhood?: string;
   customerZipCode?: string;
+  customerIeIndicator?: "1" | "2" | "9";
+  naturezaOperacao?: string;
   items: NFEItem[];
   cfop: string;
 }
@@ -114,6 +122,25 @@ const resolveOrigin = (origin?: string) => {
 const shouldHighlightIcmsForCst = (cst: string) =>
   ["00", "10", "20", "70", "90"].includes(cst);
 
+const buildBenefitXml = (params: {
+  cBenef?: string;
+  icmsDesonValue?: number;
+  motDesIcms?: string;
+}) => {
+  const cBenef = String(params.cBenef || "").trim();
+  const icmsDesonValue = Math.max(0, toNumber(params.icmsDesonValue, 0));
+  const motDesIcms = String(params.motDesIcms || "").trim();
+  let xml = "";
+  if (cBenef) xml += `\n            <cBenef>${escapeXml(cBenef)}</cBenef>`;
+  if (icmsDesonValue > 0) {
+    xml += `\n            <vICMSDeson>${asMoney(icmsDesonValue)}</vICMSDeson>`;
+    if (motDesIcms) {
+      xml += `\n            <motDesICMS>${escapeXml(motDesIcms)}</motDesICMS>`;
+    }
+  }
+  return xml;
+};
+
 const buildIcmsForSimples = (params: {
   csosn: string;
   orig: string;
@@ -122,6 +149,9 @@ const buildIcmsForSimples = (params: {
   icmsValue: number;
   icmsStValue: number;
   icmsReduction: number;
+  cBenef?: string;
+  motDesIcms?: string;
+  icmsDesonValue?: number;
 }) => {
   const { csosn, orig, base, icmsAliquot, icmsValue, icmsStValue, icmsReduction } =
     params;
@@ -131,6 +161,7 @@ const buildIcmsForSimples = (params: {
   const vBCST = asMoney(base);
   const vICMSST = asMoney(icmsStValue);
   const pRedBC = asMoney(icmsReduction);
+  const benefitXml = buildBenefitXml(params);
 
   if (csosn === "101") {
     return `<ICMSSN101>
@@ -145,6 +176,7 @@ const buildIcmsForSimples = (params: {
     return `<ICMSSN${csosn}>
             <orig>${orig}</orig>
             <CSOSN>${csosn}</CSOSN>
+            ${benefitXml}
           </ICMSSN${csosn}>`;
   }
 
@@ -158,6 +190,7 @@ const buildIcmsForSimples = (params: {
             <vBCST>${vBCST}</vBCST>
             <pICMSST>${pICMS}</pICMSST>
             <vICMSST>${vICMSST}</vICMSST>
+            ${benefitXml}
           </ICMSSN${csosn}>`;
   }
 
@@ -165,6 +198,7 @@ const buildIcmsForSimples = (params: {
     return `<ICMSSN203>
             <orig>${orig}</orig>
             <CSOSN>203</CSOSN>
+            ${benefitXml}
           </ICMSSN203>`;
   }
 
@@ -174,6 +208,7 @@ const buildIcmsForSimples = (params: {
             <CSOSN>500</CSOSN>
             <vBCSTRet>${vBCST}</vBCSTRet>
             <vICMSSTRet>${vICMSST}</vICMSSTRet>
+            ${benefitXml}
           </ICMSSN500>`;
   }
 
@@ -185,6 +220,7 @@ const buildIcmsForSimples = (params: {
             <vBC>${vBC}</vBC>
             <pICMS>${pICMS}</pICMS>
             <vICMS>${vICMS}</vICMS>
+            ${benefitXml}
           </ICMSSN900>`;
   }
 
@@ -201,6 +237,9 @@ const buildIcmsForRegimeNormal = (params: {
   icmsValue: number;
   icmsStValue: number;
   icmsReduction: number;
+  cBenef?: string;
+  motDesIcms?: string;
+  icmsDesonValue?: number;
 }) => {
   const { cst, orig, base, icmsAliquot, icmsValue, icmsStValue, icmsReduction } =
     params;
@@ -210,6 +249,7 @@ const buildIcmsForRegimeNormal = (params: {
   const vBCST = asMoney(base);
   const vICMSST = asMoney(icmsStValue);
   const pRedBC = asMoney(icmsReduction);
+  const benefitXml = buildBenefitXml(params);
 
   if (cst === "00") {
     return `<ICMS00>
@@ -219,6 +259,7 @@ const buildIcmsForRegimeNormal = (params: {
             <vBC>${vBC}</vBC>
             <pICMS>${pICMS}</pICMS>
             <vICMS>${vICMS}</vICMS>
+            ${benefitXml}
           </ICMS00>`;
   }
 
@@ -236,6 +277,7 @@ const buildIcmsForRegimeNormal = (params: {
             <vBCST>${vBCST}</vBCST>
             <pICMSST>${pICMS}</pICMSST>
             <vICMSST>${vICMSST}</vICMSST>
+            ${benefitXml}
           </ICMS${cst}>`;
   }
 
@@ -248,6 +290,7 @@ const buildIcmsForRegimeNormal = (params: {
             <vBC>${vBC}</vBC>
             <pICMS>${pICMS}</pICMS>
             <vICMS>${vICMS}</vICMS>
+            ${benefitXml}
           </ICMS20>`;
   }
 
@@ -255,6 +298,7 @@ const buildIcmsForRegimeNormal = (params: {
     return `<ICMS40>
             <orig>${orig}</orig>
             <CST>${cst}</CST>
+            ${benefitXml}
           </ICMS40>`;
   }
 
@@ -264,6 +308,7 @@ const buildIcmsForRegimeNormal = (params: {
             <CST>60</CST>
             <vBCSTRet>${vBCST}</vBCSTRet>
             <vICMSSTRet>${vICMSST}</vICMSSTRet>
+            ${benefitXml}
           </ICMS60>`;
   }
 
@@ -274,6 +319,7 @@ const buildIcmsForRegimeNormal = (params: {
             <vBC>${vBC}</vBC>
             <pICMS>${pICMS}</pICMS>
             <vICMS>${vICMS}</vICMS>
+            ${benefitXml}
           </ICMS90>`;
 };
 
@@ -415,6 +461,8 @@ export class NFEGenerator {
     const emitCEP = padNumber(config.companyZipCode || "37200000", 8);
 
     const destUF = (config.customerState || emitUF || "MG").toUpperCase();
+    const interstate = destUF !== emitUF;
+    const idDest = interstate ? "2" : "1";
     const destCMun = padNumber(config.customerCityCode || cMunFG, 7);
     const destXMun = escapeXml(config.customerCity || config.companyCity || "LAVRAS");
     const destXLgr = escapeXml(config.customerAddress || "RUA NAO INFORMADA");
@@ -424,6 +472,8 @@ export class NFEGenerator {
     const companyCnpj = padNumber(config.cnpj, 14);
     const emitIE = String(config.ie || "").replace(/\D/g, "") || "ISENTO";
     const crt = resolveCRT(config);
+    const natOp = escapeXml(config.naturezaOperacao || "Venda");
+    const indIEDest = config.customerIeIndicator || "9";
 
     const items = Array.isArray(config.items) && config.items.length > 0
       ? config.items
@@ -447,7 +497,10 @@ export class NFEGenerator {
     let totalProd = 0;
     let totalBcIcms = 0;
     let totalIcms = 0;
+    let totalIcmsDeson = 0;
     let totalSt = 0;
+    let totalDifal = 0;
+    let totalFcpDifal = 0;
     let totalIpi = 0;
     let totalPis = 0;
     let totalCofins = 0;
@@ -463,10 +516,22 @@ export class NFEGenerator {
         const icmsAliquot = Math.max(0, toNumber(item.icmsAliquot, 0));
         const icmsReduction = Math.max(0, toNumber(item.icmsReduction, 0));
         const icmsBase = round2(base * (1 - icmsReduction / 100));
-        const icmsStValue = Math.max(0, toNumber(item.icmsStValue, 0));
+        const icmsStAliquot = Math.max(0, toNumber(item.icmsStAliquot, 0));
+        let icmsStValue = Math.max(0, toNumber(item.icmsStValue, 0));
+        if (icmsStValue <= 0 && icmsStAliquot > 0) {
+          icmsStValue = round2(Math.max(0, (icmsBase * icmsStAliquot) / 100 - 0));
+        }
         const ipiAliquot = Math.max(0, toNumber(item.ipiAliquot, 0));
         const pisAliquot = Math.max(0, toNumber(item.pisAliquot, 0));
         const cofinsAliquot = Math.max(0, toNumber(item.cofinsAliquot, 0));
+        const destinationIcmsAliquot = Math.max(
+          0,
+          toNumber(item.destinationIcmsAliquot, 18),
+        );
+        const fcpAliquot = Math.max(0, toNumber(item.fcpAliquot, 0));
+        const cBenef = String(item.cBenef || "").trim();
+        const motDesIcms = String(item.motDesIcms || "").trim();
+        let icmsDesonValue = Math.max(0, toNumber(item.icmsDesonValue, 0));
 
         const csosn = padNumber(item.csosn || "102", 3);
         const cstIcms = padNumber(item.cstIcms || "00", 2);
@@ -483,6 +548,15 @@ export class NFEGenerator {
             : shouldHighlightIcmsForCst(cstIcms)
               ? round2((icmsBase * icmsAliquot) / 100)
               : 0;
+        if (icmsDesonValue <= 0 && motDesIcms && icmsValue > 0) {
+          icmsDesonValue = 0;
+        }
+        const applyDifal = interstate && indIEDest === "9";
+        const difalRate = applyDifal
+          ? Math.max(0, destinationIcmsAliquot - icmsAliquot)
+          : 0;
+        const difalValue = round2((icmsBase * difalRate) / 100);
+        const fcpDifalValue = round2((icmsBase * fcpAliquot) / 100);
         const ipiValue = round2((base * ipiAliquot) / 100);
         const pisValue = round2((base * pisAliquot) / 100);
         const cofinsValue = round2((base * cofinsAliquot) / 100);
@@ -490,11 +564,21 @@ export class NFEGenerator {
         totalProd += subtotal;
         totalBcIcms += icmsValue > 0 ? icmsBase : 0;
         totalIcms += icmsValue;
+        totalIcmsDeson += icmsDesonValue;
         totalSt += icmsStValue;
+        totalDifal += difalValue;
+        totalFcpDifal += fcpDifalValue;
         totalIpi += ipiValue;
         totalPis += pisValue;
         totalCofins += cofinsValue;
-        totalTrib += icmsValue + icmsStValue + ipiValue + pisValue + cofinsValue;
+        totalTrib +=
+          icmsValue +
+          icmsStValue +
+          difalValue +
+          fcpDifalValue +
+          ipiValue +
+          pisValue +
+          cofinsValue;
 
         const cProd = String(item.productId || idx + 1);
         const xProd = escapeXml(item.productName || `ITEM ${idx + 1}`);
@@ -514,6 +598,9 @@ export class NFEGenerator {
                 icmsValue,
                 icmsStValue,
                 icmsReduction,
+                cBenef,
+                motDesIcms,
+                icmsDesonValue,
               })
             : buildIcmsForRegimeNormal({
                 cst: cstIcms,
@@ -523,7 +610,25 @@ export class NFEGenerator {
                 icmsValue,
                 icmsStValue,
                 icmsReduction,
+                cBenef,
+                motDesIcms,
+                icmsDesonValue,
               });
+
+        const difalXml =
+          applyDifal && (difalValue > 0 || fcpDifalValue > 0)
+            ? `
+        <ICMSUFDest>
+          <vBCUFDest>${asMoney(icmsBase)}</vBCUFDest>
+          <pFCPUFDest>${asMoney(fcpAliquot)}</pFCPUFDest>
+          <pICMSUFDest>${asMoney(destinationIcmsAliquot)}</pICMSUFDest>
+          <pICMSInter>${asMoney(icmsAliquot)}</pICMSInter>
+          <pICMSInterPart>100.00</pICMSInterPart>
+          <vFCPUFDest>${asMoney(fcpDifalValue)}</vFCPUFDest>
+          <vICMSUFDest>${asMoney(difalValue)}</vICMSUFDest>
+          <vICMSUFRemet>0.00</vICMSUFRemet>
+        </ICMSUFDest>`
+            : "";
 
         const ipiXml = buildIpiXml({
           cst: cstIpi,
@@ -566,6 +671,7 @@ export class NFEGenerator {
         <ICMS>
           ${icmsXmlByRegime}
         </ICMS>
+        ${difalXml}
         ${ipiXml}
         ${pisXml}
         ${cofinsXml}
@@ -577,19 +683,24 @@ export class NFEGenerator {
     const vProd = asMoney(totalProd);
     const vBC = asMoney(totalBcIcms);
     const vIcms = asMoney(totalIcms);
+    const vIcmsDeson = asMoney(totalIcmsDeson);
     const vSt = asMoney(totalSt);
+    const vFcpDifal = asMoney(totalFcpDifal);
+    const vIcmsUfDest = asMoney(totalDifal);
     const vIpi = asMoney(totalIpi);
     const vPis = asMoney(totalPis);
     const vCofins = asMoney(totalCofins);
     const vTotTrib = asMoney(totalTrib);
-    const vNF = asMoney(totalProd + totalIpi + totalSt);
+    const vNF = asMoney(totalProd + totalIpi + totalSt + totalDifal + totalFcpDifal);
 
     const cnpjDest = String(config.customerCNPJ || "").replace(/\D/g, "");
     const cpfDest = String(config.customerCPF || "").replace(/\D/g, "");
+    const destIeDigits = String(config.customerIE || "").replace(/\D/g, "");
     const destDocXml =
       cnpjDest.length === 14
         ? `<CNPJ>${cnpjDest}</CNPJ>`
         : `<CPF>${padNumber(cpfDest || "00000000000", 11)}</CPF>`;
+    const destIeXml = indIEDest === "1" && destIeDigits ? `<IE>${destIeDigits}</IE>` : "";
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
@@ -597,13 +708,13 @@ export class NFEGenerator {
     <ide>
       <cUF>${padNumber(config.ufCode || "31", 2)}</cUF>
       <cNF>${cNF}</cNF>
-      <natOp>Venda</natOp>
+      <natOp>${natOp}</natOp>
       <mod>55</mod>
       <serie>${serieXml}</serie>
       <nNF>${parseInt(nNF, 10)}</nNF>
       <dhEmi>${emissionDateTime}</dhEmi>
       <tpNF>1</tpNF>
-      <idDest>1</idDest>
+      <idDest>${idDest}</idDest>
       <cMunFG>${cMunFG}</cMunFG>
       <tpImp>1</tpImp>
       <tpEmis>1</tpEmis>
@@ -646,18 +757,22 @@ export class NFEGenerator {
         <cPais>1058</cPais>
         <xPais>BRASIL</xPais>
       </enderDest>
-      <indIEDest>9</indIEDest>
+      ${destIeXml}
+      <indIEDest>${indIEDest}</indIEDest>
     </dest>${detXml}
     <total>
       <ICMSTot>
         <vBC>${vBC}</vBC>
         <vICMS>${vIcms}</vICMS>
-        <vICMSDeson>0.00</vICMSDeson>
+        <vICMSDeson>${vIcmsDeson}</vICMSDeson>
         <vFCP>0.00</vFCP>
         <vBCST>0.00</vBCST>
         <vST>${vSt}</vST>
         <vFCPST>0.00</vFCPST>
         <vFCPSTRet>0.00</vFCPSTRet>
+        <vFCPUFDest>${vFcpDifal}</vFCPUFDest>
+        <vICMSUFDest>${vIcmsUfDest}</vICMSUFDest>
+        <vICMSUFRemet>0.00</vICMSUFRemet>
         <vProd>${vProd}</vProd>
         <vFrete>0.00</vFrete>
         <vSeg>0.00</vSeg>

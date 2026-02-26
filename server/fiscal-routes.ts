@@ -830,12 +830,62 @@ router.post("/nfe/validate", requireAuth, async (req, res) => {
             })
           : null;
 
+      const exceptionData =
+        matchedRule && typeof matchedRule.exceptionData === "object"
+          ? (matchedRule.exceptionData as Record<string, unknown>)
+          : {};
+      const resolvedFiscal = {
+        cfop: matrixResult.cfop || item.cfop,
+        csosn: matrixResult.csosn || matchedRule?.csosn || item.csosn,
+        cstIcms: matrixResult.cst || matchedRule?.cstIcms || item.cstIcms,
+        cstIpi: matchedRule?.cstIpi || item.cstIpi,
+        cstPis: matchedRule?.cstPis || undefined,
+        cstCofins: matchedRule?.cstCofins || undefined,
+        icmsAliquot:
+          matchedRule?.icmsAliquot != null ? Number(matchedRule.icmsAliquot) : undefined,
+        icmsReduction:
+          matchedRule?.icmsReduction != null
+            ? Number(matchedRule.icmsReduction)
+            : undefined,
+        icmsStAliquot:
+          matchedRule?.icmsStAliquot != null
+            ? Number(matchedRule.icmsStAliquot)
+            : undefined,
+        ipiAliquot:
+          matchedRule?.ipiAliquot != null ? Number(matchedRule.ipiAliquot) : undefined,
+        pisAliquot:
+          matchedRule?.pisAliquot != null ? Number(matchedRule.pisAliquot) : undefined,
+        cofinsAliquot:
+          matchedRule?.cofinsAliquot != null
+            ? Number(matchedRule.cofinsAliquot)
+            : undefined,
+        cBenef:
+          typeof exceptionData.cBenef === "string"
+            ? String(exceptionData.cBenef).trim()
+            : undefined,
+        motDesIcms:
+          typeof exceptionData.motDesIcms === "string"
+            ? String(exceptionData.motDesIcms).trim()
+            : undefined,
+        icmsDesonPercent:
+          exceptionData.icmsDesonPercent != null
+            ? Number(exceptionData.icmsDesonPercent)
+            : undefined,
+        destinationIcmsAliquot:
+          exceptionData.destinationIcmsAliquot != null
+            ? Number(exceptionData.destinationIcmsAliquot)
+            : undefined,
+        fcpAliquot:
+          exceptionData.fcpAliquot != null ? Number(exceptionData.fcpAliquot) : undefined,
+      };
+
       resolvedItems.push({
         ...item,
         ncm,
         cest,
         appliedTaxRuleId: matchedRule?.id || null,
         taxMatrix: matrixResult,
+        resolvedFiscal,
         ibpt,
       });
     }
@@ -858,9 +908,17 @@ router.post("/nfe/validate", requireAuth, async (req, res) => {
 router.post("/nfe/calculate-taxes", async (req, res) => {
   try {
     const { items } = req.body;
+    const scope = String(req.body?.scope || "interna");
+    const customerType = String(req.body?.customerType || "");
+    const applyDifal =
+      scope === "interestadual" &&
+      (customerType === "consumidor" || customerType === "nao-contribuinte");
 
     const calculations = [];
     let totalICMS = 0;
+    let totalICMSST = 0;
+    let totalDIFAL = 0;
+    let totalFCP = 0;
     let totalIPI = 0;
     let totalPIS = 0;
     let totalCOFINS = 0;
@@ -875,16 +933,24 @@ router.post("/nfe/calculate-taxes", async (req, res) => {
         item.unitPrice,
         item.icmsAliquot || 18,
         item.icmsReduction || 0,
+        item.icmsStAliquot || 0,
         item.ipiAliquot || 0,
         item.pisAliquot || 0,
         item.cofinsAliquot || 0,
         item.issAliquot || 0,
         item.irrfAliquot || 0,
+        item.destinationIcmsAliquot || 18,
+        item.fcpAliquot || 0,
+        applyDifal,
       );
+      const icmsExpanded = taxes.icmsValue + taxes.difalValue + taxes.fcpValue;
 
       const subtotal = item.quantity * item.unitPrice;
       baseValue += subtotal;
-      totalICMS += taxes.icmsValue;
+      totalICMS += icmsExpanded;
+      totalICMSST += taxes.icmsStValue;
+      totalDIFAL += taxes.difalValue;
+      totalFCP += taxes.fcpValue;
       totalIPI += taxes.ipiValue;
       totalPIS += taxes.pisValue;
       totalCOFINS += taxes.cofinsValue;
@@ -898,7 +964,11 @@ router.post("/nfe/calculate-taxes", async (req, res) => {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         subtotal,
+        icmsBaseValue: Math.round(
+          subtotal * (1 - Number(item.icmsReduction || 0) / 100) * 100,
+        ) / 100,
         ...taxes,
+        icmsValue: Math.round(icmsExpanded * 100) / 100,
       });
     }
 
@@ -907,6 +977,9 @@ router.post("/nfe/calculate-taxes", async (req, res) => {
       totals: {
         baseValue: Math.round(baseValue * 100) / 100,
         icmsTotal: Math.round(totalICMS * 100) / 100,
+        icmsStTotal: Math.round(totalICMSST * 100) / 100,
+        difalTotal: Math.round(totalDIFAL * 100) / 100,
+        fcpTotal: Math.round(totalFCP * 100) / 100,
         ipiTotal: Math.round(totalIPI * 100) / 100,
         pisTotal: Math.round(totalPIS * 100) / 100,
         cofinsTotal: Math.round(totalCOFINS * 100) / 100,

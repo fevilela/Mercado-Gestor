@@ -17,13 +17,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Loader2,
   FileText,
   DollarSign,
   Trash2,
+  Pencil,
+  Copy,
   Settings as SettingsIcon,
 } from "lucide-react";
 
@@ -88,9 +90,73 @@ interface FiscalTaxRule {
   cofinsAliquot?: string | null;
   ipiAliquot?: string | null;
   issAliquot?: string | null;
+  icmsStAliquot?: string | null;
+  exceptionData?: Record<string, unknown> | null;
   priority?: number | null;
   isActive?: boolean | null;
 }
+
+type TaxRuleFormState = {
+  name: string;
+  description: string;
+  operationType: string;
+  customerType: string;
+  regime: string;
+  scope: string;
+  originUf: string;
+  destinationUf: string;
+  ncm: string;
+  cest: string;
+  cfop: string;
+  cstIcms: string;
+  csosn: string;
+  cstPis: string;
+  cstCofins: string;
+  cstIpi: string;
+  icmsAliquot: string;
+  icmsStAliquot: string;
+  pisAliquot: string;
+  cofinsAliquot: string;
+  ipiAliquot: string;
+  issAliquot: string;
+  destinationIcmsAliquot: string;
+  fcpAliquot: string;
+  cBenef: string;
+  motDesIcms: string;
+  icmsDesonPercent: string;
+  priority: number;
+};
+
+const createEmptyTaxRuleForm = (): TaxRuleFormState => ({
+  name: "",
+  description: "",
+  operationType: "venda",
+  customerType: "consumidor_final",
+  regime: "Simples Nacional",
+  scope: "interna",
+  originUf: "",
+  destinationUf: "",
+  ncm: "",
+  cest: "",
+  cfop: "",
+  cstIcms: "",
+  csosn: "",
+  cstPis: "",
+  cstCofins: "",
+  cstIpi: "",
+  icmsAliquot: "",
+  icmsStAliquot: "",
+  pisAliquot: "",
+  cofinsAliquot: "",
+  ipiAliquot: "",
+  issAliquot: "",
+  destinationIcmsAliquot: "",
+  fcpAliquot: "",
+  cBenef: "",
+  motDesIcms: "",
+  icmsDesonPercent: "",
+  priority: 0,
+});
 
 export default function FiscalConfig() {
   const { toast } = useToast();
@@ -115,6 +181,15 @@ export default function FiscalConfig() {
   const [showNewCfop, setShowNewCfop] = useState(false);
   const [showNewAliquot, setShowNewAliquot] = useState(false);
   const [showNewTaxRule, setShowNewTaxRule] = useState(false);
+  const [editingTaxRuleId, setEditingTaxRuleId] = useState<number | null>(null);
+  const [taxRuleQuickFilter, setTaxRuleQuickFilter] = useState<
+    "all" | "st" | "difal" | "fcp" | "benefit" | "desoneracao"
+  >("all");
+  const [taxRuleSearch, setTaxRuleSearch] = useState("");
+  const [taxRuleSort, setTaxRuleSort] = useState<{
+    key: "priority" | "name" | "cfop" | "ncm" | "uf";
+    direction: "asc" | "desc";
+  }>({ key: "priority", direction: "desc" });
   const [newCfop, setNewCfop] = useState({
     code: "",
     description: "",
@@ -132,30 +207,8 @@ export default function FiscalConfig() {
     cofinsAliquot: "0",
     issAliquot: "0",
   });
-  const [newTaxRule, setNewTaxRule] = useState({
-    name: "",
-    description: "",
-    operationType: "venda",
-    customerType: "consumidor_final",
-    regime: "Simples Nacional",
-    scope: "interna",
-    originUf: "",
-    destinationUf: "",
-    ncm: "",
-    cest: "",
-    cfop: "",
-    cstIcms: "",
-    csosn: "",
-    cstPis: "",
-    cstCofins: "",
-    cstIpi: "",
-    icmsAliquot: "",
-    pisAliquot: "",
-    cofinsAliquot: "",
-    ipiAliquot: "",
-    issAliquot: "",
-    priority: 0,
-  });
+  const [newTaxRule, setNewTaxRule] = useState<TaxRuleFormState>(createEmptyTaxRuleForm());
+  const [editTaxRule, setEditTaxRule] = useState<TaxRuleFormState>(createEmptyTaxRuleForm());
 
   useEffect(() => {
     loadFiscalData();
@@ -323,6 +376,178 @@ export default function FiscalConfig() {
     return normalized.length > 0 ? normalized : undefined;
   };
 
+  const buildTaxRulePayload = (form: TaxRuleFormState) => ({
+    name: form.name.trim(),
+    description: normalizeOptional(form.description),
+    priority: Number.isFinite(form.priority) ? form.priority : 0,
+    isActive: true,
+    operationType: normalizeOptional(form.operationType),
+    customerType: normalizeOptional(form.customerType),
+    regime: normalizeOptional(form.regime),
+    scope: normalizeOptional(form.scope),
+    originUf: normalizeOptional(form.originUf)?.toUpperCase(),
+    destinationUf: normalizeOptional(form.destinationUf)?.toUpperCase(),
+    ncm: normalizeOptional(form.ncm),
+    cest: normalizeOptional(form.cest),
+    cfop: normalizeOptional(form.cfop),
+    cstIcms: normalizeOptional(form.cstIcms),
+    csosn: normalizeOptional(form.csosn),
+    cstPis: normalizeOptional(form.cstPis),
+    cstCofins: normalizeOptional(form.cstCofins),
+    cstIpi: normalizeOptional(form.cstIpi),
+    icmsAliquot: normalizeOptional(form.icmsAliquot),
+    icmsStAliquot: normalizeOptional(form.icmsStAliquot),
+    pisAliquot: normalizeOptional(form.pisAliquot),
+    cofinsAliquot: normalizeOptional(form.cofinsAliquot),
+    ipiAliquot: normalizeOptional(form.ipiAliquot),
+    issAliquot: normalizeOptional(form.issAliquot),
+    exceptionData: {
+      ...(normalizeOptional(form.destinationIcmsAliquot)
+        ? { destinationIcmsAliquot: Number(form.destinationIcmsAliquot) }
+        : {}),
+      ...(normalizeOptional(form.fcpAliquot)
+        ? { fcpAliquot: Number(form.fcpAliquot) }
+        : {}),
+      ...(normalizeOptional(form.cBenef) ? { cBenef: form.cBenef.trim() } : {}),
+      ...(normalizeOptional(form.motDesIcms)
+        ? { motDesIcms: form.motDesIcms.trim() }
+        : {}),
+      ...(normalizeOptional(form.icmsDesonPercent)
+        ? { icmsDesonPercent: Number(form.icmsDesonPercent) }
+        : {}),
+    },
+  });
+
+  const mapRuleToTaxRuleForm = (rule: FiscalTaxRule): TaxRuleFormState => {
+    const exceptionData = ((rule.exceptionData as Record<string, unknown>) || {});
+    return {
+      name: rule.name || "",
+      description: String(rule.description || ""),
+      operationType: String(rule.operationType || "venda"),
+      customerType: String(rule.customerType || "consumidor_final"),
+      regime: String(rule.regime || "Simples Nacional"),
+      scope: String(rule.scope || "interna"),
+      originUf: String(rule.originUf || ""),
+      destinationUf: String(rule.destinationUf || ""),
+      ncm: String(rule.ncm || ""),
+      cest: String(rule.cest || ""),
+      cfop: String(rule.cfop || ""),
+      cstIcms: String(rule.cstIcms || ""),
+      csosn: String(rule.csosn || ""),
+      cstPis: String(rule.cstPis || ""),
+      cstCofins: String(rule.cstCofins || ""),
+      cstIpi: String(rule.cstIpi || ""),
+      icmsAliquot: String(rule.icmsAliquot || ""),
+      icmsStAliquot: String(rule.icmsStAliquot || ""),
+      pisAliquot: String(rule.pisAliquot || ""),
+      cofinsAliquot: String(rule.cofinsAliquot || ""),
+      ipiAliquot: String(rule.ipiAliquot || ""),
+      issAliquot: String(rule.issAliquot || ""),
+      destinationIcmsAliquot: String(exceptionData.destinationIcmsAliquot || ""),
+      fcpAliquot: String(exceptionData.fcpAliquot || ""),
+      cBenef: String(exceptionData.cBenef || ""),
+      motDesIcms: String(exceptionData.motDesIcms || ""),
+      icmsDesonPercent: String(exceptionData.icmsDesonPercent || ""),
+      priority: Number(rule.priority || 0),
+    };
+  };
+
+  const filteredFiscalTaxRules = useMemo(() => {
+    const query = taxRuleSearch.trim().toLowerCase();
+    const filtered = fiscalTaxRules.filter((rule) => {
+      const ex = (rule.exceptionData as Record<string, unknown>) || {};
+      const matchesSearch =
+        !query ||
+        [
+          rule.name,
+          rule.description,
+          rule.operationType,
+          rule.customerType,
+          rule.regime,
+          rule.scope,
+          rule.originUf,
+          rule.destinationUf,
+          rule.ncm,
+          rule.cest,
+          rule.cfop,
+          rule.cstIcms,
+          rule.csosn,
+          ex.cBenef,
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(query));
+      if (!matchesSearch) return false;
+      if (taxRuleQuickFilter === "all") return true;
+      if (taxRuleQuickFilter === "st") {
+        return Number(rule.icmsStAliquot || 0) > 0;
+      }
+      if (taxRuleQuickFilter === "difal") {
+        return Number(ex.destinationIcmsAliquot || 0) > 0;
+      }
+      if (taxRuleQuickFilter === "fcp") {
+        return Number(ex.fcpAliquot || 0) > 0;
+      }
+      if (taxRuleQuickFilter === "benefit") {
+        return String(ex.cBenef || "").trim().length > 0;
+      }
+      if (taxRuleQuickFilter === "desoneracao") {
+        return (
+          String(ex.motDesIcms || "").trim().length > 0 ||
+          Number(ex.icmsDesonPercent || 0) > 0
+        );
+      }
+      return true;
+    });
+    const sorted = [...filtered].sort((a, b) => {
+      const dir = taxRuleSort.direction === "asc" ? 1 : -1;
+      const aUf = `${a.originUf || ""}-${a.destinationUf || ""}`;
+      const bUf = `${b.originUf || ""}-${b.destinationUf || ""}`;
+      const aVal =
+        taxRuleSort.key === "priority"
+          ? Number(a.priority || 0)
+          : taxRuleSort.key === "name"
+            ? String(a.name || "").toLowerCase()
+            : taxRuleSort.key === "cfop"
+              ? String(a.cfop || "").toLowerCase()
+              : taxRuleSort.key === "ncm"
+                ? String(a.ncm || "").toLowerCase()
+                : aUf.toLowerCase();
+      const bVal =
+        taxRuleSort.key === "priority"
+          ? Number(b.priority || 0)
+          : taxRuleSort.key === "name"
+            ? String(b.name || "").toLowerCase()
+            : taxRuleSort.key === "cfop"
+              ? String(b.cfop || "").toLowerCase()
+              : taxRuleSort.key === "ncm"
+                ? String(b.ncm || "").toLowerCase()
+                : bUf.toLowerCase();
+      if (aVal < bVal) return -1 * dir;
+      if (aVal > bVal) return 1 * dir;
+      return 0;
+    });
+    return sorted;
+  }, [fiscalTaxRules, taxRuleQuickFilter, taxRuleSearch, taxRuleSort]);
+
+  const toggleTaxRuleSort = (
+    key: "priority" | "name" | "cfop" | "ncm" | "uf",
+  ) => {
+    setTaxRuleSort((prev) =>
+      prev.key === key
+        ? {
+            key,
+            direction: prev.direction === "asc" ? "desc" : "asc",
+          }
+        : {
+            key,
+            direction: key === "priority" ? "desc" : "asc",
+          },
+    );
+  };
+
+  const sortIndicator = (key: "priority" | "name" | "cfop" | "ncm" | "uf") =>
+    taxRuleSort.key === key ? (taxRuleSort.direction === "asc" ? " ↑" : " ↓") : "";
+
   const handleAddTaxRule = async () => {
     try {
       if (!newTaxRule.name.trim()) {
@@ -333,32 +558,7 @@ export default function FiscalConfig() {
         });
         return;
       }
-
-      const payload = {
-        name: newTaxRule.name.trim(),
-        description: normalizeOptional(newTaxRule.description),
-        priority: Number.isFinite(newTaxRule.priority) ? newTaxRule.priority : 0,
-        isActive: true,
-        operationType: normalizeOptional(newTaxRule.operationType),
-        customerType: normalizeOptional(newTaxRule.customerType),
-        regime: normalizeOptional(newTaxRule.regime),
-        scope: normalizeOptional(newTaxRule.scope),
-        originUf: normalizeOptional(newTaxRule.originUf)?.toUpperCase(),
-        destinationUf: normalizeOptional(newTaxRule.destinationUf)?.toUpperCase(),
-        ncm: normalizeOptional(newTaxRule.ncm),
-        cest: normalizeOptional(newTaxRule.cest),
-        cfop: normalizeOptional(newTaxRule.cfop),
-        cstIcms: normalizeOptional(newTaxRule.cstIcms),
-        csosn: normalizeOptional(newTaxRule.csosn),
-        cstPis: normalizeOptional(newTaxRule.cstPis),
-        cstCofins: normalizeOptional(newTaxRule.cstCofins),
-        cstIpi: normalizeOptional(newTaxRule.cstIpi),
-        icmsAliquot: normalizeOptional(newTaxRule.icmsAliquot),
-        pisAliquot: normalizeOptional(newTaxRule.pisAliquot),
-        cofinsAliquot: normalizeOptional(newTaxRule.cofinsAliquot),
-        ipiAliquot: normalizeOptional(newTaxRule.ipiAliquot),
-        issAliquot: normalizeOptional(newTaxRule.issAliquot),
-      };
+      const payload = buildTaxRulePayload(newTaxRule);
 
       const response = await fetch("/api/fiscal-tax-rules", {
         method: "POST",
@@ -373,35 +573,67 @@ export default function FiscalConfig() {
       const created = await response.json();
       setFiscalTaxRules([created, ...fiscalTaxRules]);
       setShowNewTaxRule(false);
-      setNewTaxRule({
-        name: "",
-        description: "",
-        operationType: "venda",
-        customerType: "consumidor_final",
-        regime: "Simples Nacional",
-        scope: "interna",
-        originUf: "",
-        destinationUf: "",
-        ncm: "",
-        cest: "",
-        cfop: "",
-        cstIcms: "",
-        csosn: "",
-        cstPis: "",
-        cstCofins: "",
-        cstIpi: "",
-        icmsAliquot: "",
-        pisAliquot: "",
-        cofinsAliquot: "",
-        ipiAliquot: "",
-        issAliquot: "",
-        priority: 0,
-      });
+      setNewTaxRule(createEmptyTaxRuleForm());
       toast({ title: "Sucesso", description: "Regra fiscal criada" });
     } catch (error) {
       toast({
         title: "Erro",
         description: "Falha ao criar regra fiscal",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleStartEditTaxRule = (rule: FiscalTaxRule) => {
+    setEditingTaxRuleId(rule.id);
+    setEditTaxRule(mapRuleToTaxRuleForm(rule));
+  };
+
+  const handleDuplicateTaxRule = (rule: FiscalTaxRule) => {
+    const cloned = mapRuleToTaxRuleForm(rule);
+    setNewTaxRule({
+      ...cloned,
+      name: cloned.name ? `${cloned.name} (Copia)` : "Nova regra (Copia)",
+      priority: Number(cloned.priority || 0),
+    });
+    setShowNewTaxRule(true);
+    setEditingTaxRuleId(null);
+  };
+
+  const handleCancelEditTaxRule = () => {
+    setEditingTaxRuleId(null);
+    setEditTaxRule(createEmptyTaxRuleForm());
+  };
+
+  const handleUpdateTaxRule = async () => {
+    if (!editingTaxRuleId) return;
+    try {
+      if (!editTaxRule.name.trim()) {
+        toast({
+          title: "Erro",
+          description: "Informe o nome da regra fiscal",
+          variant: "destructive",
+        });
+        return;
+      }
+      const response = await fetch(`/api/fiscal-tax-rules/${editingTaxRuleId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildTaxRulePayload(editTaxRule)),
+      });
+      if (!response.ok) {
+        throw new Error("Erro ao atualizar regra fiscal");
+      }
+      const updated = await response.json();
+      setFiscalTaxRules((prev) =>
+        prev.map((rule) => (rule.id === updated.id ? updated : rule)),
+      );
+      handleCancelEditTaxRule();
+      toast({ title: "Sucesso", description: "Regra fiscal atualizada" });
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "Falha ao atualizar regra fiscal",
         variant: "destructive",
       });
     }
@@ -1186,6 +1418,19 @@ export default function FiscalConfig() {
                       />
                     </div>
                     <div>
+                      <Label>Aliquota ICMS-ST (%)</Label>
+                      <Input
+                        value={(newTaxRule as any).icmsStAliquot}
+                        onChange={(e) =>
+                          setNewTaxRule({
+                            ...newTaxRule,
+                            icmsStAliquot: e.target.value,
+                          } as any)
+                        }
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
                       <Label>Aliquota PIS (%)</Label>
                       <Input
                         value={newTaxRule.pisAliquot}
@@ -1209,6 +1454,71 @@ export default function FiscalConfig() {
                         }
                       />
                     </div>
+                    <div>
+                      <Label>Aliquota ICMS Destino (DIFAL) %</Label>
+                      <Input
+                        value={(newTaxRule as any).destinationIcmsAliquot}
+                        onChange={(e) =>
+                          setNewTaxRule({
+                            ...newTaxRule,
+                            destinationIcmsAliquot: e.target.value,
+                          } as any)
+                        }
+                        placeholder="18.00"
+                      />
+                    </div>
+                    <div>
+                      <Label>Aliquota FCP (%)</Label>
+                      <Input
+                        value={(newTaxRule as any).fcpAliquot}
+                        onChange={(e) =>
+                          setNewTaxRule({
+                            ...newTaxRule,
+                            fcpAliquot: e.target.value,
+                          } as any)
+                        }
+                        placeholder="2.00"
+                      />
+                    </div>
+                    <div>
+                      <Label>cBenef</Label>
+                      <Input
+                        value={(newTaxRule as any).cBenef}
+                        onChange={(e) =>
+                          setNewTaxRule({
+                            ...newTaxRule,
+                            cBenef: e.target.value,
+                          } as any)
+                        }
+                        placeholder="Codigo do beneficio fiscal"
+                      />
+                    </div>
+                    <div>
+                      <Label>Motivo Deson. ICMS</Label>
+                      <Input
+                        value={(newTaxRule as any).motDesIcms}
+                        onChange={(e) =>
+                          setNewTaxRule({
+                            ...newTaxRule,
+                            motDesIcms: e.target.value,
+                          } as any)
+                        }
+                        placeholder="9"
+                      />
+                    </div>
+                    <div>
+                      <Label>% Desoneracao ICMS</Label>
+                      <Input
+                        value={(newTaxRule as any).icmsDesonPercent}
+                        onChange={(e) =>
+                          setNewTaxRule({
+                            ...newTaxRule,
+                            icmsDesonPercent: e.target.value,
+                          } as any)
+                        }
+                        placeholder="0.00"
+                      />
+                    </div>
                   </div>
                   <div className="flex gap-2 justify-end">
                     <Button
@@ -1218,6 +1528,297 @@ export default function FiscalConfig() {
                       Cancelar
                     </Button>
                     <Button onClick={handleAddTaxRule}>Criar Regra</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {editingTaxRuleId && (
+              <Card className="border-primary/40">
+                <CardHeader>
+                  <CardTitle>Editar Regra Fiscal #{editingTaxRuleId}</CardTitle>
+                  <CardDescription>
+                    Ajuste contexto, CST/CSOSN, ST, DIFAL/FCP e beneficios fiscais.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <Label>Nome da Regra</Label>
+                      <Input
+                        value={editTaxRule.name}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, name: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Descricao</Label>
+                      <Input
+                        value={editTaxRule.description}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, description: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Prioridade</Label>
+                      <Input
+                        type="number"
+                        value={editTaxRule.priority}
+                        onChange={(e) =>
+                          setEditTaxRule({
+                            ...editTaxRule,
+                            priority: parseInt(e.target.value || "0", 10) || 0,
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Operacao</Label>
+                      <Input
+                        value={editTaxRule.operationType}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, operationType: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Cliente</Label>
+                      <Input
+                        value={editTaxRule.customerType}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, customerType: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Regime</Label>
+                      <Input
+                        value={editTaxRule.regime}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, regime: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Escopo</Label>
+                      <Input
+                        value={editTaxRule.scope}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, scope: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>UF Origem</Label>
+                      <Input
+                        maxLength={2}
+                        value={editTaxRule.originUf}
+                        onChange={(e) =>
+                          setEditTaxRule({
+                            ...editTaxRule,
+                            originUf: e.target.value.toUpperCase(),
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>UF Destino</Label>
+                      <Input
+                        maxLength={2}
+                        value={editTaxRule.destinationUf}
+                        onChange={(e) =>
+                          setEditTaxRule({
+                            ...editTaxRule,
+                            destinationUf: e.target.value.toUpperCase(),
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>NCM</Label>
+                      <Input
+                        value={editTaxRule.ncm}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, ncm: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CEST</Label>
+                      <Input
+                        value={editTaxRule.cest}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, cest: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CFOP</Label>
+                      <Input
+                        value={editTaxRule.cfop}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, cfop: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CST ICMS</Label>
+                      <Input
+                        value={editTaxRule.cstIcms}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, cstIcms: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CSOSN</Label>
+                      <Input
+                        value={editTaxRule.csosn}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, csosn: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CST IPI</Label>
+                      <Input
+                        value={editTaxRule.cstIpi}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, cstIpi: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CST PIS</Label>
+                      <Input
+                        value={editTaxRule.cstPis}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, cstPis: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CST COFINS</Label>
+                      <Input
+                        value={editTaxRule.cstCofins}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, cstCofins: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>ICMS (%)</Label>
+                      <Input
+                        value={editTaxRule.icmsAliquot}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, icmsAliquot: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>ICMS-ST (%)</Label>
+                      <Input
+                        value={editTaxRule.icmsStAliquot}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, icmsStAliquot: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>ICMS Destino (DIFAL) %</Label>
+                      <Input
+                        value={editTaxRule.destinationIcmsAliquot}
+                        onChange={(e) =>
+                          setEditTaxRule({
+                            ...editTaxRule,
+                            destinationIcmsAliquot: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>FCP (%)</Label>
+                      <Input
+                        value={editTaxRule.fcpAliquot}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, fcpAliquot: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>IPI (%)</Label>
+                      <Input
+                        value={editTaxRule.ipiAliquot}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, ipiAliquot: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>PIS (%)</Label>
+                      <Input
+                        value={editTaxRule.pisAliquot}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, pisAliquot: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>COFINS (%)</Label>
+                      <Input
+                        value={editTaxRule.cofinsAliquot}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, cofinsAliquot: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>ISS (%)</Label>
+                      <Input
+                        value={editTaxRule.issAliquot}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, issAliquot: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>cBenef</Label>
+                      <Input
+                        value={editTaxRule.cBenef}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, cBenef: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Motivo Deson. ICMS</Label>
+                      <Input
+                        value={editTaxRule.motDesIcms}
+                        onChange={(e) =>
+                          setEditTaxRule({ ...editTaxRule, motDesIcms: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>% Desoneracao ICMS</Label>
+                      <Input
+                        value={editTaxRule.icmsDesonPercent}
+                        onChange={(e) =>
+                          setEditTaxRule({
+                            ...editTaxRule,
+                            icmsDesonPercent: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button variant="outline" onClick={handleCancelEditTaxRule}>
+                      Cancelar Edicao
+                    </Button>
+                    <Button onClick={handleUpdateTaxRule}>Salvar Alteracoes</Button>
                   </div>
                 </CardContent>
               </Card>
@@ -1233,6 +1834,39 @@ export default function FiscalConfig() {
                   <CardDescription>
                     Cadastro por contexto fiscal: operacao, cliente, regime, UF, NCM e CFOP.
                   </CardDescription>
+                  <div className="mt-3 max-w-md">
+                    <Input
+                      value={taxRuleSearch}
+                      onChange={(e) => setTaxRuleSearch(e.target.value)}
+                      placeholder="Buscar por nome, CFOP, NCM, UF, regime, cliente..."
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {[
+                      { key: "all", label: "Todas" },
+                      { key: "st", label: "ST" },
+                      { key: "difal", label: "DIFAL" },
+                      { key: "fcp", label: "FCP" },
+                      { key: "benefit", label: "Beneficio" },
+                      { key: "desoneracao", label: "Desoneracao" },
+                    ].map((filter) => {
+                      const active = taxRuleQuickFilter === (filter.key as typeof taxRuleQuickFilter);
+                      return (
+                        <Button
+                          key={filter.key}
+                          type="button"
+                          variant={active ? "default" : "outline"}
+                          size="sm"
+                          onClick={() =>
+                            setTaxRuleQuickFilter(filter.key as typeof taxRuleQuickFilter)
+                          }
+                          className="h-7 px-2 text-xs"
+                        >
+                          {filter.label}
+                        </Button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <Button onClick={() => setShowNewTaxRule(true)}>
                   + Nova Regra
@@ -1243,25 +1877,74 @@ export default function FiscalConfig() {
                   <div className="flex justify-center py-8">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                   </div>
-                ) : fiscalTaxRules.length === 0 ? (
+                ) : filteredFiscalTaxRules.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>Nenhuma regra fiscal cadastrada</p>
+                    <p>
+                      {taxRuleSearch.trim()
+                        ? "Nenhuma regra encontrada para a busca/filtro"
+                        : taxRuleQuickFilter === "all"
+                          ? "Nenhuma regra fiscal cadastrada"
+                          : "Nenhuma regra encontrada para esse filtro"}
+                    </p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead className="border-b">
                         <tr>
-                          <th className="text-left py-2 px-4">Nome</th>
+                          <th className="text-left py-2 px-4">
+                            <button
+                              type="button"
+                              className="font-medium hover:underline"
+                              onClick={() => toggleTaxRuleSort("name")}
+                            >
+                              Nome{sortIndicator("name")}
+                            </button>
+                          </th>
                           <th className="text-left py-2 px-4">Contexto</th>
+                          <th className="text-left py-2 px-4">
+                            <button
+                              type="button"
+                              className="font-medium hover:underline"
+                              onClick={() => toggleTaxRuleSort("cfop")}
+                            >
+                              CFOP{sortIndicator("cfop")}
+                            </button>
+                          </th>
+                          <th className="text-left py-2 px-4">
+                            <button
+                              type="button"
+                              className="font-medium hover:underline"
+                              onClick={() => toggleTaxRuleSort("ncm")}
+                            >
+                              NCM{sortIndicator("ncm")}
+                            </button>
+                          </th>
+                          <th className="text-left py-2 px-4">
+                            <button
+                              type="button"
+                              className="font-medium hover:underline"
+                              onClick={() => toggleTaxRuleSort("uf")}
+                            >
+                              UFs{sortIndicator("uf")}
+                            </button>
+                          </th>
                           <th className="text-left py-2 px-4">Resultado</th>
-                          <th className="text-left py-2 px-4">Prioridade</th>
+                          <th className="text-left py-2 px-4">
+                            <button
+                              type="button"
+                              className="font-medium hover:underline"
+                              onClick={() => toggleTaxRuleSort("priority")}
+                            >
+                              Prioridade{sortIndicator("priority")}
+                            </button>
+                          </th>
                           <th className="text-right py-2 px-4">Acoes</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {fiscalTaxRules.map((rule) => (
+                        {filteredFiscalTaxRules.map((rule) => (
                           <tr key={rule.id} className="border-b hover:bg-muted/50">
                             <td className="py-2 px-4">
                               <div className="font-semibold">{rule.name}</div>
@@ -1283,25 +1966,92 @@ export default function FiscalConfig() {
                                 .filter(Boolean)
                                 .join(" | ") || "-"}
                             </td>
+                            <td className="py-2 px-4 text-xs font-mono">
+                              {rule.cfop || "-"}
+                            </td>
+                            <td className="py-2 px-4 text-xs font-mono">
+                              {rule.ncm || "-"}
+                            </td>
+                            <td className="py-2 px-4 text-xs font-mono">
+                              {[rule.originUf, rule.destinationUf].filter(Boolean).join(" -> ") ||
+                                "-"}
+                            </td>
                             <td className="py-2 px-4 text-xs">
+                              <div className="flex flex-wrap gap-1 mb-1">
+                                {rule.icmsStAliquot && Number(rule.icmsStAliquot) > 0 ? (
+                                  <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-semibold">
+                                    ST
+                                  </span>
+                                ) : null}
+                                {(rule.exceptionData as any)?.destinationIcmsAliquot ? (
+                                  <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-800 px-2 py-0.5 text-[10px] font-semibold">
+                                    DIFAL
+                                  </span>
+                                ) : null}
+                                {(rule.exceptionData as any)?.fcpAliquot ? (
+                                  <span className="inline-flex items-center rounded-full bg-sky-100 text-sky-800 px-2 py-0.5 text-[10px] font-semibold">
+                                    FCP
+                                  </span>
+                                ) : null}
+                                {(rule.exceptionData as any)?.cBenef ? (
+                                  <span className="inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10px] font-semibold">
+                                    Beneficio
+                                  </span>
+                                ) : null}
+                                {(rule.exceptionData as any)?.motDesIcms ? (
+                                  <span className="inline-flex items-center rounded-full bg-rose-100 text-rose-800 px-2 py-0.5 text-[10px] font-semibold">
+                                    Desoneracao
+                                  </span>
+                                ) : null}
+                              </div>
                               {[
                                 rule.cstIcms ? `CST ${rule.cstIcms}` : null,
                                 rule.csosn ? `CSOSN ${rule.csosn}` : null,
                                 rule.cstPis ? `PIS ${rule.cstPis}` : null,
                                 rule.cstCofins ? `COFINS ${rule.cstCofins}` : null,
+                                rule.icmsAliquot ? `ICMS ${rule.icmsAliquot}%` : null,
+                                rule.icmsStAliquot ? `ST ${rule.icmsStAliquot}%` : null,
+                                (rule.exceptionData as any)?.destinationIcmsAliquot
+                                  ? `DIFAL Dest ${(rule.exceptionData as any).destinationIcmsAliquot}%`
+                                  : null,
+                                (rule.exceptionData as any)?.fcpAliquot
+                                  ? `FCP ${(rule.exceptionData as any).fcpAliquot}%`
+                                  : null,
+                                (rule.exceptionData as any)?.cBenef
+                                  ? `cBenef ${(rule.exceptionData as any).cBenef}`
+                                  : null,
                               ]
                                 .filter(Boolean)
                                 .join(" | ") || "-"}
                             </td>
                             <td className="py-2 px-4">{rule.priority ?? 0}</td>
                             <td className="py-2 px-4 text-right">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleDeleteTaxRule(rule.id)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              <div className="inline-flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDuplicateTaxRule(rule)}
+                                  title="Duplicar"
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleStartEditTaxRule(rule)}
+                                  title="Editar"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDeleteTaxRule(rule.id)}
+                                  title="Excluir"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         ))}

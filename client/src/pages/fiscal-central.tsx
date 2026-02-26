@@ -870,6 +870,44 @@ export default function FiscalCentralPage() {
     },
   });
 
+  const exportAccountantMutation = useMutation({
+    mutationFn: async (format: "json" | "csv" | "zip" = "json") => {
+      const res = await fetch(
+        `/api/fiscal/accountant/export?period=${encodeURIComponent(accessoryPeriod)}&format=${format}`,
+      );
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error || "Falha ao exportar para contador");
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const fileNameMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+      const fileName =
+        fileNameMatch?.[1] || `EXPORT_CONTADOR_${accessoryPeriod.replace("-", "")}.${format}`;
+      return { blob, fileName };
+    },
+    onSuccess: ({ blob, fileName }) => {
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(href);
+      toast({ title: "Sucesso", description: "Exportação para contador baixada." });
+      queryClient.invalidateQueries({ queryKey: ["/api/fiscal/accessory-obligations/history"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error ? error.message : "Falha ao exportar para contador",
+        variant: "destructive",
+      });
+    },
+  });
+
   const orderedNfe = useMemo(
     () =>
       [...nfeHistory].sort(
@@ -1648,6 +1686,45 @@ export default function FiscalCentralPage() {
                     </CardContent>
                   </Card>
                 </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Exportação para Contador</CardTitle>
+                    <CardDescription>
+                      Gera arquivo consolidado do período para o contador (JSON ou CSV).
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={() => exportAccountantMutation.mutate("json")}
+                      disabled={exportAccountantMutation.isPending}
+                    >
+                      {exportAccountantMutation.isPending && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      Exportar p/ contador (JSON)
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => exportAccountantMutation.mutate("csv")}
+                      disabled={exportAccountantMutation.isPending}
+                    >
+                      {exportAccountantMutation.isPending && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      Exportar p/ contador (CSV)
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => exportAccountantMutation.mutate("zip")}
+                      disabled={exportAccountantMutation.isPending}
+                    >
+                      {exportAccountantMutation.isPending && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      Exportar p/ contador (ZIP)
+                    </Button>
+                  </CardContent>
+                </Card>
               </CardContent>
             </Card>
 

@@ -181,6 +181,9 @@ interface FormItem {
   bcIcmsValue: string;
   icmsAliquot: string;
   icmsReduction: string;
+  icmsStAliquot: string;
+  destinationIcmsAliquot: string;
+  fcpAliquot: string;
   ipiAliquot: string;
   pisAliquot: string;
   cofinsAliquot: string;
@@ -193,6 +196,9 @@ interface FormItem {
   issValue: string;
   irrfValue: string;
   icmsStValue: string;
+  cBenef: string;
+  motDesIcms: string;
+  icmsDesonValue: string;
   totalTaxes: string;
 }
 
@@ -749,7 +755,56 @@ export default function FiscalDocuments() {
       }
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      const resolvedItems = Array.isArray(data?.items) ? data.items : [];
+      if (resolvedItems.length > 0) {
+        setFormData((prev) => ({
+          ...prev,
+          items: prev.items.map((item, index) => {
+            const resolved = resolvedItems[index];
+            const fiscal = resolved?.resolvedFiscal || {};
+            const cstPis = String(fiscal.cstPis || "").trim();
+            const cstCofins = String(fiscal.cstCofins || "").trim();
+            return {
+              ...item,
+              ncm: String(resolved?.ncm || item.ncm || "").replace(/\D/g, "").slice(0, 8),
+              cest: String(resolved?.cest || item.cest || "").replace(/\D/g, "").slice(0, 7),
+              cfop: String(fiscal.cfop || item.cfop || prev.cfopCode || ""),
+              csosn: String(fiscal.csosn || item.csosn || ""),
+              cstIcms: String(fiscal.cstIcms || item.cstIcms || ""),
+              cstIpi: String(fiscal.cstIpi || item.cstIpi || ""),
+              cstPisCofins:
+                cstPis && cstPis === cstCofins ? cstPis : item.cstPisCofins,
+              icmsAliquot:
+                fiscal.icmsAliquot != null ? String(fiscal.icmsAliquot) : item.icmsAliquot,
+              icmsReduction:
+                fiscal.icmsReduction != null
+                  ? String(fiscal.icmsReduction)
+                  : item.icmsReduction,
+              icmsStAliquot:
+                fiscal.icmsStAliquot != null
+                  ? String(fiscal.icmsStAliquot)
+                  : item.icmsStAliquot,
+              ipiAliquot:
+                fiscal.ipiAliquot != null ? String(fiscal.ipiAliquot) : item.ipiAliquot,
+              pisAliquot:
+                fiscal.pisAliquot != null ? String(fiscal.pisAliquot) : item.pisAliquot,
+              cofinsAliquot:
+                fiscal.cofinsAliquot != null
+                  ? String(fiscal.cofinsAliquot)
+                  : item.cofinsAliquot,
+              destinationIcmsAliquot:
+                fiscal.destinationIcmsAliquot != null
+                  ? String(fiscal.destinationIcmsAliquot)
+                  : item.destinationIcmsAliquot,
+              fcpAliquot:
+                fiscal.fcpAliquot != null ? String(fiscal.fcpAliquot) : item.fcpAliquot,
+              cBenef: String(fiscal.cBenef || item.cBenef || ""),
+              motDesIcms: String(fiscal.motDesIcms || item.motDesIcms || ""),
+            };
+          }),
+        }));
+      }
       setNfeActionStatus("NF-e validada com sucesso");
       toast.success("NF-e validada com sucesso!");
     },
@@ -794,13 +849,14 @@ export default function FiscalDocuments() {
               )
             ),
             icmsValue: String(round2(toAmount(calc.icmsValue))),
+            icmsStValue: String(round2(toAmount(calc.icmsStValue ?? item.icmsStValue))),
             ipiValue: String(round2(toAmount(calc.ipiValue))),
             pisValue: String(round2(toAmount(calc.pisValue))),
             cofinsValue: String(round2(toAmount(calc.cofinsValue))),
             issValue: String(round2(toAmount(calc.issValue))),
             irrfValue: String(round2(toAmount(calc.irrfValue))),
             totalTaxes: String(
-              round2(toAmount(calc.totalTaxes) + toAmount(item.icmsStValue))
+              round2(toAmount(calc.totalTaxes))
             ),
           };
         });
@@ -1030,6 +1086,9 @@ export default function FiscalDocuments() {
       bcIcmsValue: newItems[itemIndex].bcIcmsValue || "0",
       icmsAliquot: newItems[itemIndex].icmsAliquot || "18",
       icmsReduction: newItems[itemIndex].icmsReduction || "0",
+      icmsStAliquot: newItems[itemIndex].icmsStAliquot || "0",
+      destinationIcmsAliquot: newItems[itemIndex].destinationIcmsAliquot || "18",
+      fcpAliquot: newItems[itemIndex].fcpAliquot || "0",
       ipiAliquot: newItems[itemIndex].ipiAliquot || "0",
       pisAliquot: newItems[itemIndex].pisAliquot || "0",
       cofinsAliquot: newItems[itemIndex].cofinsAliquot || "0",
@@ -1042,6 +1101,9 @@ export default function FiscalDocuments() {
       issValue: "0",
       irrfValue: "0",
       icmsStValue: "0",
+      cBenef: newItems[itemIndex].cBenef || "",
+      motDesIcms: newItems[itemIndex].motDesIcms || "",
+      icmsDesonValue: newItems[itemIndex].icmsDesonValue || "0",
       totalTaxes: "0",
     };
     setFormData({ ...formData, items: newItems });
@@ -1208,6 +1270,9 @@ export default function FiscalDocuments() {
           bcIcmsValue: "0",
           icmsAliquot: "18",
           icmsReduction: "0",
+          icmsStAliquot: "0",
+          destinationIcmsAliquot: "18",
+          fcpAliquot: "0",
           ipiAliquot: "0",
           pisAliquot: "0",
           cofinsAliquot: "0",
@@ -1220,6 +1285,9 @@ export default function FiscalDocuments() {
           issValue: "0",
           irrfValue: "0",
           icmsStValue: "0",
+          cBenef: "",
+          motDesIcms: "",
+          icmsDesonValue: "0",
           totalTaxes: "0",
         },
       ],
@@ -1251,6 +1319,9 @@ export default function FiscalDocuments() {
           bcIcmsValue: "0",
           icmsAliquot: "18",
           icmsReduction: "0",
+          icmsStAliquot: "0",
+          destinationIcmsAliquot: "18",
+          fcpAliquot: "0",
           ipiAliquot: "0",
           pisAliquot: "0",
           cofinsAliquot: "0",
@@ -1263,6 +1334,9 @@ export default function FiscalDocuments() {
           issValue: "0",
           irrfValue: "0",
           icmsStValue: "0",
+          cBenef: "",
+          motDesIcms: "",
+          icmsDesonValue: "0",
           totalTaxes: "0",
         } as FormItem,
       ];
@@ -1302,6 +1376,9 @@ export default function FiscalDocuments() {
       "bcIcmsValue",
       "icmsAliquot",
       "icmsReduction",
+      "icmsStAliquot",
+      "destinationIcmsAliquot",
+      "fcpAliquot",
       "ipiAliquot",
       "pisAliquot",
       "cofinsAliquot",
@@ -1518,7 +1595,20 @@ export default function FiscalDocuments() {
     [headerTaxes]
   );
 
-  const buildTaxPayloadFromItems = (items: FormItem[], cfopCode: string) => ({
+  const buildTaxPayloadFromItems = (items: FormItem[], cfopCode: string) => {
+    const isPf =
+      String(selectedCustomer?.personType || "")
+        .trim()
+        .toLowerCase() === "pf";
+    const customerType: "contribuinte" | "nao-contribuinte" | "consumidor" = isPf
+      ? "consumidor"
+      : selectedCustomer?.isIcmsContributor || nfeDestExtra.ieIndicator === "contribuinte"
+        ? "contribuinte"
+        : "nao-contribuinte";
+
+    return {
+    scope: formData.scope,
+    customerType,
     items: items.map((item) => ({
       productId: item.productId,
       description: item.description,
@@ -1530,15 +1620,19 @@ export default function FiscalDocuments() {
       discountValue: Math.max(0, toAmount(item.discountValue)),
       bcIcmsValue: Math.max(0, toAmount(item.bcIcmsValue)),
       icmsStValue: Math.max(0, toAmount(item.icmsStValue)),
+      icmsStAliquot: Math.max(0, toAmount(item.icmsStAliquot)),
       icmsAliquot: Math.max(0, toAmount(item.icmsAliquot)),
       icmsReduction: Math.max(0, toAmount(item.icmsReduction)),
+      destinationIcmsAliquot: Math.max(0, toAmount(item.destinationIcmsAliquot || "18")),
+      fcpAliquot: Math.max(0, toAmount(item.fcpAliquot)),
       ipiAliquot: Math.max(0, toAmount(item.ipiAliquot)),
       pisAliquot: Math.max(0, toAmount(item.pisAliquot)),
       cofinsAliquot: Math.max(0, toAmount(item.cofinsAliquot)),
       issAliquot: Math.max(0, toAmount(item.issAliquot)),
       irrfAliquot: Math.max(0, toAmount(item.irrfAliquot)),
     })),
-  });
+    };
+  };
 
   const buildTaxPayload = () => buildTaxPayloadFromItems(formData.items, formData.cfopCode);
 
@@ -1616,11 +1710,18 @@ export default function FiscalDocuments() {
       customerCNPJ: customerDoc.length === 14 ? customerDoc : undefined,
       customerCPF: customerDoc.length === 11 ? customerDoc : undefined,
       customerIE: String(nfeDestExtra.ie || "").trim() || undefined,
+      customerIeIndicator:
+        nfeDestExtra.ieIndicator === "contribuinte"
+          ? "1"
+          : nfeDestExtra.ieIndicator === "isento"
+            ? "2"
+            : "9",
       customerState: String(selectedCustomer?.state || settings?.state || "MG").toUpperCase(),
       customerCity: String(selectedCustomer?.city || settings?.city || "LAVRAS").trim(),
       customerAddress:
         String(selectedCustomer?.address || nfeDestExtra.address || "RUA NAO INFORMADA").trim(),
       customerZipCode: customerZip || undefined,
+      naturezaOperacao: String(nfeIdentification.naturezaOperacao || "Venda").trim(),
       items: formData.items.map((item, index) => ({
         productId: Number(item.productId || index + 1),
         productName: item.productName || item.description || `ITEM ${index + 1}`,
@@ -1638,7 +1739,13 @@ export default function FiscalDocuments() {
         cstPisCofins: item.cstPisCofins || "07",
         origin: item.origin || "nacional",
         icmsReduction: Math.max(0, toAmount(item.icmsReduction)),
+        icmsStAliquot: Math.max(0, toAmount(item.icmsStAliquot)),
         icmsStValue: Math.max(0, toAmount(item.icmsStValue)),
+        destinationIcmsAliquot: Math.max(0, toAmount(item.destinationIcmsAliquot || "18")),
+        fcpAliquot: Math.max(0, toAmount(item.fcpAliquot)),
+        cBenef: String(item.cBenef || "").trim() || undefined,
+        motDesIcms: String(item.motDesIcms || "").trim() || undefined,
+        icmsDesonValue: Math.max(0, toAmount(item.icmsDesonValue)),
       })),
       cfop: formData.cfopCode || formData.items[0]?.cfop || "5102",
     };
@@ -1740,8 +1847,7 @@ export default function FiscalDocuments() {
           totalsFromItems.productsTotal -
             totalsFromItems.discountTotal +
             toAmount(headerTaxes.otherExpensesTotal) +
-            toAmount(totals.totalTaxes) +
-            totalsFromItems.icmsStTotal
+            toAmount(totals.totalTaxes)
         ),
         bcIcmsTotal: round2(totalsFromItems.bcIcmsTotal),
         icmsTotal: round2(toAmount(totals.icmsTotal)),
@@ -1822,10 +1928,10 @@ export default function FiscalDocuments() {
       toast.success(
         receivableCreated
           ? `Nota fechada e conta a receber criada com sucesso. Tributos: R$ ${round2(
-              toAmount(totals.totalTaxes) + totalsFromItems.icmsStTotal
+              toAmount(totals.totalTaxes)
             ).toFixed(2)}`
           : `Nota fechada com sucesso, mas sem conta a receber. Tributos: R$ ${round2(
-              toAmount(totals.totalTaxes) + totalsFromItems.icmsStTotal
+              toAmount(totals.totalTaxes)
             ).toFixed(2)}`
       );
 

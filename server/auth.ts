@@ -21,7 +21,7 @@ import {
   type Role,
   type Permission,
 } from "@shared/schema";
-import { eq, and, isNull, desc, ilike, or, ne, inArray, asc } from "drizzle-orm";
+import { eq, and, isNull, desc, ilike, or, ne, inArray, asc, sql } from "drizzle-orm";
 import { z } from "zod";
 import { validateMercadoPagoSettings } from "./payment-service";
 import { validateStoneSettings } from "./stone-connect";
@@ -433,14 +433,14 @@ async function initializePermissions() {
   }
 }
 
-async function createDefaultRolesForCompany(companyId: number) {
-  const allPermissions = await db.select().from(permissions);
+async function createDefaultRolesForCompany(tx: any, companyId: number) {
+  const allPermissions = await tx.select().from(permissions);
   const permissionMap = new Map(
     allPermissions.map((p) => [`${p.module}:${p.action}`, p.id])
   );
 
   for (const [key, template] of Object.entries(ROLE_TEMPLATES)) {
-    const [role] = await db
+    const [role] = await tx
       .insert(roles)
       .values({
         companyId,
@@ -453,9 +453,10 @@ async function createDefaultRolesForCompany(companyId: number) {
     for (const permKey of template.permissions) {
       const permId = permissionMap.get(permKey);
       if (permId) {
-        await db.insert(rolePermissions).values({
+        await tx.insert(rolePermissions).values({
           roleId: role.id,
           permissionId: permId,
+          companyId,
         });
       }
     }
@@ -1054,195 +1055,203 @@ authRouter.post("/manager/companies", async (req, res) => {
 
     await initializePermissions();
 
-    const [company] = await db
-      .insert(companies)
-      .values({
-        cnpj: data.cnpj.replace(/\D/g, ""),
-        razaoSocial: data.razaoSocial,
-        nomeFantasia: data.nomeFantasia || data.razaoSocial,
-        email: data.email,
-        phone: data.phone,
-        address: data.address,
-        city: data.city,
-        state: data.state,
-        zipCode: data.zipCode,
-      })
-      .returning();
+    const result = await db.transaction(async (tx) => {
+      const [company] = await tx
+        .insert(companies)
+        .values({
+          cnpj: data.cnpj.replace(/\D/g, ""),
+          razaoSocial: data.razaoSocial,
+          nomeFantasia: data.nomeFantasia || data.razaoSocial,
+          email: data.email,
+          phone: data.phone,
+          address: data.address,
+          city: data.city,
+          state: data.state,
+          zipCode: data.zipCode,
+        })
+        .returning();
 
-    await createDefaultRolesForCompany(company.id);
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: company.id })}, true)`,
+      );
 
-    await db.insert(companySettings).values({
-      companyId: company.id,
-      cnpj: company.cnpj,
-      ie: data.ie || null,
-      razaoSocial: company.razaoSocial,
-      nomeFantasia: company.nomeFantasia,
-      stoneEnabled: Boolean(data.stoneEnabled),
-      stoneClientId: data.stoneClientId || null,
-      stoneClientSecret: data.stoneClientSecret || null,
-      stoneTerminalId: data.stoneTerminalId || null,
-      stoneEnvironment: data.stoneEnvironment || "producao",
-      mpEnabled: Boolean(data.mpEnabled),
-      mpAccessToken: data.mpAccessToken || null,
-      mpTerminalId: data.mpTerminalId || null,
-      printerEnabled: Boolean(data.printerEnabled),
-      printerModel: data.printerModel || null,
-      printerPort: data.printerPort || null,
-      printerBaudRate: data.printerBaudRate ?? 9600,
-      printerColumns: data.printerColumns ?? 48,
-      printerCutCommand:
-        data.printerCutCommand === undefined ? true : Boolean(data.printerCutCommand),
-      printerBeepOnSale:
-        data.printerBeepOnSale === undefined ? true : Boolean(data.printerBeepOnSale),
-      receiptHeaderText: data.receiptHeaderText || null,
-      receiptFooterText: data.receiptFooterText || null,
-      receiptShowSeller:
-        data.receiptShowSeller === undefined ? true : Boolean(data.receiptShowSeller),
-      nfcePrintLayout: data.nfcePrintLayout || null,
-      nfeDanfeLayout: data.nfeDanfeLayout || null,
-      danfeLogoUrl: data.danfeLogoUrl || null,
-    });
+      await createDefaultRolesForCompany(tx, company.id);
 
-    const initialMachineIdByKey = new Map<string, number>();
-    if (Array.isArray(data.initialMachines) && data.initialMachines.length > 0) {
-      const normalizedInitialMachines = data.initialMachines
-        .filter((m) => String(m.name || "").trim())
-        .map((m) => ({
-          key: m.key,
-          row: {
-          companyId: company.id,
-          name: String(m.name || "").trim(),
-          provider: m.provider,
-          mpTerminalId: m.provider === "mercadopago" ? m.mpTerminalId || null : null,
-          stoneTerminalId:
-            m.provider === "stone" ? m.stoneTerminalId || null : null,
-          isActive: true,
-          },
-        }));
-
-      if (normalizedInitialMachines.length > 0) {
-        const insertedMachines = await db
-          .insert(paymentMachines)
-          .values(normalizedInitialMachines.map((m) => m.row))
-          .returning();
-        insertedMachines.forEach((row, index) => {
-          const source = normalizedInitialMachines[index];
-          if (source?.key) initialMachineIdByKey.set(source.key, row.id);
-        });
-      }
-    }
-
-    if (Array.isArray(data.initialTerminals) && data.initialTerminals.length > 0) {
-      const usedCodes = new Set<string>();
-      const terminalRows = data.initialTerminals
-        .filter((t) => String(t.name || "").trim())
-        .map((t, index) => {
-          let code = normalizeTerminalCode(t.code, `CX${String(index + 1).padStart(2, "0")}`);
-          while (usedCodes.has(code)) {
-            code = `${code}_${index + 1}`;
-          }
-          usedCodes.add(code);
-
-          const linkedMachineId = t.paymentMachineKey
-            ? initialMachineIdByKey.get(t.paymentMachineKey) || null
-            : null;
-
-          return {
-            companyId: company.id,
-            name: String(t.name || "").trim(),
-            code,
-            paymentMachineId: linkedMachineId,
-            paymentProvider:
-              linkedMachineId
-                ? "company_default"
-                : t.paymentProvider && t.paymentProvider !== "company_default"
-                ? t.paymentProvider
-                : "company_default",
-            mpTerminalId: t.mpTerminalId || null,
-            stoneTerminalId: t.stoneTerminalId || null,
-            isAutonomous: false,
-            requiresSangria: false,
-            requiresSuprimento: false,
-            requiresOpening: true,
-            requiresClosing: true,
-            isActive: true,
-          };
-        });
-
-      if (terminalRows.length > 0) {
-        await db.insert(posTerminals).values(terminalRows);
-      }
-    }
-
-    const [adminRole] = await db
-      .select()
-      .from(roles)
-      .where(
-        and(eq(roles.companyId, company.id), eq(roles.name, "Administrador")),
-      )
-      .limit(1);
-
-    if (!adminRole) {
-      return res.status(500).json({ error: "Perfil Administrador nao encontrado" });
-    }
-
-    const temporaryPassword = `invite-pending-${Date.now()}-${Math.random()}`;
-    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
-
-    const [adminUser] = await db
-      .insert(users)
-      .values({
+      await tx.insert(companySettings).values({
         companyId: company.id,
-        roleId: adminRole.id,
-        username: data.adminEmail.split("@")[0],
+        cnpj: company.cnpj,
+        ie: data.ie || null,
+        razaoSocial: company.razaoSocial,
+        nomeFantasia: company.nomeFantasia,
+        stoneEnabled: Boolean(data.stoneEnabled),
+        stoneClientId: data.stoneClientId || null,
+        stoneClientSecret: data.stoneClientSecret || null,
+        stoneTerminalId: data.stoneTerminalId || null,
+        stoneEnvironment: data.stoneEnvironment || "producao",
+        mpEnabled: Boolean(data.mpEnabled),
+        mpAccessToken: data.mpAccessToken || null,
+        mpTerminalId: data.mpTerminalId || null,
+        printerEnabled: Boolean(data.printerEnabled),
+        printerModel: data.printerModel || null,
+        printerPort: data.printerPort || null,
+        printerBaudRate: data.printerBaudRate ?? 9600,
+        printerColumns: data.printerColumns ?? 48,
+        printerCutCommand:
+          data.printerCutCommand === undefined ? true : Boolean(data.printerCutCommand),
+        printerBeepOnSale:
+          data.printerBeepOnSale === undefined ? true : Boolean(data.printerBeepOnSale),
+        receiptHeaderText: data.receiptHeaderText || null,
+        receiptFooterText: data.receiptFooterText || null,
+        receiptShowSeller:
+          data.receiptShowSeller === undefined ? true : Boolean(data.receiptShowSeller),
+        nfcePrintLayout: data.nfcePrintLayout || null,
+        nfeDanfeLayout: data.nfeDanfeLayout || null,
+        danfeLogoUrl: data.danfeLogoUrl || null,
+      });
+
+      const initialMachineIdByKey = new Map<string, number>();
+      if (Array.isArray(data.initialMachines) && data.initialMachines.length > 0) {
+        const normalizedInitialMachines = data.initialMachines
+          .filter((m) => String(m.name || "").trim())
+          .map((m) => ({
+            key: m.key,
+            row: {
+              companyId: company.id,
+              name: String(m.name || "").trim(),
+              provider: m.provider,
+              mpTerminalId: m.provider === "mercadopago" ? m.mpTerminalId || null : null,
+              stoneTerminalId:
+                m.provider === "stone" ? m.stoneTerminalId || null : null,
+              isActive: true,
+            },
+          }));
+
+        if (normalizedInitialMachines.length > 0) {
+          const insertedMachines = await tx
+            .insert(paymentMachines)
+            .values(normalizedInitialMachines.map((m) => m.row))
+            .returning();
+          insertedMachines.forEach((row, index) => {
+            const source = normalizedInitialMachines[index];
+            if (source?.key) initialMachineIdByKey.set(source.key, row.id);
+          });
+        }
+      }
+
+      if (Array.isArray(data.initialTerminals) && data.initialTerminals.length > 0) {
+        const usedCodes = new Set<string>();
+        const terminalRows = data.initialTerminals
+          .filter((t) => String(t.name || "").trim())
+          .map((t, index) => {
+            let code = normalizeTerminalCode(t.code, `CX${String(index + 1).padStart(2, "0")}`);
+            while (usedCodes.has(code)) {
+              code = `${code}_${index + 1}`;
+            }
+            usedCodes.add(code);
+
+            const linkedMachineId = t.paymentMachineKey
+              ? initialMachineIdByKey.get(t.paymentMachineKey) || null
+              : null;
+
+            return {
+              companyId: company.id,
+              name: String(t.name || "").trim(),
+              code,
+              paymentMachineId: linkedMachineId,
+              paymentProvider:
+                linkedMachineId
+                  ? "company_default"
+                  : t.paymentProvider && t.paymentProvider !== "company_default"
+                  ? t.paymentProvider
+                  : "company_default",
+              mpTerminalId: t.mpTerminalId || null,
+              stoneTerminalId: t.stoneTerminalId || null,
+              isAutonomous: false,
+              requiresSangria: false,
+              requiresSuprimento: false,
+              requiresOpening: true,
+              requiresClosing: true,
+              isActive: true,
+            };
+          });
+
+        if (terminalRows.length > 0) {
+          await tx.insert(posTerminals).values(terminalRows);
+        }
+      }
+
+      const [adminRole] = await tx
+        .select()
+        .from(roles)
+        .where(
+          and(eq(roles.companyId, company.id), eq(roles.name, "Administrador")),
+        )
+        .limit(1);
+
+      if (!adminRole) {
+        throw new Error("Perfil Administrador nao encontrado");
+      }
+
+      const temporaryPassword = `invite-pending-${Date.now()}-${Math.random()}`;
+      const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+
+      const [adminUser] = await tx
+        .insert(users)
+        .values({
+          companyId: company.id,
+          roleId: adminRole.id,
+          username: data.adminEmail.split("@")[0],
+          email: data.adminEmail,
+          password: hashedPassword,
+          name: data.adminName,
+        })
+        .returning();
+
+      const code = generateOnboardingCode();
+      const codeHash = hashOnboardingCode(code);
+      const expiresInMinutes = Number(
+        process.env.ONBOARDING_CODE_TTL_MINUTES || 30,
+      );
+      const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+
+      await tx.insert(companyOnboardingCodes).values({
+        companyId: company.id,
+        userId: adminUser.id,
         email: data.adminEmail,
-        password: hashedPassword,
-        name: data.adminName,
-      })
-      .returning();
+        codeHash,
+        expiresAt,
+      });
 
-    const code = generateOnboardingCode();
-    const codeHash = hashOnboardingCode(code);
-    const expiresInMinutes = Number(
-      process.env.ONBOARDING_CODE_TTL_MINUTES || 30,
-    );
-    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
-
-    await db.insert(companyOnboardingCodes).values({
-      companyId: company.id,
-      userId: adminUser.id,
-      email: data.adminEmail,
-      codeHash,
-      expiresAt,
+      return { company, adminUser, code, expiresAt };
     });
 
     const emailResult = await sendOnboardingCodeEmail({
       to: data.adminEmail,
       userName: data.adminName,
-      companyName: company.nomeFantasia || company.razaoSocial,
-      code,
+      companyName: result.company.nomeFantasia || result.company.razaoSocial,
+      code: result.code,
     });
 
     res.json({
       message:
         "Empresa cadastrada. O responsavel recebeu um codigo para criar a senha.",
       adminUser: {
-        id: adminUser.id,
-        name: adminUser.name,
-        email: adminUser.email,
+        id: result.adminUser.id,
+        name: result.adminUser.name,
+        email: result.adminUser.email,
       },
       company: {
-        id: company.id,
-        cnpj: company.cnpj,
-        razaoSocial: company.razaoSocial,
-        nomeFantasia: company.nomeFantasia,
-        email: company.email,
-        phone: company.phone,
+        id: result.company.id,
+        cnpj: result.company.cnpj,
+        razaoSocial: result.company.razaoSocial,
+        nomeFantasia: result.company.nomeFantasia,
+        email: result.company.email,
+        phone: result.company.phone,
       },
       onboarding: {
         emailSent: emailResult.sent,
-        expiresAt,
-        ...(process.env.NODE_ENV !== "production" ? { code } : {}),
+        expiresAt: result.expiresAt,
+        ...(process.env.NODE_ENV !== "production" ? { code: result.code } : {}),
         ...(emailResult.sent ? {} : { emailError: emailResult.reason }),
       },
     });

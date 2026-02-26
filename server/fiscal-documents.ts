@@ -211,6 +211,9 @@ export const NFeItemSchema = z.object({
   ncm: z.string().length(8),
   cfop: z.string().regex(/^\d{4}$/),
   csosn: z.string().regex(/^\d{3}$/),
+  cstIcms: z.string().optional(),
+  cstIpi: z.string().optional(),
+  cstPisCofins: z.string().optional(),
   quantity: z.number().positive(),
   unit: z.string(),
   unitPrice: z.number().positive(),
@@ -218,9 +221,15 @@ export const NFeItemSchema = z.object({
   discountValue: z.number().nonnegative().optional(),
   icmsValue: z.number().nonnegative(),
   icmsAliquot: z.number().min(0).max(100),
+  icmsStAliquot: z.number().min(0).max(100).optional(),
+  destinationIcmsAliquot: z.number().min(0).max(100).optional(),
+  fcpAliquot: z.number().min(0).max(100).optional(),
   piValue: z.number().nonnegative(),
   cofinsValue: z.number().nonnegative(),
   ipiValue: z.number().nonnegative(),
+  cBenef: z.string().optional(),
+  motDesIcms: z.string().optional(),
+  icmsDesonValue: z.number().nonnegative().optional(),
 });
 
 export const NFeSalesValidationSchema = z.object({
