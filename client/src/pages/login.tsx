@@ -37,11 +37,11 @@ export default function Login() {
   return (
     <div className="h-screen overflow-hidden bg-white p-0 font-['Plus_Jakarta_Sans']">
       <div className="mx-auto grid h-full max-w-[1600px] overflow-hidden rounded-sm border border-[#d7d9e2] bg-[#efeff8] md:grid-cols-2">
-        <section className="relative hidden overflow-hidden bg-[#060b1f] px-16 pb-14 pt-20 text-white md:flex md:flex-col">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_78%_35%,rgba(131,171,255,0.48)_0%,rgba(62,95,170,0.2)_18%,rgba(10,17,42,0.02)_52%)]" />
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(165deg,transparent_62%,rgba(121,170,255,0.2)_76%,transparent_90%)]" />
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(156deg,transparent_66%,rgba(126,170,255,0.17)_78%,transparent_90%)]" />
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_15%,rgba(26,54,130,0.35)_0%,rgba(8,14,35,0.18)_22%,transparent_50%)]" />
+        <section className="relative hidden overflow-hidden bg-[#000000] px-16 py-12 text-white md:flex md:flex-col md:justify-center">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_78%_35%,rgba(95,180,188,0.34)_0%,rgba(22,86,94,0.16)_22%,rgba(4,28,33,0.03)_54%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(165deg,transparent_62%,rgba(83,158,168,0.18)_76%,transparent_90%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(156deg,transparent_66%,rgba(72,142,151,0.15)_78%,transparent_90%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_15%,rgba(20,76,88,0.32)_0%,rgba(5,31,36,0.2)_24%,transparent_52%)]" />
 
           <img
             src="/images/Arqis-branco.png"
@@ -53,7 +53,7 @@ export default function Login() {
             A Solução Arqis
           </h2>
 
-          <div className="relative mt-14 space-y-10">
+          <div className="relative mt-10 space-y-10">
             <div className="flex items-start gap-5">
               <div className="flex w-[58px] items-center justify-center border-r border-white/20 pr-5 pt-1">
                 <BriefcaseBusiness className="h-10 w-10 stroke-[1.8] text-[#d9e4ff]" />
@@ -96,9 +96,9 @@ export default function Login() {
           </p>
         </section>
 
-        <section className="flex items-center justify-center px-8 py-10 md:px-10">
-          <div className="w-full max-w-[700px] rounded-3xl border border-[#cfd1db] bg-[#f4f4f6] px-10 pb-10 pt-12 shadow-[0_10px_30px_rgba(32,36,67,0.12)] md:px-14 md:pb-12 md:pt-14">
-            <div className="mb-14 flex justify-center">
+        <section className="grid h-full place-items-center px-8 md:px-10">
+          <div className="w-full max-w-[700px] rounded-3xl border border-[#cfd1db] bg-[#f4f4f6] px-10 py-8 shadow-[0_10px_30px_rgba(32,36,67,0.12)] md:px-14 md:py-8">
+            <div className="mb-10 flex justify-center">
               <img
                 src="/images/Arqis.png"
                 alt="Arqis"
@@ -200,3 +200,5 @@ export default function Login() {
     </div>
   );
 }
+
+
