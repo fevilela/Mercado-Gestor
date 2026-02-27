@@ -35,8 +35,8 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-white p-3">
-      <div className="mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-[1600px] overflow-hidden rounded-sm border border-[#d7d9e2] bg-[#efeff8] md:grid-cols-2">
+    <div className="h-screen overflow-hidden bg-white p-0 font-['Plus_Jakarta_Sans']">
+      <div className="mx-auto grid h-full max-w-[1600px] overflow-hidden rounded-sm border border-[#d7d9e2] bg-[#efeff8] md:grid-cols-2">
         <section className="relative hidden overflow-hidden bg-[#060b1f] px-16 pb-14 pt-20 text-white md:flex md:flex-col">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_78%_35%,rgba(131,171,255,0.48)_0%,rgba(62,95,170,0.2)_18%,rgba(10,17,42,0.02)_52%)]" />
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(165deg,transparent_62%,rgba(121,170,255,0.2)_76%,transparent_90%)]" />
@@ -46,52 +46,52 @@ export default function Login() {
           <img
             src="/images/Arqis-branco.png"
             alt="Arqis"
-            className="relative mb-16 h-12 w-auto object-contain"
+            className="relative mb-8 h-12 w-auto object-contain"
           />
 
-          <h2 className="relative text-[64px] font-semibold leading-[1.06] tracking-[-0.02em]">
-            A Solucao ARQIS
+          <h2 className="relative text-center text-[52px] font-['Sora'] font-semibold leading-[1.06] tracking-[-0.02em]">
+            A Solução Arqis
           </h2>
 
           <div className="relative mt-14 space-y-10">
             <div className="flex items-start gap-5">
-              <div className="flex w-[78px] items-center justify-center border-r border-white/20 pr-5 pt-1">
+              <div className="flex w-[58px] items-center justify-center border-r border-white/20 pr-5 pt-1">
                 <BriefcaseBusiness className="h-10 w-10 stroke-[1.8] text-[#d9e4ff]" />
               </div>
               <div>
-                <p className="text-[28px] font-semibold leading-none text-white">Arquitetura Centralizada</p>
-                <p className="mt-2 text-[19px] leading-tight text-[#dbe3f8]">
+                <p className="text-[18px] font-['Sora'] font-semibold leading-none text-white">Arquitetura Centralizada</p>
+                <p className="mt-2 text-[12px] leading-tight text-[#dbe3f8]">
                   Um unico ponto de verdade <span className="font-semibold text-white">para toda</span> operacao.
                 </p>
               </div>
             </div>
 
             <div className="flex items-start gap-5">
-              <div className="flex w-[78px] items-center justify-center border-r border-white/20 pr-5 pt-1">
+              <div className="flex w-[58px] items-center justify-center border-r border-white/20 pr-5 pt-1">
                 <Store className="h-10 w-10 stroke-[1.8] text-[#d9e4ff]" />
               </div>
               <div>
-                <p className="text-[28px] font-semibold leading-none text-white">Controle em Tempo Real</p>
-                <p className="mt-2 text-[19px] leading-tight text-[#dbe3f8]">
+                <p className="text-[18px] font-['Sora'] font-semibold leading-none text-white">Controle em Tempo Real</p>
+                <p className="mt-2 text-[12px] leading-tight text-[#dbe3f8]">
                   Estoque, vendas e metricas com visibilidade total.
                 </p>
               </div>
             </div>
 
             <div className="flex items-start gap-5">
-              <div className="flex w-[78px] items-center justify-center border-r border-white/20 pr-5 pt-1">
+              <div className="flex w-[58px] items-center justify-center border-r border-white/20 pr-5 pt-1">
                 <Lightbulb className="h-10 w-10 stroke-[1.8] text-[#d9e4ff]" />
               </div>
               <div>
-                <p className="text-[28px] font-semibold leading-none text-white">Inteligencia Operacional</p>
-                <p className="mt-2 text-[19px] leading-tight text-[#dbe3f8]">
+                <p className="text-[18px] font-['Sora'] font-semibold leading-none text-white">Inteligencia Operacional</p>
+                <p className="mt-2 text-[12px] leading-tight text-[#dbe3f8]">
                   Analises preditivas e decisoes baseadas em dados.
                 </p>
               </div>
             </div>
           </div>
 
-          <p className="relative mt-auto max-w-[78%] text-[26px] leading-tight text-[#dbe3f8]">
+          <p className="relative mt-10 max-w-none whitespace-nowrap text-[18px] leading-tight text-[#dbe3f8]">
             Controle total e decisoes inteligentes para operacoes modernas.
           </p>
         </section>
@@ -109,7 +109,7 @@ export default function Login() {
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-[16px] font-semibold text-[#151515]">Email</Label>
+                <Label htmlFor="email" className="text-[14px] font-['Sora'] font-semibold text-[#151515]">Email</Label>
                 <div className="relative">
                   <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#717171]" />
                   <Input
@@ -118,7 +118,7 @@ export default function Login() {
                     placeholder="seu@email.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="h-12 rounded-lg border-[#c7c8cf] bg-[#f8f8f8] pl-12 text-[15px] text-[#1e1e1e] placeholder:text-[#717171]"
+                    className="h-12 rounded-lg border-[#c7c8cf] bg-[#f8f8f8] pl-12 text-[14px] text-[#1e1e1e] placeholder:text-[#717171]"
                     required
                     data-testid="input-email"
                   />
@@ -126,7 +126,7 @@ export default function Login() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-[16px] font-semibold text-[#151515]">Senha</Label>
+                <Label htmlFor="password" className="text-[14px] font-['Sora'] font-semibold text-[#151515]">Senha</Label>
                 <div className="relative">
                   <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#717171]" />
                   <Input
@@ -135,7 +135,7 @@ export default function Login() {
                     placeholder="Sua senha"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="h-12 rounded-lg border-[#c7c8cf] bg-[#f8f8f8] pl-12 text-[15px] text-[#1e1e1e] placeholder:text-[#717171]"
+                    className="h-12 rounded-lg border-[#c7c8cf] bg-[#f8f8f8] pl-12 text-[14px] text-[#1e1e1e] placeholder:text-[#717171]"
                     required
                     data-testid="input-password"
                   />
@@ -144,7 +144,7 @@ export default function Login() {
 
               <Button
                 type="submit"
-                className="mt-2 h-[50px] w-full rounded-lg bg-black text-[20px] font-medium text-white hover:bg-[#111111]"
+                className="mt-2 h-[50px] w-full rounded-lg bg-black text-[16px] font-medium text-white hover:bg-[#111111]"
                 disabled={isLoading}
                 data-testid="button-login"
               >
@@ -158,7 +158,7 @@ export default function Login() {
                 )}
               </Button>
 
-              <p className="text-center text-[18px] text-[#171717]">
+              <p className="text-center text-[14px] text-[#171717]">
                 <a
                   href="/forgot-password"
                   onClick={(e) => {
@@ -187,7 +187,7 @@ export default function Login() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-[50px] w-full rounded-lg border-[#101010] bg-transparent text-[19px] font-normal text-[#101010] hover:bg-white"
+                className="h-[50px] w-full rounded-lg border-[#101010] bg-transparent text-[16px] font-normal text-[#101010] hover:bg-white"
                 onClick={() => setLocation("/manager-onboarding")}
                 data-testid="button-manager-onboarding"
               >
