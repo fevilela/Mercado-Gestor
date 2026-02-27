@@ -128,16 +128,16 @@ const PAYABLE_CATEGORIES = [
   "Fornecedores",
   "Aluguel",
   "Energia",
-  "Água",
+  "ÃƒÂgua",
   "Internet",
   "Impostos",
-  "Salários",
+  "SalÃƒÂ¡rios",
   "Marketing",
-  "Manutenção",
+  "ManutenÃƒÂ§ÃƒÂ£o",
   "Outros",
 ];
 
-const RECEIVABLE_CATEGORIES = ["Vendas", "Serviços", "Empréstimos", "Outros"];
+const RECEIVABLE_CATEGORIES = ["Vendas", "ServiÃƒÂ§os", "EmprÃƒÂ©stimos", "Outros"];
 
 export default function Finance() {
   const [location] = useLocation();
@@ -327,7 +327,7 @@ export default function Finance() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/payables"] });
-      toast({ title: "Conta a pagar excluída" });
+      toast({ title: "Conta a pagar excluÃƒÂ­da" });
     },
   });
 
@@ -338,7 +338,7 @@ export default function Finance() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/receivables"] });
-      toast({ title: "Conta a receber excluída" });
+      toast({ title: "Conta a receber excluÃƒÂ­da" });
     },
   });
 
@@ -457,17 +457,17 @@ export default function Finance() {
   const handleDownloadReport = () => {
     const monthLabel = format(selectedMonth, "MMMM yyyy", { locale: ptBR });
 
-    let content = `RELATÓRIO FINANCEIRO - ${monthLabel.toUpperCase()}\n`;
+    let content = `RELATÃƒâ€œRIO FINANCEIRO - ${monthLabel.toUpperCase()}\n`;
     content += "=".repeat(50) + "\n\n";
 
     content += "RESUMO\n";
     content += "-".repeat(30) + "\n";
-    content += `Receitas do Mês: R$ ${currentMonthTotal.toFixed(2)}\n`;
+    content += `Receitas do MÃƒÂªs: R$ ${currentMonthTotal.toFixed(2)}\n`;
     content += `Contas a Pagar Pendentes: R$ ${totalPayables.toFixed(2)}\n`;
     content += `Contas a Receber Pendentes: R$ ${totalReceivables.toFixed(
       2
     )}\n`;
-    content += `Saldo Líquido: R$ ${netBalance.toFixed(2)}\n\n`;
+    content += `Saldo Liquido: R$ ${netBalance.toFixed(2)}\n\n`;
 
     content += "CONTAS A PAGAR\n";
     content += "-".repeat(30) + "\n";
@@ -502,7 +502,7 @@ export default function Finance() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    toast({ title: "Relatório baixado com sucesso" });
+    toast({ title: "RelatÃƒÂ³rio baixado com sucesso" });
   };
 
   const handlePayableSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -558,76 +558,66 @@ export default function Finance() {
 
   return (
     <Layout>
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-3xl font-heading font-bold tracking-tight text-foreground">
+            <h1 className="text-4xl font-heading font-bold tracking-tight text-foreground">
               Financeiro
             </h1>
-            <p className="text-muted-foreground">
-              Fluxo de caixa, contas a pagar e DRE.
-            </p>
+            <p className="text-sm text-muted-foreground">Fluxo do caixa, contas a pagar e DRE.</p>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setSelectedMonth(subMonths(selectedMonth, 1))}
-            >
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => setSelectedMonth(subMonths(selectedMonth, 1))}>
               &lt;
             </Button>
-            <Button variant="outline" className="min-w-[150px]">
-              <Calendar className="mr-2 h-4 w-4" />
+            <Button variant="outline" className="h-8 min-w-[132px] rounded-md bg-white text-xs">
+              <Calendar className="mr-1.5 h-3.5 w-3.5" />
               {format(selectedMonth, "MMMM yyyy", { locale: ptBR })}
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))}
-            >
+            <Button variant="outline" size="icon" className="h-8 w-8 rounded-md" onClick={() => setSelectedMonth(addMonths(selectedMonth, 1))}>
               &gt;
             </Button>
-            <Button variant="outline" onClick={handleDownloadReport}>
-              <Download className="mr-2 h-4 w-4" /> Relatórios
-            </Button>
+            <Button variant="outline" className="h-8 rounded-md bg-[#2d4f86] text-white hover:bg-[#264577] hover:text-white" onClick={handleDownloadReport}><Download className="mr-1.5 h-3.5 w-3.5" /> Relatorios</Button>
           </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
-          <Card className="bg-emerald-500/10 border-emerald-500/20">
+          <Card className="border-emerald-200 bg-emerald-50/60 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-                Receitas (Mês)
+              <CardTitle className="text-xs font-medium text-emerald-700">
+                Receitas (Mes)
               </CardTitle>
-              <ArrowUpRight className="h-4 w-4 text-emerald-600" />
+              <ArrowUpRight className="h-3.5 w-3.5 text-emerald-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">
+              <div className="text-[30px] leading-none font-bold text-emerald-700">
                 R${" "}
                 {currentMonthTotal.toLocaleString("pt-BR", {
                   minimumFractionDigits: 2,
                 })}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-[11px] text-muted-foreground mt-1">
                 {Number(monthChange) >= 0 ? "+" : ""}
-                {monthChange}% vs. mês anterior
+                {monthChange}% vs. mes anterior
               </p>
             </CardContent>
           </Card>
 
-          <Card className="bg-rose-500/10 border-rose-500/20">
+          <Card className="border-rose-200 bg-rose-50/60 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-rose-700 dark:text-rose-400">
+              <CardTitle className="text-xs font-medium text-rose-700">
                 A Pagar (Pendente)
               </CardTitle>
-              <ArrowDownRight className="h-4 w-4 text-rose-600" />
+              <ArrowDownRight className="h-3.5 w-3.5 text-rose-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-rose-700 dark:text-rose-400">
+              <div className="text-[30px] leading-none font-bold text-rose-700">
                 R${" "}
                 {totalPayables.toLocaleString("pt-BR", {
                   minimumFractionDigits: 2,
                 })}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-[11px] text-muted-foreground mt-1">
                 {
                   payables.filter((p: Payable) => p.status === "Pendente")
                     .length
@@ -637,21 +627,21 @@ export default function Finance() {
             </CardContent>
           </Card>
 
-          <Card className="bg-primary/10 border-primary/20">
+          <Card className="border-slate-200 bg-slate-50/70 shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-primary">
-                Saldo Líquido
+              <CardTitle className="text-xs font-medium text-slate-700">
+                Saldo Liquido
               </CardTitle>
-              <DollarSign className="h-4 w-4 text-primary" />
+              <DollarSign className="h-3.5 w-3.5 text-slate-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-primary">
+              <div className="text-[30px] leading-none font-bold text-slate-800">
                 R${" "}
                 {netBalance.toLocaleString("pt-BR", {
                   minimumFractionDigits: 2,
                 })}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-[11px] text-muted-foreground mt-1">
                 Margem: {marginPercent}%
               </p>
             </CardContent>
@@ -665,7 +655,7 @@ export default function Finance() {
           }
           className="space-y-4"
         >
-          <TabsList>
+          <TabsList className="h-9 rounded-lg bg-slate-100 p-1">
             <TabsTrigger value="cashflow">Fluxo de Caixa</TabsTrigger>
             <TabsTrigger value="payables">Contas a Pagar</TabsTrigger>
             <TabsTrigger value="receivables">Contas a Receber</TabsTrigger>
@@ -674,11 +664,11 @@ export default function Finance() {
 
           <TabsContent value="cashflow" className="space-y-4">
             <div className="grid gap-4 md:grid-cols-7">
-              <Card className="col-span-4">
+              <Card className="col-span-4 border-slate-200 shadow-sm">
                 <CardHeader>
-                  <CardTitle>Fluxo Diário</CardTitle>
+                  <CardTitle>Fluxo Diario</CardTitle>
                   <CardDescription>
-                    Entradas vs. Saídas nos últimos 7 dias.
+                    Entradas vs. Saidas nos ultimos 7 dias.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="pl-2">
@@ -723,7 +713,7 @@ export default function Finance() {
                       <Line
                         type="monotone"
                         dataKey="out"
-                        name="Saídas"
+                        name="SaÃƒÂ­das"
                         stroke="#ef4444"
                         strokeWidth={2}
                         dot={false}
@@ -733,11 +723,11 @@ export default function Finance() {
                 </CardContent>
               </Card>
 
-              <Card className="col-span-3">
+              <Card className="col-span-3 border-slate-200 shadow-sm">
                 <CardHeader>
-                  <CardTitle>Vendas por Método</CardTitle>
+                  <CardTitle>Vendas por Metodo</CardTitle>
                   <CardDescription>
-                    Distribuição por forma de pagamento.
+                    Distribuicao por forma de pagamento.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -783,7 +773,7 @@ export default function Finance() {
           <TabsContent value="payables">
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex items-start justify-between">
                   <div>
                     <CardTitle>Contas a Pagar</CardTitle>
                     <CardDescription>
@@ -810,7 +800,7 @@ export default function Finance() {
                       <form onSubmit={handlePayableSubmit}>
                         <div className="grid gap-4 py-4">
                           <div className="grid gap-2">
-                            <Label htmlFor="description">Descrição *</Label>
+                            <Label htmlFor="description">DescriÃƒÂ§ÃƒÂ£o *</Label>
                             <Input
                               id="description"
                               name="description"
@@ -879,7 +869,7 @@ export default function Finance() {
                             </Select>
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="notes">Observações</Label>
+                            <Label htmlFor="notes">ObservaÃƒÂ§ÃƒÂµes</Label>
                             <Input id="notes" name="notes" />
                           </div>
                         </div>
@@ -903,7 +893,7 @@ export default function Finance() {
                 {filteredPayables.length === 0 ? (
                   <div className="text-center text-muted-foreground py-8">
                     <DollarSign className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>Nenhuma conta a pagar para este mês</p>
+                    <p>Nenhuma conta a pagar para este mÃƒÂªs</p>
                     <p className="text-sm mt-2">
                       Clique em "Nova Conta" para adicionar
                     </p>
@@ -912,13 +902,13 @@ export default function Finance() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Descrição</TableHead>
+                        <TableHead>DescriÃƒÂ§ÃƒÂ£o</TableHead>
                         <TableHead>Categoria</TableHead>
                         <TableHead>Fornecedor</TableHead>
                         <TableHead>Vencimento</TableHead>
                         <TableHead className="text-right">Valor</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Ações</TableHead>
+                        <TableHead className="text-right">AÃƒÂ§ÃƒÂµes</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -984,7 +974,7 @@ export default function Finance() {
           <TabsContent value="receivables">
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex items-start justify-between">
                   <div>
                     <CardTitle>Contas a Receber</CardTitle>
                     <CardDescription>
@@ -1011,7 +1001,7 @@ export default function Finance() {
                       <form onSubmit={handleReceivableSubmit}>
                         <div className="grid gap-4 py-4">
                           <div className="grid gap-2">
-                            <Label htmlFor="description">Descrição *</Label>
+                            <Label htmlFor="description">DescriÃƒÂ§ÃƒÂ£o *</Label>
                             <Input
                               id="description"
                               name="description"
@@ -1080,7 +1070,7 @@ export default function Finance() {
                             </Select>
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="notes">Observações</Label>
+                            <Label htmlFor="notes">ObservaÃƒÂ§ÃƒÂµes</Label>
                             <Input id="notes" name="notes" />
                           </div>
                         </div>
@@ -1104,7 +1094,7 @@ export default function Finance() {
                 {filteredReceivables.length === 0 ? (
                   <div className="text-center text-muted-foreground py-8">
                     <DollarSign className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>Nenhuma conta a receber para este mês</p>
+                    <p>Nenhuma conta a receber para este mÃƒÂªs</p>
                     <p className="text-sm mt-2">
                       Clique em "Nova Conta" para adicionar
                     </p>
@@ -1113,13 +1103,13 @@ export default function Finance() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Descrição</TableHead>
+                        <TableHead>DescriÃƒÂ§ÃƒÂ£o</TableHead>
                         <TableHead>Categoria</TableHead>
                         <TableHead>Cliente</TableHead>
                         <TableHead>Vencimento</TableHead>
                         <TableHead className="text-right">Valor</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Ações</TableHead>
+                        <TableHead className="text-right">AÃƒÂ§ÃƒÂµes</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1193,7 +1183,7 @@ export default function Finance() {
               <CardHeader>
                 <CardTitle>DRE Gerencial</CardTitle>
                 <CardDescription>
-                  Demonstrativo de Resultado do Exercício
+                  Demonstrativo de Resultado do ExercÃƒÂ­cio
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -1230,7 +1220,7 @@ export default function Finance() {
                     </span>
                   </div>
                   <div className="flex justify-between items-center pt-2">
-                    <span className="font-bold text-lg">Resultado Líquido</span>
+                    <span className="font-bold text-lg">Resultado LÃƒÂ­quido</span>
                     <span
                       className={`font-bold text-lg ${
                         netBalance >= 0 ? "text-emerald-600" : "text-rose-600"

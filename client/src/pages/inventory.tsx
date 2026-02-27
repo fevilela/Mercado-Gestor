@@ -26,6 +26,10 @@ import {
   Upload,
   RefreshCw,
   ReceiptText,
+  List,
+  Grid3X3,
+  AlertTriangle,
+  CircleAlert,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -169,20 +173,20 @@ const adjustmentTypes = [
     label: "Entrada (Compra/Recebimento)",
     icon: PackagePlus,
   },
-  { value: "saida", label: "Saída (Uso/Transferência)", icon: PackageMinus },
-  { value: "ajuste", label: "Ajuste de Inventário", icon: Package },
+  { value: "saida", label: "SaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­da (Uso/TransferÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âªncia)", icon: PackageMinus },
+  { value: "ajuste", label: "Ajuste de InventÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio", icon: Package },
   { value: "perda", label: "Perda/Avaria", icon: PackageMinus },
-  { value: "devolucao", label: "Devolução", icon: PackagePlus },
+  { value: "devolucao", label: "DevoluÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o", icon: PackagePlus },
 ];
 
 const adjustmentReasons = [
-  "Contagem de inventário",
+  "Contagem de inventÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio",
   "Compra de fornecedor",
-  "Devolução de cliente",
+  "DevoluÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o de cliente",
   "Produto avariado",
   "Produto vencido",
-  "Transferência entre lojas",
-  "Correção de erro",
+  "TransferÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âªncia entre lojas",
+  "CorreÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o de erro",
   "Outro",
 ];
 
@@ -214,6 +218,7 @@ export default function Inventory() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [isSendingPdvLoad, setIsSendingPdvLoad] = useState(false);
   const [pdvLoadFeedback, setPdvLoadFeedback] = useState<{
     type: "success" | "error";
@@ -506,7 +511,7 @@ export default function Inventory() {
     if (!file) return;
 
     if (!file.name.toLowerCase().endsWith(".xml")) {
-      toast.error("Por favor, selecione um arquivo XML válido");
+      toast.error("Por favor, selecione um arquivo XML vÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido");
       return;
     }
 
@@ -919,7 +924,7 @@ export default function Inventory() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast.success("Produto excluído com sucesso!");
+      toast.success("Produto excluÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­do com sucesso!");
       setDeleteProductId(null);
     },
     onError: () => {
@@ -1000,7 +1005,7 @@ export default function Inventory() {
 
     const quantity = parseInt(adjustQuantity);
     if (isNaN(quantity) || quantity <= 0) {
-      toast.error("Quantidade deve ser um número positivo");
+      toast.error("Quantidade deve ser um nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºmero positivo");
       return;
     }
 
@@ -1066,6 +1071,21 @@ export default function Inventory() {
     )
   );
 
+  const inventorySummary = useMemo(() => {
+    const total = products.length;
+    const critical = products.filter((product: any) => {
+      const stock = Number(product.stock || 0);
+      const minStock = Math.max(1, Number(product.minStock || 1));
+      return stock <= minStock * 0.5;
+    }).length;
+    const belowMin = products.filter((product: any) => {
+      const stock = Number(product.stock || 0);
+      const minStock = Math.max(1, Number(product.minStock || 1));
+      return stock > minStock * 0.5 && stock <= minStock;
+    }).length;
+    return { total, critical, belowMin };
+  }, [products]);
+
   if (isLoading) {
     return (
       <Layout>
@@ -1081,14 +1101,14 @@ export default function Inventory() {
 
   return (
     <Layout>
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-heading font-bold tracking-tight text-foreground">
+            <h1 className="text-4xl font-heading font-bold tracking-tight text-foreground">
               Produtos & Estoque
             </h1>
-            <p className="text-muted-foreground">
-              Gerencie seu catálogo, preços e níveis de estoque.
+            <p className="text-sm text-muted-foreground">
+              Gerencie seu catalogo, precos e niveis de estoque.
             </p>
           </div>
           <div className="flex gap-2">
@@ -1150,12 +1170,36 @@ export default function Inventory() {
           </p>
         )}
 
-        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between bg-card p-4 rounded-lg border border-border shadow-sm">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-lg border border-border bg-slate-50 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Produtos</p>
+              <Package className="h-4 w-4 text-slate-600" />
+            </div>
+            <p className="text-2xl font-semibold text-slate-800">{inventorySummary.total}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-rose-50 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Criticos</p>
+              <AlertTriangle className="h-4 w-4 text-rose-600" />
+            </div>
+            <p className="text-2xl font-semibold text-rose-700">{inventorySummary.critical}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-amber-50 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">Abaixo do minimo</p>
+              <CircleAlert className="h-4 w-4 text-amber-600" />
+            </div>
+            <p className="text-2xl font-semibold text-amber-700">{inventorySummary.belowMin}</p>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-card p-3 rounded-lg border border-border shadow-sm">
           <div className="relative w-full sm:w-96">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               data-testid="input-search-products"
-              placeholder="Buscar por nome, código de barras, EAN ou SKU..."
+              placeholder="Buscar produto por nome, EAN ou SKU..."
               className="pl-9"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -1164,17 +1208,40 @@ export default function Inventory() {
           <div className="flex gap-2 w-full sm:w-auto">
             <Button
               variant="outline"
-              className="flex-1 sm:flex-none"
+              className="h-9 rounded-lg flex-1 sm:flex-none"
               onClick={() => setFiltersOpen(true)}
             >
               <Filter className="mr-2 h-4 w-4" /> Filtros
             </Button>
             <Button
               variant="outline"
-              className="flex-1 sm:flex-none"
+              className="h-9 rounded-lg flex-1 sm:flex-none"
               onClick={() => setCategoriesOpen(true)}
             >
               Categorias
+            </Button>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-border bg-card p-2">
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant={viewMode === "list" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setViewMode("list")}
+            >
+              <List className="mr-1.5 h-4 w-4" />
+              Lista
+            </Button>
+            <Button
+              type="button"
+              variant={viewMode === "grid" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setViewMode("grid")}
+            >
+              <Grid3X3 className="mr-1.5 h-4 w-4" />
+              Grade
             </Button>
           </div>
         </div>
@@ -1194,11 +1261,12 @@ export default function Inventory() {
           </div>
         ) : (
           <div className="rounded-md border border-border bg-card shadow-sm overflow-hidden">
-            <Table>
+            {viewMode === "list" && (
+            <Table className="table-fixed">
               <TableHeader>
                 <TableRow className="bg-muted/50">
-                  <TableHead className="w-[100px]">Imagem</TableHead>
-                  <TableHead className="min-w-[200px]">
+                  <TableHead className="w-[90px] text-center">ID</TableHead>
+                  <TableHead className="w-[34%] min-w-[220px]">
                     <Button
                       variant="ghost"
                       className="p-0 font-semibold hover:bg-transparent"
@@ -1206,12 +1274,12 @@ export default function Inventory() {
                       Produto <ArrowUpDown className="ml-2 h-3 w-3" />
                     </Button>
                   </TableHead>
-                  <TableHead>Categoria</TableHead>
-                  <TableHead>Unidade</TableHead>
-                  <TableHead>Preço Venda</TableHead>
-                  <TableHead className="min-w-[150px]">Estoque</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
+                  <TableHead className="w-[13%]">Categoria</TableHead>
+                  <TableHead className="w-[9%] text-center">Unidade</TableHead>
+                  <TableHead className="w-[12%] text-center">Preco Venda</TableHead>
+                  <TableHead className="w-[18%]">Estoque</TableHead>
+                  <TableHead className="w-[9%] text-center">Status</TableHead>
+                  <TableHead className="w-[6%] text-right">Acoes</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1227,7 +1295,7 @@ export default function Inventory() {
 
                   if (product.stock <= minStock * 0.5) {
                     statusColor = "bg-destructive";
-                    statusText = "Crítico";
+                    statusText = "Critico";
                   } else if (product.stock <= minStock) {
                     statusColor = "bg-amber-500";
                     statusText = "Baixo";
@@ -1238,18 +1306,10 @@ export default function Inventory() {
                       key={product.id}
                       data-testid={`row-product-${product.id}`}
                     >
-                      <TableCell>
-                        <div className="h-12 w-12 rounded-md bg-muted flex items-center justify-center overflow-hidden border border-border">
-                          {product.mainImageUrl ? (
-                            <img
-                              src={product.mainImageUrl}
-                              alt={product.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <Package className="h-6 w-6 text-muted-foreground opacity-50" />
-                          )}
-                        </div>
+                      <TableCell className="text-center">
+                        <span className="inline-flex min-w-[56px] items-center justify-center rounded-md border border-border bg-muted px-2 py-1 text-xs font-semibold text-foreground">
+                          {product.id}
+                        </span>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
@@ -1259,7 +1319,7 @@ export default function Inventory() {
                               ? `EAN: ${product.ean}`
                               : product.sku
                               ? `SKU: ${product.sku}`
-                              : "Sem código"}
+                              : "Sem codigo"}
                           </span>
                           {product.brand && (
                             <span className="text-xs text-muted-foreground">
@@ -1273,10 +1333,10 @@ export default function Inventory() {
                           {product.category}
                         </Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-center">
                         <span className="text-sm">{product.unit || "UN"}</span>
                       </TableCell>
-                      <TableCell className="font-medium">
+                      <TableCell className="text-center font-medium">
                         <div className="flex flex-col">
                           <span>R$ {parseFloat(product.price).toFixed(2)}</span>
                           {product.promoPrice && (
@@ -1294,7 +1354,7 @@ export default function Inventory() {
                               {product.stock} {product.unit || "un"}
                             </span>
                             <span className="text-muted-foreground">
-                              Máx: {maxStock}
+                              Max: {maxStock}
                             </span>
                           </div>
                           <Progress
@@ -1304,11 +1364,11 @@ export default function Inventory() {
                           />
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-center">
                         <Badge
                           variant="outline"
                           className={`${
-                            statusText === "Crítico"
+                            statusText === "Critico"
                               ? "text-destructive border-destructive/50"
                               : statusText === "Baixo"
                               ? "text-amber-600 border-amber-500/50"
@@ -1331,7 +1391,7 @@ export default function Inventory() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>Ações</DropdownMenuLabel>
+                            <DropdownMenuLabel>Acoes</DropdownMenuLabel>
                             <DropdownMenuItem
                               onClick={() => handleEdit(product)}
                               data-testid={`button-edit-${product.id}`}
@@ -1364,6 +1424,97 @@ export default function Inventory() {
                 })}
               </TableBody>
             </Table>
+            )}
+            {viewMode === "grid" && (
+              <div className="grid gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredProducts.map((product: any) => {
+                  const maxStock = product.maxStock || 100;
+                  const stockPercentage = Math.min((product.stock / maxStock) * 100, 100);
+                  const minStock = product.minStock || 10;
+                  let statusColor = "bg-emerald-500";
+                  let statusText = "Em Estoque";
+
+                  if (product.stock <= minStock * 0.5) {
+                    statusColor = "bg-destructive";
+                    statusText = "Critico";
+                  } else if (product.stock <= minStock) {
+                    statusColor = "bg-amber-500";
+                    statusText = "Baixo";
+                  }
+
+                  return (
+                    <div key={product.id} className="rounded-lg border border-border bg-white p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="h-12 min-w-[56px] rounded-md bg-muted border border-border flex items-center justify-center text-xs font-semibold text-foreground">
+                            {product.id}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="line-clamp-1 font-medium">{product.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {product.ean ? `EAN: ${product.ean}` : product.sku ? `SKU: ${product.sku}` : "Sem codigo"}
+                            </p>
+                          </div>
+                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>Acoes</DropdownMenuLabel>
+                            <DropdownMenuItem onClick={() => handleEdit(product)}>
+                              <Pencil className="mr-2 h-4 w-4" /> Editar Produto
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleAdjustStock(product)}>
+                              <PackagePlus className="mr-2 h-4 w-4" /> Ajustar Estoque
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-destructive" onClick={() => setDeleteProductId(product.id)}>
+                              <Trash2 className="mr-2 h-4 w-4" /> Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Categoria</p>
+                          <Badge variant="secondary" className="mt-1 font-normal">{product.category}</Badge>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Preco Venda</p>
+                          <p className="font-semibold">R$ {parseFloat(product.price).toFixed(2)}</p>
+                        </div>
+                      </div>
+                      <div className="mt-2 space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span>{product.stock} {product.unit || "un"}</span>
+                          <span className="text-muted-foreground">Max: {maxStock}</span>
+                        </div>
+                        <Progress value={stockPercentage} className="h-2" indicatorClassName={statusColor} />
+                        <Badge
+                          variant="outline"
+                          className={`${
+                            statusText === "Critico"
+                              ? "text-destructive border-destructive/50"
+                              : statusText === "Baixo"
+                              ? "text-amber-600 border-amber-500/50"
+                              : ""
+                          }`}
+                        >
+                          {statusText}
+                        </Badge>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="flex items-center justify-between border-t border-border px-3 py-2 text-xs text-muted-foreground">
+              <span>Exibindo 1 a {filteredProducts.length} de {products.length} produtos</span>
+              <span>{viewMode === "list" ? "Lista" : "Grade"}</span>
+            </div>
           </div>
         )}
       </div>
@@ -1740,7 +1891,7 @@ export default function Inventory() {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir Produto</AlertDialogTitle>
             <AlertDialogDescription>
-              Tem certeza que deseja excluir este produto? Esta ação não pode
+              Tem certeza que deseja excluir este produto? Esta aÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o pode
               ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1781,7 +1932,7 @@ export default function Inventory() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="adjustType">Tipo de Movimentação *</Label>
+                <Label htmlFor="adjustType">Tipo de MovimentaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o *</Label>
                 <Select value={adjustType} onValueChange={setAdjustType}>
                   <SelectTrigger
                     id="adjustType"
@@ -1835,7 +1986,7 @@ export default function Inventory() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="adjustNotes">Observações (opcional)</Label>
+                <Label htmlFor="adjustNotes">ObservaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âµes (opcional)</Label>
                 <Textarea
                   id="adjustNotes"
                   placeholder="Detalhes adicionais sobre o ajuste..."
@@ -1863,7 +2014,7 @@ export default function Inventory() {
                   </p>
                   {getNewStockPreview() < 0 && (
                     <p className="text-xs text-destructive mt-1">
-                      Atenção: O estoque não pode ficar negativo
+                      AtenÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o: O estoque nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o pode ficar negativo
                     </p>
                   )}
                 </div>
@@ -1908,7 +2059,7 @@ export default function Inventory() {
       >
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>Pré-visualização da Importação XML</DialogTitle>
+            <DialogTitle>PrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©-visualizaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o da ImportaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o XML</DialogTitle>
           </DialogHeader>
 
           <div className="flex-1 overflow-auto">
@@ -2021,9 +2172,9 @@ export default function Inventory() {
                 </div>
                 {xmlTotalsComparison && !xmlTotalsComparison.canImport && (
                   <p className="text-sm text-red-600">
-                    Divergência com a capa da nota XML:{" "}
-                    {xmlTotalsComparison.mismatches.join(", ")}. A importação
-                    será bloqueada.
+                    DivergÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âªncia com a capa da nota XML:{" "}
+                    {xmlTotalsComparison.mismatches.join(", ")}. A importaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o
+                    serÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ bloqueada.
                   </p>
                 )}
 
@@ -2042,7 +2193,7 @@ export default function Inventory() {
                       <TableHead>Margem (%)</TableHead>
                       <TableHead>Venda (R$)</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Ações</TableHead>
+                      <TableHead className="text-right">Acoes</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -2200,7 +2351,7 @@ export default function Inventory() {
                               size="sm"
                               onClick={() => setXmlFiscalEditTempId(product.tempId)}
                             >
-                              Tributação
+                              TributaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o
                             </Button>
                             <Button
                               variant="ghost"
@@ -2227,7 +2378,7 @@ export default function Inventory() {
           >
             <DialogContent className="max-w-4xl">
               <DialogHeader>
-                <DialogTitle>Tributação do item (Importação XML)</DialogTitle>
+                <DialogTitle>TributaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o do item (ImportaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o XML)</DialogTitle>
               </DialogHeader>
               {editingXmlFiscalProduct && (
                 <div className="space-y-4">
@@ -2444,7 +2595,7 @@ export default function Inventory() {
                   Importando...
                 </>
               ) : (
-                <>Confirmar Importação ({xmlPreviewProducts.length} produtos)</>
+                <>Confirmar ImportaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o ({xmlPreviewProducts.length} produtos)</>
               )}
             </Button>
           </DialogFooter>

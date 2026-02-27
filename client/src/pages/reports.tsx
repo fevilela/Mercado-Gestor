@@ -15,6 +15,21 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+} from "recharts";
+import {
   Table,
   TableBody,
   TableCell,
@@ -22,8 +37,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, Download, Eye, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, Download, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { FileText, Receipt, Percent, BookOpen, Wallet, Users } from "lucide-react";
 
 type CsvValue = string | number;
 type ReportRow = Record<string, CsvValue>;
@@ -166,6 +182,33 @@ interface ReportDefinition {
   group: string;
 }
 
+const REPORT_ICON_BY_ID: Record<string, typeof FileText> = {
+  fiscal_vendas_periodo: Receipt,
+  fiscal_notas_emitidas: FileText,
+  fiscal_cancelamentos: Receipt,
+  fiscal_impostos: Percent,
+  fiscal_livro: BookOpen,
+  financeiro_fluxo_caixa: Wallet,
+  auditoria_log_usuarios: Users,
+};
+const REPORT_ICON_STYLE_BY_ID: Record<string, string> = {
+  fiscal_vendas_periodo: "bg-emerald-100 text-emerald-600",
+  fiscal_notas_emitidas: "bg-blue-100 text-blue-600",
+  fiscal_cancelamentos: "bg-rose-100 text-rose-600",
+  fiscal_impostos: "bg-amber-100 text-amber-600",
+  fiscal_livro: "bg-violet-100 text-violet-600",
+  financeiro_fluxo_caixa: "bg-emerald-100 text-emerald-600",
+  auditoria_log_usuarios: "bg-slate-100 text-slate-600",
+};
+const REPORT_ICON_STYLE_BY_GROUP: Record<string, string> = {
+  "Relatorios Fiscais": "bg-rose-100 text-rose-600",
+  "Relatorios Financeiros": "bg-emerald-100 text-emerald-600",
+  "Relatorios de Estoque": "bg-indigo-100 text-indigo-600",
+  "Relatorios de PDV": "bg-sky-100 text-sky-600",
+  "Relatorios Gerenciais": "bg-amber-100 text-amber-600",
+  "Relatorios de Auditoria": "bg-slate-100 text-slate-600",
+};
+
 interface ReportBuildContext {
   filteredSales: Sale[];
   filteredPayables: Payable[];
@@ -182,6 +225,7 @@ interface ReportBuildContext {
 }
 
 type FilterControlType = "text" | "select";
+type ChartKind = "bar" | "line" | "pie";
 
 const REPORT_DEFINITIONS: ReportDefinition[] = [
   { id: "fiscal_vendas_periodo", group: "Relatorios Fiscais", title: "Vendas por periodo", description: "Total bruto, descontos, cancelamentos, devolucoes e liquido" },
@@ -210,6 +254,7 @@ const REPORT_DEFINITIONS: ReportDefinition[] = [
   { id: "auditoria_log_usuarios", group: "Relatorios de Auditoria", title: "Log de usuarios", description: "Acoes operacionais de caixa e fiscal" },
   { id: "auditoria_alteracoes_cadastro", group: "Relatorios de Auditoria", title: "Alteracoes de cadastro", description: "Produtos, clientes e fornecedores cadastrados/atualizados" },
 ];
+const CHART_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#84cc16", "#f97316"];
 
 function parseDateSafe(value: string | null | undefined): Date | null {
   if (!value) return null;
@@ -234,6 +279,50 @@ function fmtDate(value: string | Date | null | undefined): string {
   const date = value instanceof Date ? value : parseDateSafe(value);
   if (!date) return "-";
   return format(date, "dd/MM/yyyy HH:mm", { locale: ptBR });
+}
+
+function buildChartModel(
+  report: ReportOutput | null,
+  rows: ReportRow[],
+): {
+  kind: ChartKind;
+  data: Array<{ label: string; value: number }>;
+  groupLabel: string;
+} | null {
+  if (!report || rows.length === 0) return null;
+
+  const numericCol = report.columns.find((column) =>
+    rows.some((row) => Number.isFinite(toNumber(row[column])) && toNumber(row[column]) !== 0),
+  );
+  if (!numericCol) return null;
+
+  const labelCol = report.columns.find((column) => column !== numericCol) || report.columns[0];
+  const data = rows
+    .slice(0, 24)
+    .map((row, index) => ({
+      label: String(row[labelCol] ?? `Item ${index + 1}`),
+      value: toNumber(row[numericCol]),
+    }))
+    .filter((item) => Number.isFinite(item.value));
+
+  if (data.length === 0) return null;
+
+  const definition = REPORT_DEFINITIONS.find((d) => d.id === report.id);
+  const kindByGroup: Record<string, ChartKind> = {
+    "Relatorios Fiscais": "bar",
+    "Relatorios Financeiros": "line",
+    "Relatorios de Estoque": "pie",
+    "Relatorios de PDV": "bar",
+    "Relatorios Gerenciais": "line",
+    "Relatorios de Auditoria": "pie",
+  };
+  const kind = definition?.group ? kindByGroup[definition.group] || "bar" : "bar";
+
+  return {
+    kind,
+    data: kind === "pie" ? data.slice(0, 8) : data,
+    groupLabel: numericCol,
+  };
 }
 
 async function fetchJsonOrFallback<T>(url: string, fallback: T): Promise<T> {
@@ -1048,7 +1137,7 @@ export default function Reports() {
   const [filteredRows, setFilteredRows] = useState<ReportRow[]>([]);
   const [hasAppliedFilter, setHasAppliedFilter] = useState(false);
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [catalogGroupFilter, setCatalogGroupFilter] = useState<string>("all");
 
   const exportCsv = (report: ReportOutput, rows: ReportRow[]) => {
     const escapeCsv = (value: CsvValue) => `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -1185,11 +1274,21 @@ export default function Reports() {
     });
     return Array.from(groups.entries());
   }, []);
-
-  const isGroupCollapsed = (groupName: string) => Boolean(collapsedGroups[groupName]);
-  const toggleGroup = (groupName: string) => {
-    setCollapsedGroups((prev) => ({ ...prev, [groupName]: !prev[groupName] }));
-  };
+  const visibleGroups = useMemo(
+    () =>
+      groupedDefinitions.filter(([groupName]) =>
+        catalogGroupFilter === "all" ? true : groupName === catalogGroupFilter,
+      ),
+    [groupedDefinitions, catalogGroupFilter],
+  );
+  const recentReports = useMemo(() => REPORT_DEFINITIONS.slice(0, 3), []);
+  const visibleFilterColumns = useMemo(() => {
+    if (!rawReport) return [];
+    if (rawReport.id === "fiscal_vendas_periodo") {
+      return rawReport.columns.filter((column) => column.toLowerCase() !== "valor");
+    }
+    return rawReport.columns;
+  }, [rawReport]);
 
   const filterConfigByColumn = useMemo(() => {
     const config = new Map<string, { type: FilterControlType; options: string[] }>();
@@ -1249,6 +1348,10 @@ export default function Reports() {
   };
 
   const canExport = rawReport && hasAppliedFilter;
+  const chartModel = useMemo(
+    () => (hasAppliedFilter ? buildChartModel(rawReport, filteredRows) : null),
+    [hasAppliedFilter, rawReport, filteredRows],
+  );
 
   if (isLoading) {
     return (
@@ -1277,39 +1380,79 @@ export default function Reports() {
 
         {!activeReportId ? (
           <div className="space-y-4">
-            {groupedDefinitions.map(([groupName, defs]) => (
-              <Card key={groupName}>
-                <CardHeader
-                  className="cursor-pointer"
-                  onClick={() => toggleGroup(groupName)}
-                >
-                  <CardTitle className="flex items-center justify-between">
-                    {groupName}
-                    {isGroupCollapsed(groupName) ? (
-                      <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                    ) : (
-                      <ChevronDown className="h-5 w-5 text-muted-foreground" />
-                    )}
-                  </CardTitle>
-                </CardHeader>
-                {!isGroupCollapsed(groupName) && (
-                  <CardContent className="space-y-2">
-                    {defs.map((report) => (
-                      <button
-                        key={report.id}
-                        type="button"
-                        className="w-full rounded-md border p-3 text-left transition-colors hover:bg-muted/50"
-                        onClick={() => handleOpenReport(report.id)}
-                        disabled={isGenerating}
-                      >
-                        <p className="font-medium">{report.title}</p>
-                        <p className="text-sm text-muted-foreground">{report.description}</p>
-                      </button>
-                    ))}
-                  </CardContent>
-                )}
-              </Card>
+            <Card className="border-slate-200 bg-slate-50/50">
+              <CardContent className="pt-4">
+                <div className="max-w-sm">
+                  <p className="mb-1 text-xs font-medium text-muted-foreground">Tipo de Relatorio</p>
+                  <Select value={catalogGroupFilter} onValueChange={setCatalogGroupFilter}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Todos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      {groupedDefinitions.map(([groupName]) => (
+                        <SelectItem key={groupName} value={groupName}>
+                          {groupName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+
+            {visibleGroups.map(([groupName, defs]) => (
+              <div key={groupName} className="space-y-2">
+                <h3 className="text-lg font-semibold text-foreground">{groupName}</h3>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {defs.map((report) => {
+                    const Icon = REPORT_ICON_BY_ID[report.id] || FileText;
+                    const iconStyle =
+                      REPORT_ICON_STYLE_BY_ID[report.id] ||
+                      REPORT_ICON_STYLE_BY_GROUP[report.group] ||
+                      "bg-slate-100 text-slate-600";
+                    return (
+                    <button
+                      key={report.id}
+                      type="button"
+                      className="w-full rounded-xl border bg-white p-3 text-left shadow-sm transition-colors hover:bg-muted/40"
+                      onClick={() => handleOpenReport(report.id)}
+                      disabled={isGenerating}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex items-center gap-2">
+                          <span className={`h-8 w-8 shrink-0 rounded-md flex items-center justify-center ${iconStyle}`}>
+                            <Icon className="h-4 w-4" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="font-semibold line-clamp-1">{report.title}</p>
+                            <p className="text-sm text-muted-foreground line-clamp-1">{report.description}</p>
+                          </div>
+                        </div>
+                        <Eye className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </div>
+                    </button>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
+
+            <Card className="border-slate-200">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Relatorios Recentes</CardTitle>
+                  <Button variant="link" className="h-auto p-0 text-sm">Ver todos</Button>
+                </div>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                {recentReports.map((r) => (
+                  <Badge key={r.id} variant="outline" className="rounded-md bg-slate-50">
+                    {r.id}.csv
+                  </Badge>
+                ))}
+              </CardContent>
+            </Card>
           </div>
         ) : (
           <Card>
@@ -1338,7 +1481,7 @@ export default function Reports() {
               ) : (
                 <>
                   <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                    {rawReport.columns.map((column) => (
+                    {visibleFilterColumns.map((column) => (
                       <div key={column}>
                         <p className="mb-2 text-sm font-medium">{column}</p>
                         {filterConfigByColumn.get(column)?.type === "select" ? (
@@ -1378,6 +1521,44 @@ export default function Reports() {
 
                   {hasAppliedFilter ? (
                     <>
+                      {chartModel && (
+                        <div className="rounded-md border p-3">
+                          <p className="mb-2 text-sm font-medium">Grafico do Relatorio</p>
+                          <div className="h-[280px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              {chartModel.kind === "bar" ? (
+                                <BarChart data={chartModel.data}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                                  <YAxis />
+                                  <Tooltip formatter={(value: number) => money(Number(value))} />
+                                  <Legend />
+                                  <Bar dataKey="value" name={chartModel.groupLabel} fill="#3b82f6" radius={[6, 6, 0, 0]} />
+                                </BarChart>
+                              ) : chartModel.kind === "line" ? (
+                                <LineChart data={chartModel.data}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                                  <YAxis />
+                                  <Tooltip formatter={(value: number) => money(Number(value))} />
+                                  <Legend />
+                                  <Line type="monotone" dataKey="value" name={chartModel.groupLabel} stroke="#10b981" strokeWidth={2} dot={false} />
+                                </LineChart>
+                              ) : (
+                                <PieChart>
+                                  <Pie data={chartModel.data} dataKey="value" nameKey="label" outerRadius={95} innerRadius={45}>
+                                    {chartModel.data.map((entry, index) => (
+                                      <Cell key={`${entry.label}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                                    ))}
+                                  </Pie>
+                                  <Tooltip formatter={(value: number) => money(Number(value))} />
+                                  <Legend />
+                                </PieChart>
+                              )}
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                      )}
                       {rawReport.note && (
                         <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
                           {rawReport.note}
