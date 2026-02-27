@@ -4,16 +4,8 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardFooter } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Lock,
-  Mail,
-  Loader2,
-  BriefcaseBusiness,
-  Store,
-  Lightbulb,
-} from "lucide-react";
+import { Lock, Mail, Loader2, BriefcaseBusiness, Store, Lightbulb } from "lucide-react";
 
 export default function Login() {
   const [, setLocation] = useLocation();
@@ -43,155 +35,166 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-white p-2 sm:p-3">
-      <div className="mx-auto grid min-h-[calc(100vh-1rem)] w-full max-w-[1270px] overflow-hidden rounded-md border border-slate-300/80 bg-[#eef0ff] sm:min-h-[calc(100vh-1.5rem)] md:grid-cols-[1.03fr_0.97fr]">
-        <section className="relative hidden overflow-hidden bg-[radial-gradient(circle_at_24%_8%,#223d74_0%,#0f1d44_42%,#060b1f_100%)] p-12 text-slate-100 md:flex md:flex-col">
-          <div className="pointer-events-none absolute -right-32 -bottom-32 h-[420px] w-[420px] rounded-full bg-blue-400/20 blur-3xl" />
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(130deg,transparent_62%,rgba(114,159,255,0.16)_76%,transparent_90%)]" />
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(160deg,transparent_70%,rgba(148,183,255,0.2)_80%,transparent_90%)]" />
+    <div className="min-h-screen bg-white p-3">
+      <div className="mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-[1600px] overflow-hidden rounded-sm border border-[#d7d9e2] bg-[#efeff8] md:grid-cols-2">
+        <section className="relative hidden overflow-hidden bg-[#060b1f] px-16 pb-14 pt-20 text-white md:flex md:flex-col">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_78%_35%,rgba(131,171,255,0.48)_0%,rgba(62,95,170,0.2)_18%,rgba(10,17,42,0.02)_52%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(165deg,transparent_62%,rgba(121,170,255,0.2)_76%,transparent_90%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(156deg,transparent_66%,rgba(126,170,255,0.17)_78%,transparent_90%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_15%,rgba(26,54,130,0.35)_0%,rgba(8,14,35,0.18)_22%,transparent_50%)]" />
 
           <img
-            src="/images/Arqis.png"
+            src="/images/Arqis-branco.png"
             alt="Arqis"
-            className="relative mb-14 h-8 w-auto object-contain brightness-0 invert"
+            className="relative mb-16 h-12 w-auto object-contain"
           />
 
-          <h2 className="relative text-[40px] font-semibold tracking-tight">A Solucao ARQIS</h2>
+          <h2 className="relative text-[64px] font-semibold leading-[1.06] tracking-[-0.02em]">
+            A Solucao ARQIS
+          </h2>
 
-          <div className="relative mt-12 space-y-8 text-slate-200">
-            <div className="flex gap-4">
-              <BriefcaseBusiness className="mt-0.5 h-5 w-5 text-slate-200" />
+          <div className="relative mt-14 space-y-10">
+            <div className="flex items-start gap-5">
+              <div className="flex w-[78px] items-center justify-center border-r border-white/20 pr-5 pt-1">
+                <BriefcaseBusiness className="h-10 w-10 stroke-[1.8] text-[#d9e4ff]" />
+              </div>
               <div>
-                <p className="font-medium text-[31px] leading-none text-white">Arquitetura Centralizada</p>
-                <p className="mt-1.5 text-[19px] text-slate-300">Um unico ponto de verdade para toda operacao.</p>
+                <p className="text-[28px] font-semibold leading-none text-white">Arquitetura Centralizada</p>
+                <p className="mt-2 text-[19px] leading-tight text-[#dbe3f8]">
+                  Um unico ponto de verdade <span className="font-semibold text-white">para toda</span> operacao.
+                </p>
               </div>
             </div>
-            <div className="flex gap-4">
-              <Store className="mt-0.5 h-5 w-5 text-slate-200" />
+
+            <div className="flex items-start gap-5">
+              <div className="flex w-[78px] items-center justify-center border-r border-white/20 pr-5 pt-1">
+                <Store className="h-10 w-10 stroke-[1.8] text-[#d9e4ff]" />
+              </div>
               <div>
-                <p className="font-medium text-[31px] leading-none text-white">Controle em Tempo Real</p>
-                <p className="mt-1.5 text-[19px] text-slate-300">Estoque, vendas e metricas com visibilidade total.</p>
+                <p className="text-[28px] font-semibold leading-none text-white">Controle em Tempo Real</p>
+                <p className="mt-2 text-[19px] leading-tight text-[#dbe3f8]">
+                  Estoque, vendas e metricas com visibilidade total.
+                </p>
               </div>
             </div>
-            <div className="flex gap-4">
-              <Lightbulb className="mt-0.5 h-5 w-5 text-slate-200" />
+
+            <div className="flex items-start gap-5">
+              <div className="flex w-[78px] items-center justify-center border-r border-white/20 pr-5 pt-1">
+                <Lightbulb className="h-10 w-10 stroke-[1.8] text-[#d9e4ff]" />
+              </div>
               <div>
-                <p className="font-medium text-[31px] leading-none text-white">Inteligencia Operacional</p>
-                <p className="mt-1.5 text-[19px] text-slate-300">Analises preditivas e decisoes baseadas em dados.</p>
+                <p className="text-[28px] font-semibold leading-none text-white">Inteligencia Operacional</p>
+                <p className="mt-2 text-[19px] leading-tight text-[#dbe3f8]">
+                  Analises preditivas e decisoes baseadas em dados.
+                </p>
               </div>
             </div>
           </div>
 
-          <p className="relative mt-auto max-w-md text-[28px] text-slate-300">
+          <p className="relative mt-auto max-w-[78%] text-[26px] leading-tight text-[#dbe3f8]">
             Controle total e decisoes inteligentes para operacoes modernas.
           </p>
         </section>
 
-        <section className="flex items-center justify-center p-4 md:p-10">
-          <Card className="w-full max-w-[468px] rounded-xl border border-slate-300/90 bg-white shadow-sm">
-            <CardHeader className="pb-3 pt-8 text-center">
-              <div className="mb-1 flex justify-center">
-                <img
-                  src="/images/Arqis.png"
-                  alt="Arqis"
-                  className="block h-10 w-auto object-contain"
-                  data-testid="image-login-brand"
-                />
+        <section className="flex items-center justify-center px-8 py-10 md:px-10">
+          <div className="w-full max-w-[700px] rounded-3xl border border-[#cfd1db] bg-[#f4f4f6] px-10 pb-10 pt-12 shadow-[0_10px_30px_rgba(32,36,67,0.12)] md:px-14 md:pb-12 md:pt-14">
+            <div className="mb-14 flex justify-center">
+              <img
+                src="/images/Arqis.png"
+                alt="Arqis"
+                className="h-14 w-auto object-contain"
+                data-testid="image-login-brand"
+              />
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="email" className="text-[16px] font-semibold text-[#151515]">Email</Label>
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#717171]" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="seu@email.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="h-12 rounded-lg border-[#c7c8cf] bg-[#f8f8f8] pl-12 text-[15px] text-[#1e1e1e] placeholder:text-[#717171]"
+                    required
+                    data-testid="input-email"
+                  />
+                </div>
               </div>
-            </CardHeader>
 
-            <form onSubmit={handleSubmit}>
-              <CardContent className="space-y-4 px-8">
-                <div className="space-y-2">
-                  <Label htmlFor="email" className="text-[13px] text-slate-700">Email</Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="seu@email.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="h-[35px] border-slate-300 pl-10 text-[13px]"
-                      required
-                      data-testid="input-email"
-                    />
-                  </div>
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-[16px] font-semibold text-[#151515]">Senha</Label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#717171]" />
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="Sua senha"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="h-12 rounded-lg border-[#c7c8cf] bg-[#f8f8f8] pl-12 text-[15px] text-[#1e1e1e] placeholder:text-[#717171]"
+                    required
+                    data-testid="input-password"
+                  />
                 </div>
+              </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="password" className="text-[13px] text-slate-700">Senha</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
-                    <Input
-                      id="password"
-                      type="password"
-                      placeholder="Sua senha"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="h-[35px] border-slate-300 pl-10 text-[13px]"
-                      required
-                      data-testid="input-password"
-                    />
-                  </div>
-                </div>
-              </CardContent>
+              <Button
+                type="submit"
+                className="mt-2 h-[50px] w-full rounded-lg bg-black text-[20px] font-medium text-white hover:bg-[#111111]"
+                disabled={isLoading}
+                data-testid="button-login"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Entrando...
+                  </>
+                ) : (
+                  "Entrar"
+                )}
+              </Button>
 
-              <CardFooter className="flex flex-col gap-3 px-8 pb-8">
-                <Button
-                  type="submit"
-                  className="h-[35px] w-full bg-slate-950 text-[13px] text-white hover:bg-slate-800"
-                  disabled={isLoading}
-                  data-testid="button-login"
+              <p className="text-center text-[18px] text-[#171717]">
+                <a
+                  href="/forgot-password"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setLocation("/forgot-password");
+                  }}
+                  className="hover:underline"
+                  data-testid="link-forgot-password"
                 >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Entrando...
-                    </>
-                  ) : (
-                    "Entrar"
-                  )}
-                </Button>
-
-                <p className="text-[12px] text-muted-foreground text-center">
-                  <a
-                    href="/forgot-password"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setLocation("/forgot-password");
-                    }}
-                    className="text-slate-700 hover:underline"
-                    data-testid="link-forgot-password"
-                  >
-                    Esqueci minha senha
-                  </a>
-                  {" | "}
-                  <a
-                    href="/access"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setLocation("/access");
-                    }}
-                    className="text-slate-700 hover:underline"
-                    data-testid="link-new-access"
-                  >
-                    Novo acesso
-                  </a>
-                </p>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-[35px] w-full border-slate-500 text-[13px] text-slate-700 hover:bg-slate-50"
-                  onClick={() => setLocation("/manager-onboarding")}
-                  data-testid="button-manager-onboarding"
+                  Esqueci minha senha
+                </a>
+                {" | "}
+                <a
+                  href="/access"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setLocation("/access");
+                  }}
+                  className="hover:underline"
+                  data-testid="link-new-access"
                 >
-                  Cadastro interno de empresa
-                </Button>
-              </CardFooter>
+                  Novo acesso
+                </a>
+              </p>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="h-[50px] w-full rounded-lg border-[#101010] bg-transparent text-[19px] font-normal text-[#101010] hover:bg-white"
+                onClick={() => setLocation("/manager-onboarding")}
+                data-testid="button-manager-onboarding"
+              >
+                Cadastro interno de empresa
+              </Button>
             </form>
-          </Card>
+          </div>
         </section>
       </div>
     </div>
