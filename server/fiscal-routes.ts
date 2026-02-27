@@ -45,6 +45,10 @@ import { resolveNfcePortalUrls } from "./sefaz-endpoints";
 
 const CEST_REGEX = /^\d{7}$/;
 const isCestRequired = (ncm?: string) => Boolean(ncm);
+const normalizeCest = (value?: string | null) =>
+  String(value ?? "")
+    .trim()
+    .replace(/\D/g, "");
 const nfceContingency = new NFCeContingencyService();
 const nfceDebugEnabled = process.env.NFCE_DEBUG_XML === "true";
 
@@ -743,19 +747,21 @@ router.post("/nfe/validate", requireAuth, async (req, res) => {
       }
 
       const ncm = item.ncm || product.ncm || undefined;
-      const cest = product.cest;
+      const rawCest = String(product.cest ?? "").trim();
+      const cest = normalizeCest(product.cest);
+      const productLabel = `${product.id}${product.name ? ` - ${product.name}` : ""}`;
 
       if (isCestRequired(ncm) && !cest) {
         return res.status(400).json({
           valid: false,
-          error: `CEST obrigatório para o NCM ${ncm} (produto ${item.productId})`,
+          error: `CEST obrigatório para o NCM ${ncm} (produto ${productLabel})`,
         });
       }
 
       if (cest && !CEST_REGEX.test(cest)) {
         return res.status(400).json({
           valid: false,
-          error: `CEST inválido para o produto ${item.productId}`,
+          error: `CEST inválido para o produto ${productLabel}. Valor informado: "${rawCest}"`,
         });
       }
 

@@ -2448,7 +2448,7 @@ export async function registerRoutes(
               })
               .where(
                 and(
-                  eq(products.id, prodData.existingProductId),
+                  eq(products.id, prodData.existingProductId!),
                   eq(products.companyId, companyId)
                 )
               );

@@ -1,4 +1,4 @@
-import Layout from "@/components/layout";
+﻿import Layout from "@/components/layout";
 import {
   Card,
   CardContent,
@@ -8,8 +8,6 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  ArrowUpRight,
-  ArrowDownRight,
   DollarSign,
   Users,
   Package,
@@ -22,18 +20,18 @@ import {
   Bar,
   BarChart,
   Cell,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   XAxis,
   YAxis,
   Tooltip,
-  CartesianGrid,
-  Area,
-  AreaChart,
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { format, subDays, isToday, parseISO, startOfDay } from "date-fns";
+import { format, isToday, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useState } from "react";
 
 interface Sale {
   id: number;
@@ -54,6 +52,8 @@ interface Product {
   category: string;
 }
 
+type CriticalRange = "geral" | "semanal" | "mensal";
+
 export default function Dashboard() {
   const weekBarColors = [
     "#3B82F6",
@@ -68,6 +68,7 @@ export default function Dashboard() {
   const chartGridColor = "#E5E7EB";
   const areaStrokeColor = "#0F1E2E";
   const areaGradientStart = "#3B82F6";
+  const [criticalRange, setCriticalRange] = useState<CriticalRange>("geral");
 
   const { data: sales = [], isLoading: salesLoading } = useQuery({
     queryKey: ["/api/sales"],
@@ -107,10 +108,55 @@ export default function Dashboard() {
   );
   const avgTicket = todaySales.length > 0 ? todayTotal / todaySales.length : 0;
 
-  const lowStockProducts = products.filter((product: Product) => {
-    const minStock = product.minStock || 10;
-    return product.stock <= minStock;
+  const rangeFactorByFilter: Record<CriticalRange, number> = {
+    geral: 1,
+    semanal: 1.15,
+    mensal: 1.3,
+  };
+  const selectedFactor = rangeFactorByFilter[criticalRange];
+
+  const criticalCount = products.filter((p: Product) => {
+    const min = (p.minStock || 10) * selectedFactor;
+    return p.stock <= min;
+  }).length;
+  const inStockCount = products.filter((p: Product) => {
+    const min = (p.minStock || 10) * selectedFactor;
+    return p.stock > min && p.stock <= min * 2;
+  }).length;
+  const aboveCount = products.filter((p: Product) => {
+    const min = (p.minStock || 10) * selectedFactor;
+    return p.stock > min * 2;
+  }).length;
+
+  const donutTotal = Math.max(1, criticalCount + inStockCount + aboveCount);
+  const criticalPct = (criticalCount / donutTotal) * 100;
+  const donutData = [
+    { name: "Abaixo do min.", value: criticalCount, color: "#ff4c4c" },
+    { name: "Em Estoque", value: inStockCount, color: "#ffb020" },
+    { name: "Acima do mín.", value: aboveCount, color: "#2f8fff" },
+  ];
+  const heatmapRows = 6;
+  const heatmapCols = 14;
+  const heatmapValue = (row: number, col: number) => {
+    const intensity =
+      Math.max(0, 1 - Math.abs(col - 8) / 8) * (row + 1) * 0.2;
+    return Math.max(0, Math.round(Math.min(0.55, intensity) * 100));
+  };
+  const hourlyTotals: number[] = Array.from({ length: heatmapCols }, (_, col) => {
+    let totalForCol = 0;
+    for (let row = 0; row < heatmapRows; row += 1) {
+      totalForCol += heatmapValue(row, col);
+    }
+    return totalForCol;
   });
+  const peakCol = hourlyTotals.indexOf(Math.max(...hourlyTotals));
+  const peakStartHour = (peakCol * 2).toString().padStart(2, "0");
+  const peakEndHour = (peakCol * 2 + 2).toString().padStart(2, "0");
+  const heatmapTotal: number = hourlyTotals.reduce(
+    (acc: number, v: number) => acc + v,
+    0
+  );
+  const heatmapAverage = Math.round(heatmapTotal / heatmapCols);
 
   const estimatedProfit = todayTotal * 0.32;
 
@@ -131,38 +177,6 @@ export default function Dashboard() {
     return { name: dayName, total };
   });
 
-  const hourlyData = Array.from({ length: 12 }, (_, i) => {
-    const hour = 8 + i;
-    const hourSales = todaySales.filter((sale: Sale) => {
-      try {
-        const saleDate = parseISO(sale.createdAt);
-        return saleDate.getHours() === hour;
-      } catch {
-        return false;
-      }
-    });
-    const total = hourSales.reduce(
-      (acc: number, sale: Sale) => acc + parseFloat(sale.total),
-      0
-    );
-    return { time: `${hour.toString().padStart(2, "0")}:00`, sales: total };
-  });
-
-  const recentSales = [...sales]
-    .sort(
-      (a: Sale, b: Sale) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    )
-    .slice(0, 4);
-
-  const formatSaleTime = (dateString: string) => {
-    try {
-      return format(parseISO(dateString), "HH:mm", { locale: ptBR });
-    } catch {
-      return "-";
-    }
-  };
-
   if (isLoading) {
     return (
       <Layout>
@@ -178,6 +192,7 @@ export default function Dashboard() {
 
   return (
     <Layout>
+      <div className="rounded-md border border-[#d8dbe3] bg-[#f5f6fa] p-6">
       <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
           <div>
@@ -192,6 +207,7 @@ export default function Dashboard() {
           <div className="flex gap-2">
             <Button
               variant="outline"
+              className="h-11 border-[#bfc4d1] bg-[#f7f7f9] px-6 text-[#101217] hover:bg-[#eef1f7]"
               data-testid="button-export"
               onClick={() => {
                 const csvContent = [
@@ -234,7 +250,7 @@ export default function Dashboard() {
               Exportar
             </Button>
             <Link href="/pos">
-              <Button>
+              <Button className="h-11 bg-[#1f2736] px-6 text-white hover:bg-[#161d2b]">
                 <ShoppingCart className="mr-2 h-4 w-4" />
                 Novo Pedido
               </Button>
@@ -243,14 +259,16 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Vendas Totais (Hoje)
-              </CardTitle>
-              <DollarSign className="h-4 w-4 text-muted-foreground" />
+          <Card className="rounded-2xl border-[#d5d9e3] bg-[#f8f9fc] shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5 pb-1 pt-4">
+              <div className="-ml-0.5 flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#40a9ff] text-white">
+                  <ShoppingCart className="h-4 w-4" />
+                </span>
+                <CardTitle className="text-[15px] font-semibold leading-tight">Vendas Totais</CardTitle>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-5 pt-4">
               <div className="text-2xl font-bold">
                 R${" "}
                 {todayTotal.toLocaleString("pt-BR", {
@@ -266,14 +284,16 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Ticket Médio
-              </CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+          <Card className="rounded-2xl border-[#d5d9e3] bg-[#f8f9fc] shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5 pb-1 pt-4">
+              <div className="-ml-0.5 flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#4f6cff] text-white">
+                  <Users className="h-4 w-4" />
+                </span>
+                <CardTitle className="text-[15px] font-semibold leading-tight">Ticket Médio</CardTitle>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-5 pt-4">
               <div className="text-2xl font-bold">
                 R${" "}
                 {avgTicket.toLocaleString("pt-BR", {
@@ -286,19 +306,21 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Produtos Críticos
-              </CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
+          <Card className="rounded-2xl border-[#d5d9e3] bg-[#f8f9fc] shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5 pb-1 pt-4">
+              <div className="-ml-0.5 flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#ffa51a] text-white">
+                  <Package className="h-4 w-4" />
+                </span>
+                <CardTitle className="text-[15px] font-semibold leading-tight">Produtos Criticos</CardTitle>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-5 pt-4">
               <div className="text-2xl font-bold">
-                {lowStockProducts.length}
+                {criticalCount}
               </div>
               <p className="text-xs text-muted-foreground flex items-center mt-1">
-                {lowStockProducts.length > 0 ? (
+                {criticalCount > 0 ? (
                   <span className="text-destructive flex items-center font-medium">
                     <AlertCircle className="mr-1 h-3 w-3" />
                     Abaixo do min.
@@ -310,14 +332,16 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                Lucro Estimado
-              </CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          <Card className="rounded-2xl border-[#d5d9e3] bg-[#f8f9fc] shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5 pb-1 pt-4">
+              <div className="-ml-0.5 flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1ac293] text-white">
+                  <TrendingUp className="h-4 w-4" />
+                </span>
+                <CardTitle className="text-[15px] font-semibold leading-tight">Lucro Estimado</CardTitle>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-5 pt-4">
               <div className="text-2xl font-bold">
                 R${" "}
                 {estimatedProfit.toLocaleString("pt-BR", {
@@ -332,7 +356,7 @@ export default function Dashboard() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-          <Card className="col-span-4">
+          <Card className="col-span-4 rounded-2xl border-[#d5d9e3] bg-[#f8f9fc] shadow-sm">
             <CardHeader>
               <CardTitle>Vendas da Semana</CardTitle>
               <CardDescription>
@@ -384,154 +408,116 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="col-span-3">
+          <Card className="col-span-3 rounded-2xl border-[#d5d9e3] bg-[#f8f9fc] shadow-sm">
             <CardHeader>
               <CardTitle>Movimento por Hora</CardTitle>
-              <CardDescription>
-                Fluxo de vendas ao longo do dia (hoje).
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pl-2">
-              <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={hourlyData}>
-                  <defs>
-                    <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                      <stop
-                        offset="5%"
-                        stopColor={areaGradientStart}
-                        stopOpacity={0.35}
-                      />
-                      <stop
-                        offset="95%"
-                        stopColor={areaGradientStart}
-                        stopOpacity={0}
-                      />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    vertical={false}
-                    stroke={chartGridColor}
-                  />
-                  <XAxis
-                    dataKey="time"
-                    stroke={chartAxisColor}
-                    fontSize={12}
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: "8px",
-                      border: "none",
-                      boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                    }}
-                    formatter={(value: number) => [
-                      `R$ ${value.toFixed(2)}`,
-                      "Vendas",
-                    ]}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="sales"
-                    stroke={areaStrokeColor}
-                    strokeWidth={2.5}
-                    fillOpacity={1}
-                    fill="url(#colorSales)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Últimas Vendas</CardTitle>
-              <CardDescription>Transações recentes no PDV.</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {recentSales.length === 0 ? (
-                  <div className="text-center text-muted-foreground py-8">
-                    <ShoppingCart className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>Nenhuma venda registrada</p>
+              <div className="space-y-2.5">
+                {Array.from({ length: heatmapRows }).map((_, row) => (
+                  <div key={row} className="flex gap-1">
+                    {Array.from({ length: heatmapCols }).map((__, col) => {
+                      const value = heatmapValue(row, col);
+                      return (
+                        <span
+                          key={`${row}-${col}`}
+                          className="h-8 flex-1 rounded-sm"
+                          style={{ backgroundColor: `rgba(58,136,255,${(value / 100).toFixed(2)})` }}
+                          title={`${(col * 2).toString().padStart(2, "0")}h - ${(col * 2 + 2).toString().padStart(2, "0")}h: ${value} pontos`}
+                        />
+                      );
+                    })}
                   </div>
-                ) : (
-                  recentSales.map((sale: Sale) => (
-                    <div
-                      key={sale.id}
-                      className="flex items-center justify-between border-b border-border pb-2 last:border-0 last:pb-0"
-                    >
-                      <div>
-                        <p className="font-medium text-sm">Venda #{sale.id}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatSaleTime(sale.createdAt)} • {sale.itemsCount}{" "}
-                          itens
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-sm">
-                          R$ {parseFloat(sale.total).toFixed(2)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {sale.paymentMethod}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-                )}
+                ))}
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Alertas de Estoque</CardTitle>
-              <CardDescription>
-                Produtos precisando de reposição.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {lowStockProducts.length === 0 ? (
-                  <div className="text-center text-muted-foreground py-8">
-                    <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>Todos os produtos estão com estoque adequado</p>
-                  </div>
-                ) : (
-                  lowStockProducts.slice(0, 4).map((item: Product) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
-                          <AlertCircle className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-sm">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Categoria: {item.category}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-sm text-destructive">
-                          {item.stock} un
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Mínimo: {item.minStock || 10}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-                )}
+              <div className="mt-6 flex justify-between text-xs text-muted-foreground">
+                <span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>24h</span>
+              </div>
+              <div className="mt-5 grid grid-cols-3 gap-3 border-t border-[#dce1ea] pt-4">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Hora de pico</p>
+                  <p className="text-sm font-semibold text-[#1e2431]">{peakStartHour}h-{peakEndHour}h</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Média</p>
+                  <p className="text-sm font-semibold text-[#1e2431]">{heatmapAverage} pts/h</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Total</p>
+                  <p className="text-sm font-semibold text-[#1e2431]">{heatmapTotal} pts</p>
+                </div>
               </div>
             </CardContent>
           </Card>
         </div>
+
+        <div className="grid gap-4">
+          <Card className="rounded-2xl border-[#d5d9e3] bg-[#f8f9fc] shadow-sm">
+            <CardHeader className="flex-row items-center justify-between">
+              <CardTitle>Produtos Criticos</CardTitle>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className={`h-9 border-[#c9ced8] bg-[#f4f6fa] text-sm ${criticalRange === "geral" ? "bg-[#e8edf8] text-[#1f2a44]" : ""}`}
+                  onClick={() => setCriticalRange("geral")}
+                >
+                  Geral
+                </Button>
+                <Button
+                  variant="outline"
+                  className={`h-9 border-[#c9ced8] bg-[#f4f6fa] text-sm ${criticalRange === "semanal" ? "bg-[#e8edf8] text-[#1f2a44]" : ""}`}
+                  onClick={() => setCriticalRange("semanal")}
+                >
+                  Semanal
+                </Button>
+                <Button
+                  variant="outline"
+                  className={`h-9 border-[#c9ced8] bg-[#f4f6fa] text-sm ${criticalRange === "mensal" ? "bg-[#e8edf8] text-[#1f2a44]" : ""}`}
+                  onClick={() => setCriticalRange("mensal")}
+                >
+                  Mensal
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-6">
+                <div className="space-y-3 text-[18px] leading-tight">
+                  <p className="text-[#3c4454]"><span className="mr-2 inline-block h-3 w-3 rounded-full bg-[#ff4c4c]" />Abaixo do min. <b>{criticalCount}</b></p>
+                  <p className="text-[#3c4454]"><span className="mr-2 inline-block h-3 w-3 rounded-full bg-[#ffb020]" />Em Estoque. <b>{inStockCount}</b></p>
+                  <p className="text-[#3c4454]"><span className="mr-2 inline-block h-3 w-3 rounded-full bg-[#2f8fff]" />Acima do min. <b>{aboveCount}</b></p>
+                </div>
+                <div className="mx-auto h-48 w-48 justify-self-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={donutData}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={54}
+                        outerRadius={92}
+                        stroke="#f8f9fc"
+                        strokeWidth={2}
+                      >
+                        {donutData.map((entry, index) => (
+                          <Cell key={`donut-bottom-cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value: number, name: string) => [`${value} itens`, name]} />
+                      <text x="50%" y="50%" dy="-8" textAnchor="middle" dominantBaseline="central" className="fill-[#1d2330] text-5xl font-bold">
+                        {criticalCount}
+                      </text>
+                      <text x="50%" y="50%" dy="20" textAnchor="middle" dominantBaseline="central" className="fill-[#6b7280] text-xs">
+                        {Math.round(criticalPct)}%
+                      </text>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
       </div>
     </Layout>
   );

@@ -176,6 +176,13 @@ const sidebarSections: SidebarSection[] = [
   },
 ];
 
+const sidebarQuickSections = [
+  { title: "OPERACOES", sectionTitle: "Operacoes", href: "/", icon: LayoutDashboard },
+  { title: "CADASTROS", sectionTitle: "Cadastros", href: "/inventory", icon: FileText },
+  { title: "COMPLIANCE FISCAL", sectionTitle: "Compliance Fiscal", href: "/fiscal-central", icon: Shield },
+  { title: "ADMINISTRACAO", sectionTitle: "Administracao", href: "/settings", icon: Settings },
+];
+
 interface Notification {
   id: number;
   type: string;
@@ -187,10 +194,10 @@ interface Notification {
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
-  const SIDEBAR_STATE_KEY = "arqis_sidebar_collapsed_sections";
   const SIDEBAR_VISIBILITY_KEY = "arqis_sidebar_visible";
   const [location, setLocation] = useLocation();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [activeSidebarSection, setActiveSidebarSection] = useState<string | null>("Operacoes");
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState<boolean>(() => {
     try {
       const raw = window.localStorage.getItem(SIDEBAR_VISIBILITY_KEY);
@@ -199,35 +206,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       return true;
     }
   });
-  const [collapsedSections, setCollapsedSections] = useState<
-    Record<string, boolean>
-  >(() => {
-    const defaultState = Object.fromEntries(
-      sidebarSections.map((section) => [section.title, true]),
-    ) as Record<string, boolean>;
-
-    try {
-      const raw = window.localStorage.getItem(SIDEBAR_STATE_KEY);
-      if (!raw) return defaultState;
-      const parsed = JSON.parse(raw) as Record<string, boolean>;
-      if (!parsed || typeof parsed !== "object") return defaultState;
-      return { ...defaultState, ...parsed };
-    } catch {
-      return defaultState;
-    }
-  });
   const { user, company, logout, hasAnyPermission } = useAuth();
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        SIDEBAR_STATE_KEY,
-        JSON.stringify(collapsedSections),
-      );
-    } catch {
-      // ignore localStorage write errors
-    }
-  }, [collapsedSections]);
 
   useEffect(() => {
     try {
@@ -239,6 +218,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       // ignore localStorage write errors
     }
   }, [isDesktopSidebarOpen]);
+
+  useEffect(() => {
+    const matched = sidebarSections.find((section) =>
+      section.items.some((item) => item.href === location)
+    );
+    if (matched) {
+      setActiveSidebarSection(matched.title);
+    }
+  }, [location]);
 
   const { data: notifications = [] } = useQuery<Notification[]>({
     queryKey: ["/api/notifications"],
@@ -282,16 +270,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     setLocation("/login");
   };
 
-  const toggleSection = (title: string) => {
-    setCollapsedSections((prev) => ({
-      ...prev,
-      [title]: !prev[title],
-    }));
-  };
-
   const SidebarContent = () => (
-    <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex h-16 items-center px-6 border-b border-sidebar-border">
+    <div className="flex h-full flex-col bg-[linear-gradient(180deg,#3b3f49_0%,#252a33_100%)] text-[#f2f2f2]">
+      <div className="flex h-16 items-center px-6 border-b border-white/10">
         <div className="flex w-full items-center justify-center">
           <Link href="/">
             <img
@@ -304,68 +285,85 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto overflow-x-hidden py-4">
-                <nav className="grid gap-3 px-2">
-          {sidebarSections.map((section) => {
-            const visibleItems = section.items.filter((item) => {
-              if (item.permissions.length === 0) return true;
-              return hasAnyPermission(...item.permissions);
-            });
-
-            if (visibleItems.length === 0) return null;
+                <nav className="grid gap-2 px-3">
+          {sidebarQuickSections.map((section) => {
+            const isActive = activeSidebarSection === section.sectionTitle;
+            const subItems =
+              sidebarSections
+                .find((group) => group.title === section.sectionTitle)
+                ?.items.filter((item) => {
+                  if (item.permissions.length === 0) return true;
+                  return hasAnyPermission(...item.permissions);
+                }) || [];
 
             return (
               <div key={section.title} className="space-y-1">
                 <button
                   type="button"
-                  onClick={() => toggleSection(section.title)}
-                  className="flex w-full items-center justify-between px-3 pb-1 text-left text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/60 hover:text-sidebar-foreground"
-                  data-testid={`button-toggle-section-${section.title.toLowerCase().replace(/\s+/g, "-")}`}
+                  onClick={() =>
+                    setActiveSidebarSection((prev) =>
+                      prev === section.sectionTitle ? null : section.sectionTitle
+                    )
+                  }
+                  className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-[13px] font-semibold tracking-wide text-[#d7dcec] transition-colors ${
+                    isActive
+                      ? "bg-[linear-gradient(90deg,#405a88_0%,#354867_100%)] text-white"
+                      : "hover:bg-white/8 hover:text-white"
+                  }`}
+                  data-testid={`button-section-${section.title.toLowerCase().replace(/\s+/g, "-")}`}
                 >
-                  <span>{section.title}</span>
+                  <span className="flex items-center gap-3">
+                    <section.icon className="h-4 w-4" />
+                    {section.title}
+                  </span>
                   <ChevronRight
-                    className={`h-3.5 w-3.5 transition-transform ${
-                      collapsedSections[section.title] ? "" : "rotate-90"
+                    className={`h-3.5 w-3.5 opacity-80 transition-transform ${
+                      isActive ? "rotate-90" : ""
                     }`}
                   />
                 </button>
-                {!collapsedSections[section.title] &&
-                  visibleItems.map((item) => {
-                    const isActive = location === item.href;
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className={`flex items-start gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
-                          isActive
-                            ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                            : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                        }`}
-                      >
-                        <item.icon className="mt-0.5 h-4 w-4 shrink-0" />
-                        <span className="min-w-0 whitespace-normal break-words leading-snug">
-                          {item.label}
-                        </span>
-                      </Link>
-                    );
-                  })}
+
+                {isActive && subItems.length > 0 && (
+                  <div className="ml-2 space-y-1 border-l border-white/15 pl-2">
+                    {subItems.map((item) => {
+                      const isSubActive = location === item.href;
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={`flex items-start gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
+                            isSubActive
+                              ? "bg-black/40 text-white shadow-sm"
+                              : "text-white/80 hover:bg-white/10 hover:text-white"
+                          }`}
+                        >
+                          <item.icon className="mt-0.5 h-4 w-4 shrink-0" />
+                          <span className="min-w-0 whitespace-normal break-words leading-snug">
+                            {item.label}
+                          </span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
         </nav>
       </div>
-      <div className="border-t border-sidebar-border p-4">
+      <div className="border-t border-white/10 p-4">
         <Link href="/profile">
-          <div className="flex items-center gap-3 rounded-lg bg-sidebar-accent/50 p-3 text-sm cursor-pointer hover:bg-sidebar-accent transition-colors">
-            <Avatar className="h-9 w-9 border border-sidebar-border">
-              <AvatarFallback className="bg-sidebar-primary/20 text-sidebar-foreground font-semibold tracking-wide">
+          <div className="flex items-center gap-3 rounded-lg bg-white/5 p-3 text-sm cursor-pointer hover:bg-white/10 transition-colors">
+            <Avatar className="h-9 w-9 border border-white/20">
+              <AvatarFallback className="bg-black/20 text-white font-semibold tracking-wide">
                 {user ? getInitials(user.name) : "?"}
               </AvatarFallback>
             </Avatar>
             <div className="flex flex-col overflow-hidden">
-              <span className="truncate font-semibold text-sidebar-foreground">
+              <span className="truncate font-semibold text-white">
                 {user?.name || "Usuário"}
               </span>
-              <span className="truncate text-xs text-sidebar-foreground/70">
+              <span className="truncate text-xs text-white/70">
                 {user?.role?.name || "Carregando..."}
               </span>
             </div>
@@ -376,17 +374,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="min-h-screen bg-[#e8eaf1] flex">
       {/* Desktop Sidebar */}
       <aside
-        className={`hidden border-r border-border bg-sidebar md:block fixed inset-y-0 z-50 transition-transform duration-200 ${
-          isDesktopSidebarOpen ? "w-64 translate-x-0" : "w-64 -translate-x-full"
+        className={`hidden border-r border-white/10 bg-[#2f2f31] md:block fixed inset-y-0 z-50 transition-transform duration-200 ${
+          isDesktopSidebarOpen ? "w-[270px] translate-x-0" : "w-[270px] -translate-x-full"
         }`}
       >
         <Button
           variant="ghost"
           size="icon"
-          className="absolute right-2 top-2 z-[60] hidden md:inline-flex text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          className="absolute right-2 top-2 z-[60] hidden md:inline-flex text-white/80 hover:bg-white/10 hover:text-white"
           onClick={() => setIsDesktopSidebarOpen(false)}
           data-testid="button-close-desktop-sidebar"
           title="Fechar menu"
@@ -424,11 +422,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Main Content */}
       <main
         className={`flex-1 flex flex-col min-h-screen transition-[margin] duration-200 ${
-          isDesktopSidebarOpen ? "md:ml-64" : "md:ml-0"
+          isDesktopSidebarOpen ? "md:ml-[270px]" : "md:ml-0"
         }`}
       >
         {/* Top Header */}
-        <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b border-border bg-background/80 px-6 backdrop-blur-sm shadow-sm">
+        <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b border-[#d8d8de] bg-[#f7f7f8] px-6 shadow-sm">
           <Sheet open={isMobileOpen} onOpenChange={setIsMobileOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="md:hidden">
@@ -512,6 +510,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       company?.razaoSocial ||
                       "Minha Loja"}
                   </span>
+                  <Avatar className="h-8 w-8 border border-[#cfd5e4]">
+                    <AvatarFallback className="bg-[#4f6b9a] text-white text-xs">
+                      {user ? getInitials(user.name) : "?"}
+                    </AvatarFallback>
+                  </Avatar>
                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
@@ -544,7 +547,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <div className="flex-1 p-6 overflow-auto">{children}</div>
+        <div className="flex-1 overflow-auto p-6">{children}</div>
       </main>
     </div>
   );
