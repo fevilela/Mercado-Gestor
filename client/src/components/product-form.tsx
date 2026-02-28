@@ -59,6 +59,9 @@ const productFormSchema = z.object({
   margin: z.string().optional(),
   price: z.string().min(1, "Preço de venda é obrigatório"),
   promoPrice: z.string().optional(),
+  promoStart: z.string().optional(),
+  promoEnd: z.string().optional(),
+  expirationDate: z.string().optional(),
   stock: z.number().default(0),
   minStock: z.number().optional().nullable(),
   maxStock: z.number().optional().nullable(),
@@ -132,6 +135,16 @@ export default function ProductForm({
   onOpenChange,
   editProduct,
 }: ProductFormProps) {
+  const toDateInputValue = (value: unknown) => {
+    if (!value) return "";
+    const date = new Date(String(value));
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString().slice(0, 10);
+    }
+    const raw = String(value);
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "";
+  };
+
   const queryClient = useQueryClient();
   const [variations, setVariations] = useState<Variation[]>([]);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
@@ -228,6 +241,7 @@ export default function ProductForm({
       ncm: "",
       serviceCode: "",
       cest: "",
+      csosnCode: "",
       origin: "nacional",
       description: "",
       mainImageUrl: "",
@@ -235,6 +249,9 @@ export default function ProductForm({
       margin: "",
       price: "",
       promoPrice: "",
+      promoStart: "",
+      promoEnd: "",
+      expirationDate: "",
       stock: 0,
       minStock: 10,
       maxStock: 100,
@@ -246,8 +263,17 @@ export default function ProductForm({
   const watchPurchasePrice = form.watch("purchasePrice");
   const watchMargin = form.watch("margin");
   const watchPrice = form.watch("price");
+  const watchPromoPrice = form.watch("promoPrice");
   const watchIsKit = form.watch("isKit");
   const watchProductName = form.watch("name");
+  const promoDiscountPercent = (() => {
+    const price = parseFloat(watchPrice || "");
+    const promo = parseFloat(watchPromoPrice || "");
+    if (!Number.isFinite(price) || !Number.isFinite(promo) || price <= 0 || promo >= price) {
+      return null;
+    }
+    return ((price - promo) / price) * 100;
+  })();
 
   const lookupEanProduct = useCallback(
     async (ean: string) => {
@@ -403,13 +429,19 @@ export default function ProductForm({
         brand: editProduct.brand || "",
         type: editProduct.type || "",
         ncm: editProduct.ncm || "",
+        serviceCode: editProduct.serviceCode || "",
         cest: editProduct.cest || "",
+        csosnCode: editProduct.csosnCode || "",
+        origin: editProduct.origin || "nacional",
         description: editProduct.description || "",
         mainImageUrl: editProduct.mainImageUrl || "",
         purchasePrice: editProduct.purchasePrice || "",
         margin: editProduct.margin || "",
         price: editProduct.price || "",
         promoPrice: editProduct.promoPrice || "",
+        promoStart: toDateInputValue(editProduct.promoStart),
+        promoEnd: toDateInputValue(editProduct.promoEnd),
+        expirationDate: editProduct.expirationDate || "",
         stock: editProduct.stock || 0,
         minStock: editProduct.minStock || 10,
         maxStock: editProduct.maxStock || 100,
@@ -475,6 +507,9 @@ export default function ProductForm({
         purchasePrice: data.purchasePrice || null,
         margin: data.margin || null,
         promoPrice: data.promoPrice || null,
+        promoStart: data.promoStart || null,
+        promoEnd: data.promoEnd || null,
+        expirationDate: data.expirationDate || null,
         supplierId: data.supplierId || null,
       },
       variations: variations.map((v) => ({
@@ -751,7 +786,7 @@ export default function ProductForm({
                   <div className="space-y-2">
                     <Label htmlFor="csosnCode">CSOSN *</Label>
                     <Select
-                      value={form.watch("csosnCode")}
+                      value={form.watch("csosnCode") || ""}
                       onValueChange={(value) =>
                         form.setValue("csosnCode", value)
                       }
@@ -1086,14 +1121,47 @@ export default function ProductForm({
                       automaticamente o preço de venda, ou edite o preço de
                       venda diretamente.
                     </p>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <Label htmlFor="promoPrice">Preço Promocional (R$)</Label>
+                          {promoDiscountPercent !== null && (
+                            <span className="text-xs text-emerald-600">
+                              -{promoDiscountPercent.toFixed(2)}%
+                            </span>
+                          )}
+                        </div>
+                        <Input
+                          id="promoPrice"
+                          {...form.register("promoPrice")}
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="promoStart">Início da Promoção</Label>
+                        <Input
+                          id="promoStart"
+                          type="date"
+                          {...form.register("promoStart")}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="promoEnd">Fim da Promoção</Label>
+                        <Input
+                          id="promoEnd"
+                          type="date"
+                          {...form.register("promoEnd")}
+                        />
+                      </div>
+                    </div>
                     <div className="space-y-2">
-                      <Label htmlFor="promoPrice">Preço Promocional (R$)</Label>
+                      <Label htmlFor="expirationDate">Data de Validade</Label>
                       <Input
-                        id="promoPrice"
-                        {...form.register("promoPrice")}
-                        type="number"
-                        step="0.01"
-                        placeholder="0.00"
+                        id="expirationDate"
+                        type="date"
+                        {...form.register("expirationDate")}
                       />
                     </div>
                   </CardContent>

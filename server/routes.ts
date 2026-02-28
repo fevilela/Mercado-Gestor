@@ -468,6 +468,31 @@ export async function registerRoutes(
     kitItems: z.array(kitItemSchema).optional(),
   });
 
+  const normalizePromoDateFields = (body: any) => {
+    if (!body || typeof body !== "object" || !body.product) return body;
+    const product = { ...body.product };
+
+    const toDateOrNull = (value: unknown) => {
+      if (value === undefined) return undefined;
+      if (value === null || value === "") return null;
+      if (value instanceof Date) return value;
+      const raw = String(value);
+      const parsed = raw.includes("T")
+        ? new Date(raw)
+        : new Date(`${raw}T00:00:00`);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    if ("promoStart" in product) {
+      product.promoStart = toDateOrNull(product.promoStart);
+    }
+    if ("promoEnd" in product) {
+      product.promoEnd = toDateOrNull(product.promoEnd);
+    }
+
+    return { ...body, product };
+  };
+
   app.post(
     "/api/products",
     requireAuth,
@@ -478,12 +503,13 @@ export async function registerRoutes(
         if (!companyId)
           return res.status(401).json({ error: "Não autenticado" });
 
+        const normalizedBody = normalizePromoDateFields(req.body);
         const {
           product,
           variations,
           media,
           kitItems: kitItemsData,
-        } = createProductRequestSchema.parse(req.body);
+        } = createProductRequestSchema.parse(normalizedBody);
 
         const result = await db.transaction(async (tx) => {
           const [newProduct] = await tx
@@ -550,7 +576,8 @@ export async function registerRoutes(
 
         const id = parseInt(req.params.id);
 
-        const parseResult = updateProductRequestSchema.safeParse(req.body);
+        const normalizedBody = normalizePromoDateFields(req.body);
+        const parseResult = updateProductRequestSchema.safeParse(normalizedBody);
         if (!parseResult.success) {
           console.error("Validation error:", parseResult.error.errors);
           return res.status(400).json({ error: parseResult.error.errors });
@@ -2036,9 +2063,22 @@ export async function registerRoutes(
 
         const productsList = await storage.getAllProducts(companyId);
         const methods = await storage.getPaymentMethods(companyId);
+        const applyPromoPrice = (product: any) => {
+          const promoPrice = Number(product.promoPrice || 0);
+          if (!Number.isFinite(promoPrice) || promoPrice <= 0) return product;
+          return {
+            ...product,
+            regularPrice: product.regularPrice ?? product.price,
+            price: product.promoPrice,
+          };
+        };
+
+        const pdvProducts = productsList.map((product: any) =>
+          applyPromoPrice(product)
+        );
         const payload = {
           generatedAt: new Date().toISOString(),
-          products: productsList,
+          products: pdvProducts,
           paymentMethods: methods.filter((m) => m.isActive !== false),
         };
         const load = await storage.createPdvLoad({
@@ -2050,7 +2090,7 @@ export async function registerRoutes(
           success: true,
           loadId: load.id,
           generatedAt: load.createdAt,
-          products: productsList.length,
+          products: pdvProducts.length,
           paymentMethods: payload.paymentMethods.length,
         });
       } catch (error) {
@@ -2073,7 +2113,36 @@ export async function registerRoutes(
         if (!load) {
           return res.status(404).json({ error: "Nenhuma carga enviada" });
         }
-        res.json(load.payload || {});
+        const currentProducts = await storage.getAllProducts(companyId);
+        const regularPriceById = new Map<number, string>(
+          currentProducts.map((p: any) => [Number(p.id), String(p.price || "0")])
+        );
+        const payload = (load.payload || {}) as any;
+        const products = Array.isArray(payload.products) ? payload.products : [];
+        const normalizedProducts = products.map((product: any) => {
+          const promoPrice = Number(product?.promoPrice || 0);
+          const productId = Number(product?.id || 0);
+          const regularPriceFromCatalog =
+            regularPriceById.get(productId) ||
+            String(product?.regularPrice || product?.price || "0");
+          if (!Number.isFinite(promoPrice) || promoPrice <= 0) {
+            return {
+              ...product,
+              regularPrice: regularPriceFromCatalog,
+              price: regularPriceFromCatalog,
+            };
+          }
+          return {
+            ...product,
+            regularPrice: regularPriceFromCatalog,
+            price: product.promoPrice,
+          };
+        });
+
+        res.json({
+          ...payload,
+          products: normalizedProducts,
+        });
       } catch (error) {
         res.status(500).json({ error: "Failed to fetch PDV load" });
       }
@@ -3167,6 +3236,7 @@ export async function registerRoutes(
         storage.getAllPayables(companyId),
         storage.getAllReceivables(companyId),
       ]);
+      const productsList = await storage.getAllProducts(companyId);
 
       const pendingFiscalSales = sales.filter((sale: any) => {
         const fiscalStatus = String(sale.nfceStatus || "").toLowerCase();
@@ -3202,6 +3272,32 @@ export async function registerRoutes(
       });
 
       const dynamicAlerts: any[] = [];
+      const startOfDay = (date: Date) =>
+        new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const today = startOfDay(now);
+      const threeDaysLimit = new Date(today);
+      threeDaysLimit.setDate(threeDaysLimit.getDate() + 3);
+
+      const productsWithExpiration = productsList
+        .filter((product: any) => Boolean(product.expirationDate))
+        .map((product: any) => {
+          const rawDate = String(product.expirationDate);
+          const parsed = new Date(`${rawDate}T00:00:00`);
+          return {
+            product,
+            expirationDate: startOfDay(parsed),
+            validDate: !Number.isNaN(parsed.getTime()),
+          };
+        })
+        .filter((item) => item.validDate);
+
+      const expiredProducts = productsWithExpiration.filter(
+        (item) => item.expirationDate < today
+      );
+      const nearExpirationProducts = productsWithExpiration.filter(
+        (item) =>
+          item.expirationDate >= today && item.expirationDate <= threeDaysLimit
+      );
 
       if (pendingFiscalSales.length > 0) {
         dynamicAlerts.push({
@@ -3243,6 +3339,38 @@ export async function registerRoutes(
           message: `${receivablesUpcoming.length} a vencer em ate 7 dias e ${receivablesOverdue.length} em atraso.`,
           referenceId: null,
           referenceType: "receivables",
+          isRead: false,
+          createdAt: now,
+        });
+      }
+
+      if (expiredProducts.length > 0 || nearExpirationProducts.length > 0) {
+        const toDayDiff = (target: Date) => {
+          const diffMs = target.getTime() - today.getTime();
+          return Math.round(diffMs / (24 * 60 * 60 * 1000));
+        };
+
+        const nearMessages = nearExpirationProducts.map((item) => {
+          const daysToExpire = toDayDiff(item.expirationDate);
+          const dayText = daysToExpire === 1 ? "dia" : "dias";
+          return `O produto ${item.product.name} (${item.product.id}) vence em ${daysToExpire} ${dayText}.`;
+        });
+
+        const expiredMessages = expiredProducts.map((item) => {
+          const daysExpired = Math.abs(toDayDiff(item.expirationDate));
+          const dayText = daysExpired === 1 ? "dia" : "dias";
+          return `O produto ${item.product.name} (${item.product.id}) venceu ha ${daysExpired} ${dayText}.`;
+        });
+
+        dynamicAlerts.push({
+          id: -1004,
+          companyId,
+          userId: userId || null,
+          type: "products_expiration",
+          title: "Produtos proximos do vencimento",
+          message: [...nearMessages, ...expiredMessages].join(" "),
+          referenceId: null,
+          referenceType: "products",
           isRead: false,
           createdAt: now,
         });

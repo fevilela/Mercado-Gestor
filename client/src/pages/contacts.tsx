@@ -20,6 +20,11 @@ import {
   Trash2,
   Loader2,
   X,
+  Users,
+  Building2,
+  Truck,
+  AlertTriangle,
+  ChevronRight,
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -552,39 +557,101 @@ export default function Contacts() {
       (t.rntc && t.rntc.includes(transporterSearchQuery))
   );
 
+  const delinquentCustomers = customers.filter((customer) =>
+    String(customer.type || "").toLowerCase().includes("inadimpl")
+  );
+
+  const formatMoney = (value: string | null | undefined) => {
+    const parsed = Number(String(value ?? "0").replace(",", "."));
+    return Number.isFinite(parsed)
+      ? parsed.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+      : "R$ 0,00";
+  };
+
+  const getInitials = (name: string) =>
+    String(name || "")
+      .split(" ")
+      .map((part) => part.charAt(0))
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+
   return (
     <Layout>
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-heading font-bold tracking-tight text-foreground">
-              Clientes & Fornecedores
-            </h1>
-            <p className="text-muted-foreground">
-              Gerencie sua base de contatos.
-            </p>
-          </div>
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-3xl font-heading font-bold tracking-tight text-foreground">
+            Clientes, Fornecedores e Transportadoras
+          </h1>
+          <p className="text-muted-foreground">Gerencie sua base de contatos.</p>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Card className="border-blue-100 bg-blue-50/60">
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs text-blue-700">Clientes</p>
+                <p className="text-2xl font-semibold text-blue-900">{customers.length}</p>
+              </div>
+              <div className="rounded-lg bg-white/70 p-2 text-blue-700">
+                <Users className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-indigo-100 bg-indigo-50/60">
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs text-indigo-700">Fornecedores</p>
+                <p className="text-2xl font-semibold text-indigo-900">{suppliers.length}</p>
+              </div>
+              <div className="rounded-lg bg-white/70 p-2 text-indigo-700">
+                <Building2 className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-amber-100 bg-amber-50/60">
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs text-amber-700">Transportadoras</p>
+                <p className="text-2xl font-semibold text-amber-900">{transporters.length}</p>
+              </div>
+              <div className="rounded-lg bg-white/70 p-2 text-amber-700">
+                <Truck className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-rose-100 bg-rose-50/60">
+            <CardContent className="flex items-center justify-between p-4">
+              <div>
+                <p className="text-xs text-rose-700">Inadimplentes</p>
+                <p className="text-2xl font-semibold text-rose-900">{delinquentCustomers.length}</p>
+              </div>
+              <div className="rounded-lg bg-white/70 p-2 text-rose-700">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <Tabs defaultValue="clients" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="clients">
+          <TabsList className="h-auto w-full justify-start gap-2 rounded-xl border bg-muted/40 p-1">
+            <TabsTrigger value="clients" className="rounded-lg px-4">
               Clientes ({customers.length})
             </TabsTrigger>
-            <TabsTrigger value="suppliers">
+            <TabsTrigger value="suppliers" className="rounded-lg px-4">
               Fornecedores ({suppliers.length})
             </TabsTrigger>
-            <TabsTrigger value="transporters">
+            <TabsTrigger value="transporters" className="rounded-lg px-4">
               Transportadoras ({transporters.length})
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="clients" className="space-y-4">
-            <div className="flex justify-between items-center bg-card p-4 rounded-lg border border-border">
-              <div className="relative w-full max-w-sm">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 md:flex-row md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar clientes..."
+                  placeholder="Buscar por nome, telefone ou e-mail..."
                   className="pl-9"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -606,42 +673,36 @@ export default function Contacts() {
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
             ) : filteredCustomers.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="rounded-xl border border-dashed py-14 text-center text-muted-foreground">
                 {searchQuery
                   ? "Nenhum cliente encontrado para esta busca."
                   : "Nenhum cliente cadastrado ainda."}
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {filteredCustomers.map((customer) => (
-                  <Card key={customer.id}>
-                    <CardHeader className="flex flex-row items-center gap-4">
-                      <Avatar>
-                        <AvatarFallback>
-                          {customer.name.substring(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1">
-                        <CardTitle className="text-base">
-                          {customer.name}
-                        </CardTitle>
-                        <CardDescription>{customer.type}</CardDescription>
-                      </div>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => openEditCustomer(customer)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setDeleteCustomerId(customer.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                  <Card key={customer.id} className="overflow-hidden rounded-xl border shadow-sm">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarFallback className="bg-emerald-100 text-emerald-700">
+                              {getInitials(customer.name)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <CardTitle className="text-base">{customer.name}</CardTitle>
+                            <CardDescription>{customer.type || "Cliente Regular"}</CardDescription>
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" onClick={() => openEditCustomer(customer)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => setDeleteCustomerId(customer.id)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-2 text-sm">
@@ -655,18 +716,25 @@ export default function Contacts() {
                           <Mail className="h-4 w-4" /> {customer.email}
                         </div>
                       )}
-                      {customer.address && (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <MapPin className="h-4 w-4" /> {customer.address}
+                      {(customer.address || customer.city || customer.state) && (
+                        <div className="flex items-start gap-2 text-muted-foreground">
+                          <MapPin className="mt-0.5 h-4 w-4" />
+                          <span>
+                            {customer.address || "-"}
+                            {customer.city ? `, ${customer.city}` : ""}
+                            {customer.state ? ` - ${customer.state}` : ""}
+                          </span>
                         </div>
                       )}
-                      {customer.cpfCnpj && (
-                        <div className="pt-2 border-t border-border mt-2">
-                          <p className="text-xs text-muted-foreground">
-                            CPF/CNPJ: {customer.cpfCnpj}
-                          </p>
-                        </div>
-                      )}
+                      <div className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                        <p>CPF/CNPJ: {customer.cpfCnpj || "-"}</p>
+                      </div>
+                      <div className="flex items-center justify-between rounded-lg bg-muted/40 p-2 text-xs">
+                        <span>Limite de crédito</span>
+                        <span className="font-semibold text-foreground">
+                          {formatMoney(customer.creditLimit)}
+                        </span>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
@@ -675,11 +743,11 @@ export default function Contacts() {
           </TabsContent>
 
           <TabsContent value="suppliers" className="space-y-4">
-            <div className="flex justify-between items-center bg-card p-4 rounded-lg border border-border">
-              <div className="relative w-full max-w-sm">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 md:flex-row md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar fornecedores..."
+                  placeholder="Buscar por empresa, contato ou e-mail..."
                   className="pl-9"
                   value={supplierSearchQuery}
                   onChange={(e) => setSupplierSearchQuery(e.target.value)}
@@ -701,41 +769,29 @@ export default function Contacts() {
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
             ) : filteredSuppliers.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="rounded-xl border border-dashed py-14 text-center text-muted-foreground">
                 {supplierSearchQuery
                   ? "Nenhum fornecedor encontrado para esta busca."
                   : "Nenhum fornecedor cadastrado ainda."}
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {filteredSuppliers.map((supplier) => (
-                  <Card key={supplier.id}>
-                    <CardHeader className="flex flex-row items-start gap-4">
-                      <div className="flex-1">
-                        <CardTitle className="text-base">
-                          {supplier.name}
-                        </CardTitle>
-                        {supplier.contact && (
-                          <CardDescription>
-                            Contato: {supplier.contact}
-                          </CardDescription>
-                        )}
-                      </div>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => openEditSupplier(supplier)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setDeleteSupplierId(supplier.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                  <Card key={supplier.id} className="overflow-hidden rounded-xl border shadow-sm">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <CardTitle className="text-base">{supplier.name}</CardTitle>
+                          <CardDescription>{supplier.contact || "Sem contato principal"}</CardDescription>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" onClick={() => openEditSupplier(supplier)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => setDeleteSupplierId(supplier.id)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-2 text-sm">
@@ -749,13 +805,20 @@ export default function Contacts() {
                           <Mail className="h-4 w-4" /> {supplier.email}
                         </div>
                       )}
-                      {supplier.cnpj && (
-                        <div className="pt-2 border-t border-border mt-2">
-                          <p className="text-xs text-muted-foreground">
-                            CNPJ: {supplier.cnpj}
-                          </p>
+                      {(supplier.address || supplier.city || supplier.state) && (
+                        <div className="flex items-start gap-2 text-muted-foreground">
+                          <MapPin className="mt-0.5 h-4 w-4" />
+                          <span>
+                            {supplier.address || "-"}
+                            {supplier.city ? `, ${supplier.city}` : ""}
+                            {supplier.state ? ` - ${supplier.state}` : ""}
+                          </span>
                         </div>
                       )}
+                      <div className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                        <p>CNPJ: {supplier.cnpj || "-"}</p>
+                        <p>Condição pagamento: {supplier.paymentTerms || "-"}</p>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
@@ -764,11 +827,11 @@ export default function Contacts() {
           </TabsContent>
 
           <TabsContent value="transporters" className="space-y-4">
-            <div className="flex justify-between items-center bg-card p-4 rounded-lg border border-border">
-              <div className="relative w-full max-w-sm">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <div className="flex flex-col gap-3 rounded-xl border bg-card p-3 md:flex-row md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar transportadoras..."
+                  placeholder="Buscar por nome, contato, CNPJ/CPF ou RNTC..."
                   className="pl-9"
                   value={transporterSearchQuery}
                   onChange={(e) => setTransporterSearchQuery(e.target.value)}
@@ -790,29 +853,34 @@ export default function Contacts() {
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
             ) : filteredTransporters.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="rounded-xl border border-dashed py-14 text-center text-muted-foreground">
                 {transporterSearchQuery
                   ? "Nenhuma transportadora encontrada para esta busca."
                   : "Nenhuma transportadora cadastrada ainda."}
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {filteredTransporters.map((transporter) => (
-                  <Card key={transporter.id}>
-                    <CardHeader className="flex flex-row items-start gap-4">
-                      <div className="flex-1">
-                        <CardTitle className="text-base">{transporter.name}</CardTitle>
-                        {transporter.contact && (
-                          <CardDescription>Contato: {transporter.contact}</CardDescription>
-                        )}
-                      </div>
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEditTransporter(transporter)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => setDeleteTransporterId(transporter.id)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                  <Card key={transporter.id} className="overflow-hidden rounded-xl border shadow-sm">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="rounded-lg bg-amber-100 p-2 text-amber-700">
+                            <Truck className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <CardTitle className="text-base">{transporter.name}</CardTitle>
+                            <CardDescription>{transporter.contact || "Sem contato principal"}</CardDescription>
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" onClick={() => openEditTransporter(transporter)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => setDeleteTransporterId(transporter.id)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-2 text-sm">
@@ -826,24 +894,21 @@ export default function Contacts() {
                           <Mail className="h-4 w-4" /> {transporter.email}
                         </div>
                       )}
-                      {transporter.address && (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <MapPin className="h-4 w-4" /> {transporter.address}
+                      {(transporter.address || transporter.city || transporter.state) && (
+                        <div className="flex items-start gap-2 text-muted-foreground">
+                          <MapPin className="mt-0.5 h-4 w-4" />
+                          <span>
+                            {transporter.address || "-"}
+                            {transporter.city ? `, ${transporter.city}` : ""}
+                            {transporter.state ? ` - ${transporter.state}` : ""}
+                          </span>
                         </div>
                       )}
-                      {(transporter.cnpjCpf || transporter.rntc) && (
-                        <div className="pt-2 border-t border-border mt-2 space-y-1">
-                          {transporter.cnpjCpf && (
-                            <p className="text-xs text-muted-foreground">CNPJ/CPF: {transporter.cnpjCpf}</p>
-                          )}
-                          {transporter.ie && (
-                            <p className="text-xs text-muted-foreground">IE: {transporter.ie}</p>
-                          )}
-                          {transporter.rntc && (
-                            <p className="text-xs text-muted-foreground">RNTC: {transporter.rntc}</p>
-                          )}
-                        </div>
-                      )}
+                      <div className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                        <p>CNPJ/CPF: {transporter.cnpjCpf || "-"}</p>
+                        <p>IE: {transporter.ie || "-"}</p>
+                        <p>RNTC: {transporter.rntc || "-"}</p>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}

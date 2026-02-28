@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, parseISO, startOfMonth, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -81,6 +81,9 @@ interface Product {
   stock: number;
   minStock: number | null;
   price: string;
+  promoPrice?: string | null;
+  promoStart?: string | null;
+  promoEnd?: string | null;
   purchasePrice: string | null;
   createdAt: string;
 }
@@ -223,6 +226,7 @@ interface ReportBuildContext {
   allSales: Sale[];
   loadSaleItemsForSales: (sales: Sale[]) => Promise<SaleItem[]>;
 }
+type DetailLevel = "resumo" | "completo";
 
 type FilterControlType = "text" | "select";
 type ChartKind = "bar" | "line" | "pie";
@@ -242,6 +246,7 @@ const REPORT_DEFINITIONS: ReportDefinition[] = [
   { id: "estoque_movimentacao", group: "Relatorios de Estoque", title: "Movimentacao de estoque", description: "Entradas, saidas, ajustes e perdas" },
   { id: "estoque_minimo", group: "Relatorios de Estoque", title: "Produtos com estoque minimo", description: "Itens abaixo do estoque minimo" },
   { id: "estoque_giro", group: "Relatorios de Estoque", title: "Giro de estoque", description: "Mais vendidos e parados" },
+  { id: "estoque_promocoes", group: "Relatorios de Estoque", title: "Produtos em promocao", description: "Preco anterior, preco promocional e duracao da promocao" },
   { id: "estoque_inventario", group: "Relatorios de Estoque", title: "Inventario fisico", description: "Comparativo sistema x contagem real" },
   { id: "pdv_fechamento", group: "Relatorios de PDV", title: "Fechamento de caixa (X e Z)", description: "Abertura, suprimentos, sangrias e diferenca de caixa" },
   { id: "pdv_vendas_vendedor", group: "Relatorios de PDV", title: "Vendas por vendedor", description: "Meta, comissao e ticket medio por operador" },
@@ -340,6 +345,7 @@ export default function Reports() {
   const [dateFrom, setDateFrom] = useState(() => format(startOfMonth(subMonths(new Date(), 1)), "yyyy-MM-dd"));
   const [dateTo, setDateTo] = useState(() => format(new Date(), "yyyy-MM-dd"));
   const [selectedReportId, setSelectedReportId] = useState<string>("fiscal_vendas_periodo");
+  const [detailLevel, setDetailLevel] = useState<DetailLevel>("completo");
   const [preview, setPreview] = useState<ReportOutput | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const saleItemsCacheRef = useRef<Map<number, SaleItem[]>>(new Map());
@@ -458,53 +464,144 @@ export default function Reports() {
         );
         const descontos = 0;
         const liquido = bruto - descontos;
+        const rows = context.filteredSales
+          .slice()
+          .sort(
+            (a, b) =>
+              (parseDateSafe(b.createdAt)?.getTime() || 0) -
+              (parseDateSafe(a.createdAt)?.getTime() || 0),
+          )
+          .map((sale) => ({
+            DataHora: fmtDate(sale.createdAt),
+            Venda: `#${sale.id}`,
+            Cliente: sale.customerName || "Consumidor Final",
+            FormaPagamento: sale.paymentMethod || "-",
+            StatusVenda: sale.status || "-",
+            StatusFiscal: sale.nfceStatus || "-",
+            Itens: sale.itemsCount || 0,
+            ValorTotal: money(toNumber(sale.total)),
+          }));
+        if (detailLevel === "resumo") {
+          const grouped = rows.reduce<Record<string, { count: number; total: number }>>((acc, row) => {
+            const status = String(row.StatusFiscal || row.StatusVenda || "-");
+            const numeric = toNumber(String(row.ValorTotal).replace("R$", "").replace(/\./g, "").replace(",", "."));
+            const current = acc[status] || { count: 0, total: 0 };
+            current.count += 1;
+            current.total += numeric;
+            acc[status] = current;
+            return acc;
+          }, {});
+          return {
+            id: reportId,
+            title: "Vendas por periodo",
+            group: "Relatorios Fiscais",
+            description: "Resumo consolidado por status fiscal",
+            columns: ["StatusFiscal", "QtdVendas", "ValorTotal"],
+            rows: Object.entries(grouped).map(([status, info]) => ({
+              StatusFiscal: status,
+              QtdVendas: info.count,
+              ValorTotal: money(info.total),
+            })),
+            note: `Resumo: bruto ${money(bruto)} | liquido ${money(liquido)}.`,
+          };
+        }
         return {
           id: reportId,
           title: "Vendas por periodo",
           group: "Relatorios Fiscais",
-          description: "Total bruto, descontos, cancelamentos, devolucoes e total liquido",
-          columns: ["Indicador", "Valor"],
-          rows: [
-            { Indicador: "Total bruto", Valor: money(bruto) },
-            { Indicador: "Descontos", Valor: money(descontos) },
-            { Indicador: "Cancelamentos", Valor: `${canceladas.length} venda(s)` },
-            { Indicador: "Devolucoes", Valor: `${devolucoes.length} venda(s)` },
-            { Indicador: "Total liquido", Valor: money(liquido) },
+          description: "Detalhamento de vendas no periodo selecionado",
+          columns: [
+            "DataHora",
+            "Venda",
+            "Cliente",
+            "FormaPagamento",
+            "StatusVenda",
+            "StatusFiscal",
+            "Itens",
+            "ValorTotal",
           ],
+          rows,
+          note: `Resumo: bruto ${money(bruto)} | descontos ${money(descontos)} | cancelamentos ${canceladas.length} | devolucoes ${devolucoes.length} | liquido ${money(liquido)}.`,
         };
       }
       case "fiscal_notas_emitidas": {
-        const nfceTotal = context.filteredSales.filter((sale) => sale.nfceKey || sale.nfceProtocol).length;
-        const nfceAutorizadas = context.filteredSales.filter((sale) =>
-          String(sale.nfceStatus || "").toLowerCase().includes("autoriz"),
-        ).length;
-        const nfceCanceladas = context.filteredSales.filter((sale) =>
-          String(sale.nfceStatus || "").toLowerCase().includes("cancel"),
-        ).length;
+        const nfceRows = context.filteredSales
+          .filter(
+            (sale) =>
+              Boolean(sale.nfceKey) ||
+              Boolean(sale.nfceProtocol) ||
+              Boolean(sale.nfceStatus),
+          )
+          .map((sale) => ({
+            Fonte: "NFC-e",
+            Documento: `Venda #${sale.id}`,
+            Status: sale.nfceStatus || sale.status || "-",
+            Ambiente: "-",
+            Chave: sale.nfceKey || "-",
+            Protocolo: sale.nfceProtocol || "-",
+            Cliente: sale.customerName || "Consumidor Final",
+            Valor: money(toNumber(sale.total)),
+            DataHora: fmtDate(sale.createdAt),
+            sortKey: parseDateSafe(sale.createdAt)?.getTime() || 0,
+          }));
+
         const nfeRows = context.nfeHistory
           .filter((r) => inRange(r.updatedAt || r.createdAt))
-          .reduce<Record<string, number>>((acc, row) => {
-            const key = row.status;
+          .map((row) => ({
+            Fonte: "NF-e",
+            Documento:
+              row.nfeNumber && row.nfeSeries
+                ? `${row.nfeNumber}/${row.nfeSeries}`
+                : row.documentKey || `NFE-${row.id}`,
+            Status: row.status,
+            Ambiente: row.environment,
+            Chave: row.documentKey || "-",
+            Protocolo: row.protocol || "-",
+            Cliente: "-",
+            Valor: "-",
+            DataHora: fmtDate(row.updatedAt || row.createdAt),
+            sortKey:
+              parseDateSafe(row.updatedAt || row.createdAt)?.getTime() || 0,
+          }));
+
+        const rows = [...nfceRows, ...nfeRows]
+          .sort((a, b) => b.sortKey - a.sortKey)
+          .map(({ sortKey, ...rest }) => rest);
+
+        if (detailLevel === "resumo") {
+          const grouped = rows.reduce<Record<string, number>>((acc, row) => {
+            const key = `${row.Fonte} - ${row.Status}`;
             acc[key] = (acc[key] || 0) + 1;
             return acc;
           }, {});
-
+          return {
+            id: reportId,
+            title: "Notas fiscais emitidas",
+            group: "Relatorios Fiscais",
+            description: "Resumo por fonte e status",
+            columns: ["FonteStatus", "Quantidade"],
+            rows: Object.entries(grouped).map(([k, v]) => ({ FonteStatus: k, Quantidade: v })),
+            note: `Total de registros: ${rows.length}.`,
+          };
+        }
         return {
           id: reportId,
           title: "Notas fiscais emitidas",
           group: "Relatorios Fiscais",
-          description: "NF-e, NFC-e e status de emissao",
-          columns: ["Documento", "Status", "Quantidade"],
-          rows: [
-            { Documento: "NFC-e", Status: "Emitidas", Quantidade: nfceTotal },
-            { Documento: "NFC-e", Status: "Autorizadas", Quantidade: nfceAutorizadas },
-            { Documento: "NFC-e", Status: "Canceladas", Quantidade: nfceCanceladas },
-            ...Object.entries(nfeRows).map(([status, qty]) => ({
-              Documento: "NF-e",
-              Status: status,
-              Quantidade: qty,
-            })),
+          description: "Detalhamento de NF-e e NFC-e do periodo",
+          columns: [
+            "Fonte",
+            "Documento",
+            "Status",
+            "Ambiente",
+            "Chave",
+            "Protocolo",
+            "Cliente",
+            "Valor",
+            "DataHora",
           ],
+          rows,
+          note: `Total de registros: ${rows.length}. NFC-e: ${nfceRows.length} | NF-e: ${nfeRows.length}.`,
         };
       }
       case "fiscal_cancelamentos": {
@@ -586,12 +683,21 @@ export default function Reports() {
         };
       }
       case "financeiro_fluxo_caixa": {
-        const dayMap = new Map<string, { entradas: number; saidas: number }>();
+        const dayMap = new Map<
+          string,
+          { entradas: number; saidas: number; qtdEntradas: number; qtdSaidas: number }
+        >();
 
         context.filteredSales.forEach((sale) => {
           const key = format(parseDateSafe(sale.createdAt) || new Date(), "yyyy-MM-dd");
-          const existing = dayMap.get(key) || { entradas: 0, saidas: 0 };
+          const existing = dayMap.get(key) || {
+            entradas: 0,
+            saidas: 0,
+            qtdEntradas: 0,
+            qtdSaidas: 0,
+          };
           existing.entradas += toNumber(sale.total);
+          existing.qtdEntradas += 1;
           dayMap.set(key, existing);
         });
 
@@ -600,8 +706,14 @@ export default function Reports() {
           .forEach((payable) => {
             const date = payable.paidDate || payable.dueDate;
             const key = format(parseDateSafe(date) || new Date(), "yyyy-MM-dd");
-            const existing = dayMap.get(key) || { entradas: 0, saidas: 0 };
+            const existing = dayMap.get(key) || {
+              entradas: 0,
+              saidas: 0,
+              qtdEntradas: 0,
+              qtdSaidas: 0,
+            };
             existing.saidas += toNumber(payable.amount);
+            existing.qtdSaidas += 1;
             dayMap.set(key, existing);
           });
 
@@ -609,7 +721,9 @@ export default function Reports() {
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([day, values]) => ({
             Data: fmtDate(`${day}T00:00:00`),
+            QtdEntradas: values.qtdEntradas,
             Entradas: money(values.entradas),
+            QtdSaidas: values.qtdSaidas,
             Saidas: money(values.saidas),
             SaldoDiario: values.entradas - values.saidas,
           }));
@@ -624,8 +738,16 @@ export default function Reports() {
           id: reportId,
           title: "Fluxo de caixa",
           group: "Relatorios Financeiros",
-          description: "Entradas, saidas, saldo diario e acumulado",
-          columns: ["Data", "Entradas", "Saidas", "SaldoDiario", "SaldoAcumulado"],
+          description: "Entradas, saídas e saldo com detalhamento diário",
+          columns: [
+            "Data",
+            "QtdEntradas",
+            "Entradas",
+            "QtdSaidas",
+            "Saidas",
+            "SaldoDiario",
+            "SaldoAcumulado",
+          ],
           rows: rowsWithAccum,
         };
       }
@@ -675,50 +797,123 @@ export default function Reports() {
         };
       }
       case "financeiro_forma_pagamento": {
-        const grouped = context.filteredSales.reduce<Record<string, number>>((acc, sale) => {
+        const grouped = context.filteredSales.reduce<
+          Record<string, { total: number; count: number }>
+        >((acc, sale) => {
           const method = sale.paymentMethod || "Outros";
-          acc[method] = (acc[method] || 0) + toNumber(sale.total);
+          const current = acc[method] || { total: 0, count: 0 };
+          current.total += toNumber(sale.total);
+          current.count += 1;
+          acc[method] = current;
           return acc;
         }, {});
+
+        const rows = context.filteredSales
+          .slice()
+          .sort(
+            (a, b) =>
+              (parseDateSafe(b.createdAt)?.getTime() || 0) -
+              (parseDateSafe(a.createdAt)?.getTime() || 0),
+          )
+          .map((sale) => ({
+            FormaPagamento: sale.paymentMethod || "Outros",
+            Venda: `#${sale.id}`,
+            Cliente: sale.customerName || "Consumidor Final",
+            DataHora: fmtDate(sale.createdAt),
+            Status: sale.status || "-",
+            Valor: money(toNumber(sale.total)),
+          }));
+        if (detailLevel === "resumo") {
+          return {
+            id: reportId,
+            title: "Recebimentos por forma de pagamento",
+            group: "Relatorios Financeiros",
+            description: "Resumo por forma de pagamento",
+            columns: ["FormaPagamento", "QtdVendas", "ValorTotal"],
+            rows: Object.entries(grouped).map(([method, data]) => ({
+              FormaPagamento: method,
+              QtdVendas: data.count,
+              ValorTotal: money(data.total),
+            })),
+          };
+        }
         return {
           id: reportId,
           title: "Recebimentos por forma de pagamento",
           group: "Relatorios Financeiros",
-          description: "Distribuicao por metodo de recebimento",
-          columns: ["FormaPagamento", "Valor"],
-          rows: Object.entries(grouped).map(([method, value]) => ({
-            FormaPagamento: method,
-            Valor: money(value),
-          })),
+          description: "Detalhamento por venda e forma de pagamento",
+          columns: ["FormaPagamento", "Venda", "Cliente", "DataHora", "Status", "Valor"],
+          rows,
+          note: Object.entries(grouped)
+            .map(([method, data]) => `${method}: ${data.count} venda(s) | ${money(data.total)}`)
+            .join(" | "),
         };
       }
       case "financeiro_conciliacao_cartoes": {
         const methods = context.filteredSales.filter((sale) =>
           /(cart|credit|debito|credito)/i.test(String(sale.paymentMethod || "")),
         );
-        const grouped = methods.reduce<Record<string, number>>((acc, sale) => {
-          const method = sale.paymentMethod || "Cartao";
-          acc[method] = (acc[method] || 0) + toNumber(sale.total);
-          return acc;
-        }, {});
-        return {
-          id: reportId,
-          title: "Conciliacao de cartoes",
-          group: "Relatorios Financeiros",
-          description: "Taxa estimada por metodo de cartao",
-          columns: ["Metodo", "Bruto", "TaxaEstimada", "LiquidoEstimado", "ParcelasAReceber"],
-          rows: Object.entries(grouped).map(([method, gross]) => {
+        const rows = methods
+          .slice()
+          .sort(
+            (a, b) =>
+              (parseDateSafe(b.createdAt)?.getTime() || 0) -
+              (parseDateSafe(a.createdAt)?.getTime() || 0),
+          )
+          .map((sale) => {
+            const method = sale.paymentMethod || "Cartao";
+            const gross = toNumber(sale.total);
             const fee = /debito/i.test(method) ? 0.02 : 0.035;
             const feeValue = gross * fee;
             const liquid = gross - feeValue;
             return {
+              Venda: `#${sale.id}`,
               Metodo: method,
+              DataHora: fmtDate(sale.createdAt),
               Bruto: money(gross),
               TaxaEstimada: `${(fee * 100).toFixed(2)}% (${money(feeValue)})`,
               LiquidoEstimado: money(liquid),
-              ParcelasAReceber: "Consultar adquirente",
+              Status: sale.status || "-",
             };
-          }),
+          });
+        if (detailLevel === "resumo") {
+          const grouped = rows.reduce<
+            Record<string, { count: number; bruto: number; liquido: number }>
+          >((acc, row) => {
+            const method = String(row.Metodo || "Cartao");
+            const bruto = toNumber(String(row.Bruto).replace("R$", "").replace(/\./g, "").replace(",", "."));
+            const liquido = toNumber(
+              String(row.LiquidoEstimado).replace("R$", "").replace(/\./g, "").replace(",", "."),
+            );
+            const current = acc[method] || { count: 0, bruto: 0, liquido: 0 };
+            current.count += 1;
+            current.bruto += bruto;
+            current.liquido += liquido;
+            acc[method] = current;
+            return acc;
+          }, {});
+          return {
+            id: reportId,
+            title: "Conciliacao de cartoes",
+            group: "Relatorios Financeiros",
+            description: "Resumo estimado por metodo",
+            columns: ["Metodo", "QtdVendas", "Bruto", "LiquidoEstimado"],
+            rows: Object.entries(grouped).map(([method, info]) => ({
+              Metodo: method,
+              QtdVendas: info.count,
+              Bruto: money(info.bruto),
+              LiquidoEstimado: money(info.liquido),
+            })),
+            note: "Taxas exibidas como estimativa.",
+          };
+        }
+        return {
+          id: reportId,
+          title: "Conciliacao de cartoes",
+          group: "Relatorios Financeiros",
+          description: "Detalhamento estimado por venda com cartao",
+          columns: ["Venda", "Metodo", "DataHora", "Bruto", "TaxaEstimada", "LiquidoEstimado", "Status"],
+          rows,
           note: "Taxas e parcelas exibidas como estimativa. Integre com TEF/adquirente para conciliacao oficial.",
         };
       }
@@ -742,19 +937,62 @@ export default function Reports() {
       }
       case "estoque_movimentacao": {
         const fromSalesItems = await context.loadSaleItemsForSales(context.filteredSales);
-        const saidas = fromSalesItems.reduce((acc, item) => acc + item.quantity, 0);
+        const salesById = new Map(context.filteredSales.map((sale) => [sale.id, sale]));
+        const grouped = fromSalesItems.reduce<
+          Record<string, { qty: number; revenue: number; lastAt: string }>
+        >((acc, item) => {
+          const key = item.productName || `Produto ${item.productId}`;
+          const sale = salesById.get(item.saleId);
+          const saleDate = sale?.createdAt || "";
+          const current = acc[key] || { qty: 0, revenue: 0, lastAt: "" };
+          current.qty += item.quantity;
+          current.revenue += toNumber(item.subtotal);
+          if (!current.lastAt || saleDate > current.lastAt) {
+            current.lastAt = saleDate;
+          }
+          acc[key] = current;
+          return acc;
+        }, {});
+
+        const rows = Object.entries(grouped)
+          .sort((a, b) => b[1].qty - a[1].qty)
+          .map(([name, info]) => ({
+            Produto: name,
+            TipoMovimento: "Saida (venda)",
+            Quantidade: info.qty,
+            ValorMovimentado: money(info.revenue),
+            UltimaMovimentacao: fmtDate(info.lastAt),
+            Origem: "Venda PDV/caixa",
+          }));
+        if (detailLevel === "resumo") {
+          const totalQty = rows.reduce((acc, row) => acc + toNumber(row.Quantidade), 0);
+          return {
+            id: reportId,
+            title: "Movimentacao de estoque",
+            group: "Relatorios de Estoque",
+            description: "Resumo de saídas no período",
+            columns: ["Indicador", "Valor"],
+            rows: [
+              { Indicador: "Produtos com movimentacao", Valor: rows.length },
+              { Indicador: "Quantidade total movimentada", Valor: totalQty },
+            ],
+            note: "Entradas/ajustes/perdas exigem ajuste de estoque para rastreio completo.",
+          };
+        }
         return {
           id: reportId,
           title: "Movimentacao de estoque",
           group: "Relatorios de Estoque",
-          description: "Consolidado de entradas, saidas, ajustes e perdas",
-          columns: ["Tipo", "Quantidade"],
-          rows: [
-            { Tipo: "Entradas", Quantidade: 0 },
-            { Tipo: "Saidas (via vendas)", Quantidade: saidas },
-            { Tipo: "Ajustes", Quantidade: 0 },
-            { Tipo: "Perdas", Quantidade: 0 },
+          description: "Detalhamento por produto das movimentacoes registradas no periodo",
+          columns: [
+            "Produto",
+            "TipoMovimento",
+            "Quantidade",
+            "ValorMovimentado",
+            "UltimaMovimentacao",
+            "Origem",
           ],
+          rows,
           note: "Entradas/ajustes/perdas exigem uso do ajuste de estoque para rastreio completo.",
         };
       }
@@ -813,6 +1051,51 @@ export default function Reports() {
           description: "Produtos mais vendidos e produtos parados",
           columns: ["Produto", "Tipo", "Quantidade", "Faturamento"],
           rows: [...moving, ...stagnant],
+        };
+      }
+      case "estoque_promocoes": {
+        const rows = context.products.map((product) => {
+          const regularPrice = toNumber(product.price);
+          const promoPrice = toNumber(product.promoPrice);
+          const hasPromotion = promoPrice > 0;
+          const start = parseDateSafe(product.promoStart || undefined);
+          const end = parseDateSafe(product.promoEnd || undefined);
+
+          let duration = "-";
+          if (start && end) {
+            const days = Math.max(
+              1,
+              Math.floor((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1,
+            );
+            duration = `${days} dia(s)`;
+          }
+
+          const period = start || end ? `${fmtDate(start)} ate ${fmtDate(end)}` : "-";
+
+          return {
+            Produto: product.name,
+            EmPromocao: hasPromotion ? "Sim" : "Nao",
+            PeriodoPromocao: period,
+            DuracaoPromocao: duration,
+            PrecoAntes: money(regularPrice),
+            PrecoPromocao: hasPromotion ? money(promoPrice) : "-",
+          };
+        });
+
+        return {
+          id: reportId,
+          title: "Produtos em promocao",
+          group: "Relatorios de Estoque",
+          description: "Situacao da promocao por produto",
+          columns: [
+            "Produto",
+            "EmPromocao",
+            "PeriodoPromocao",
+            "DuracaoPromocao",
+            "PrecoAntes",
+            "PrecoPromocao",
+          ],
+          rows,
         };
       }
       case "estoque_inventario": {
@@ -908,20 +1191,46 @@ export default function Reports() {
       }
       case "pdv_produtos_vendidos": {
         const items = await context.loadSaleItemsForSales(context.filteredSales);
-        const grouped = items.reduce<Record<string, { qty: number; revenue: number }>>((acc, item) => {
+        const salesById = new Map(context.filteredSales.map((sale) => [sale.id, sale]));
+        const grouped = items.reduce<
+          Record<string, { qty: number; revenue: number; countSales: number; lastSaleAt: string }>
+        >((acc, item) => {
           const key = item.productName || `Produto ${item.productId}`;
-          const current = acc[key] || { qty: 0, revenue: 0 };
+          const current = acc[key] || { qty: 0, revenue: 0, countSales: 0, lastSaleAt: "" };
+          const sale = salesById.get(item.saleId);
           current.qty += item.quantity;
           current.revenue += toNumber(item.subtotal);
+          current.countSales += 1;
+          const createdAt = sale?.createdAt || "";
+          if (!current.lastSaleAt || createdAt > current.lastSaleAt) {
+            current.lastSaleAt = createdAt;
+          }
           acc[key] = current;
           return acc;
         }, {});
+        if (detailLevel === "resumo") {
+          return {
+            id: reportId,
+            title: "Produtos mais vendidos",
+            group: "Relatorios de PDV",
+            description: "Ranking resumido por quantidade e faturamento",
+            columns: ["Produto", "Quantidade", "Faturamento"],
+            rows: Object.entries(grouped)
+              .sort((a, b) => b[1].qty - a[1].qty)
+              .slice(0, 20)
+              .map(([name, data]) => ({
+                Produto: name,
+                Quantidade: data.qty,
+                Faturamento: money(data.revenue),
+              })),
+          };
+        }
         return {
           id: reportId,
           title: "Produtos mais vendidos",
           group: "Relatorios de PDV",
-          description: "Ranking por quantidade e faturamento",
-          columns: ["Produto", "Quantidade", "Faturamento"],
+          description: "Ranking detalhado por quantidade, faturamento e ultima venda",
+          columns: ["Produto", "Quantidade", "Faturamento", "Vendas", "TicketMedioPorVenda", "UltimaVenda"],
           rows: Object.entries(grouped)
             .sort((a, b) => b[1].qty - a[1].qty)
             .slice(0, 50)
@@ -929,6 +1238,9 @@ export default function Reports() {
               Produto: name,
               Quantidade: data.qty,
               Faturamento: money(data.revenue),
+              Vendas: data.countSales,
+              TicketMedioPorVenda: money(data.countSales > 0 ? data.revenue / data.countSales : 0),
+              UltimaVenda: fmtDate(data.lastSaleAt),
             })),
         };
       }
@@ -1265,6 +1577,12 @@ export default function Reports() {
     setColumnFilters({});
   };
 
+  useEffect(() => {
+    if (!activeReportId) return;
+    void handleOpenReport(activeReportId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailLevel]);
+
   const groupedDefinitions = useMemo(() => {
     const groups = new Map<string, ReportDefinition[]>();
     REPORT_DEFINITIONS.forEach((def) => {
@@ -1462,7 +1780,21 @@ export default function Reports() {
                   <CardTitle>{rawReport?.title || "Relatorio"}</CardTitle>
                   <CardDescription>{rawReport?.description}</CardDescription>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="min-w-[180px]">
+                    <Select
+                      value={detailLevel}
+                      onValueChange={(value: DetailLevel) => setDetailLevel(value)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Nível de detalhe" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="resumo">Nível: Resumo</SelectItem>
+                        <SelectItem value="completo">Nível: Completo</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Button variant="outline" onClick={handleBackToList}>
                     Voltar para lista
                   </Button>

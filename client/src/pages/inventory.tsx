@@ -1290,6 +1290,21 @@ export default function Inventory() {
                     100
                   );
                   const minStock = product.minStock || 10;
+                  const basePrice = Number.parseFloat(String(product.price || "0"));
+                  const promoPrice = Number.parseFloat(String(product.promoPrice || "0"));
+                  const hasPromo = Number.isFinite(promoPrice) && promoPrice > 0;
+                  const promoDiscount =
+                    hasPromo && Number.isFinite(basePrice) && basePrice > 0 && promoPrice < basePrice
+                      ? ((basePrice - promoPrice) / basePrice) * 100
+                      : null;
+                  const formatPromoDate = (value: unknown) => {
+                    if (!value) return null;
+                    const date = new Date(String(value));
+                    if (Number.isNaN(date.getTime())) return null;
+                    return date.toLocaleDateString("pt-BR");
+                  };
+                  const promoStart = formatPromoDate(product.promoStart);
+                  const promoEnd = formatPromoDate(product.promoEnd);
                   let statusColor = "bg-emerald-500";
                   let statusText = "Em Estoque";
 
@@ -1339,10 +1354,18 @@ export default function Inventory() {
                       <TableCell className="text-center font-medium">
                         <div className="flex flex-col">
                           <span>R$ {parseFloat(product.price).toFixed(2)}</span>
-                          {product.promoPrice && (
+                          {hasPromo && (
                             <span className="text-xs text-emerald-600">
                               Promo: R${" "}
-                              {parseFloat(product.promoPrice).toFixed(2)}
+                              {promoPrice.toFixed(2)}
+                              {promoDiscount !== null
+                                ? ` (${promoDiscount.toFixed(2)}% mais barato)`
+                                : ""}
+                            </span>
+                          )}
+                          {(promoStart || promoEnd) && (
+                            <span className="text-xs text-muted-foreground">
+                              Vigência: {promoStart || "--"} até {promoEnd || "--"}
                             </span>
                           )}
                         </div>

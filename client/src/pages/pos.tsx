@@ -485,7 +485,27 @@ export default function POS() {
     { id: -3, name: "Cartao de Debito", type: "debito", tefMethod: "debito" },
     { id: -4, name: "Dinheiro", type: "dinheiro" },
   ];
-  const products = (pdvLoad?.products || []) as any[];
+  const products = ((pdvLoad?.products || []) as any[]).map((product: any) => {
+    const promoPrice = Number(product?.promoPrice || 0);
+    if (!Number.isFinite(promoPrice) || promoPrice <= 0) return product;
+    return {
+      ...product,
+      regularPrice: product.regularPrice ?? product.price,
+      price: product.promoPrice,
+    };
+  });
+  const isPromoProduct = (product: any) => {
+    const promoPrice = Number(product?.promoPrice || 0);
+    return Number.isFinite(promoPrice) && promoPrice > 0;
+  };
+  const getRegularPrice = (product: any) => {
+    const value = Number(product?.regularPrice ?? product?.price ?? 0);
+    return Number.isFinite(value) ? value : 0;
+  };
+  const getCurrentPrice = (product: any) => {
+    const value = Number(product?.price ?? 0);
+    return Number.isFinite(value) ? value : 0;
+  };
   const paymentMethods = (pdvLoad?.paymentMethods || []) as PdvPaymentMethod[];
   const normalizeText = (value: string) =>
     String(value || "")
@@ -1382,9 +1402,20 @@ export default function POS() {
                       </p>
                     </div>
                     <div className="mt-1.5">
-                      <div className="font-bold text-2xl leading-none text-primary">
-                        R$ {parseFloat(product.price).toFixed(2)}
-                      </div>
+                      {isPromoProduct(product) ? (
+                        <div className="flex flex-col gap-0.5 leading-none">
+                          <span className="text-xs text-muted-foreground line-through">
+                            De: R$ {getRegularPrice(product).toFixed(2)}
+                          </span>
+                          <span className="font-bold text-2xl text-emerald-600">
+                            Por: R$ {getCurrentPrice(product).toFixed(2)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="font-bold text-2xl leading-none text-primary">
+                          R$ {getCurrentPrice(product).toFixed(2)}
+                        </div>
+                      )}
                       <Button
                         variant="outline"
                         className="mt-1.5 h-7 w-full rounded-lg text-[11px] border-[#dbe1ee]"
@@ -1528,9 +1559,41 @@ export default function POS() {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-start justify-between gap-2">
                               <h4 className="line-clamp-1 text-[12px] font-semibold text-[#1a2235]">{item.product.name}</h4>
-                              <span className="text-[14px] font-bold text-[#1a2235]">R$ {(parseFloat(item.product.price) * item.qty).toFixed(2)}</span>
+                              <span
+                                className={`text-[14px] font-bold ${
+                                  isPromoProduct(item.product)
+                                    ? "text-emerald-600"
+                                    : "text-[#1a2235]"
+                                }`}
+                              >
+                                {isPromoProduct(item.product) ? (
+                                  <span className="flex flex-col items-end leading-tight">
+                                    <span className="text-[11px] text-muted-foreground line-through">
+                                      De: R$ {(getRegularPrice(item.product) * item.qty).toFixed(2)}
+                                    </span>
+                                    <span>Por: R$ {(getCurrentPrice(item.product) * item.qty).toFixed(2)}</span>
+                                  </span>
+                                ) : (
+                                  <span>R$ {(getCurrentPrice(item.product) * item.qty).toFixed(2)}</span>
+                                )}
+                              </span>
                             </div>
-                            <p className="text-[11px] text-[#6b7388]">Unit: R$ {parseFloat(item.product.price).toFixed(2)}</p>
+                            <p
+                              className={`text-[11px] ${
+                                isPromoProduct(item.product)
+                                  ? "text-emerald-600"
+                                  : "text-[#6b7388]"
+                              }`}
+                            >
+                              {isPromoProduct(item.product) ? (
+                                <>
+                                  Unit: <span className="line-through text-muted-foreground">De: R$ {getRegularPrice(item.product).toFixed(2)}</span>{" "}
+                                  Por: R$ {getCurrentPrice(item.product).toFixed(2)}
+                                </>
+                              ) : (
+                                <>Unit: R$ {getCurrentPrice(item.product).toFixed(2)}</>
+                              )}
+                            </p>
                           </div>
                           <div className="flex items-center gap-1">
                             <Button variant="outline" size="icon" className="h-7 w-7 rounded-md" onClick={(e) => { e.stopPropagation(); updateQty(item.product.id, -1); }} data-testid={`button-decrease-qty-${item.product.id}`}>
@@ -1630,9 +1693,44 @@ export default function POS() {
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
                                 <p className="truncate text-[12px] font-medium text-[#1a2235]">{item.product.name}</p>
-                                <p className="text-[11px] text-[#6b7388]">{item.qty}x R$ {parseFloat(item.product.price).toFixed(2)}</p>
+                                <p
+                                  className={`text-[11px] ${
+                                    isPromoProduct(item.product)
+                                      ? "text-emerald-600"
+                                      : "text-[#6b7388]"
+                                  }`}
+                                >
+                                  {isPromoProduct(item.product) ? (
+                                    <>
+                                      {item.qty}x{" "}
+                                      <span className="line-through text-muted-foreground">
+                                        De: R$ {getRegularPrice(item.product).toFixed(2)}
+                                      </span>{" "}
+                                      Por: R$ {getCurrentPrice(item.product).toFixed(2)}
+                                    </>
+                                  ) : (
+                                    <>{item.qty}x R$ {getCurrentPrice(item.product).toFixed(2)}</>
+                                  )}
+                                </p>
                               </div>
-                              <span className="text-[12px] font-semibold text-[#1a2235]">R$ {(parseFloat(item.product.price) * item.qty).toFixed(2)}</span>
+                              <span
+                                className={`text-[12px] font-semibold ${
+                                  isPromoProduct(item.product)
+                                    ? "text-emerald-600"
+                                    : "text-[#1a2235]"
+                                }`}
+                              >
+                                {isPromoProduct(item.product) ? (
+                                  <span className="flex flex-col items-end leading-tight">
+                                    <span className="text-[10px] text-muted-foreground line-through">
+                                      De: R$ {(getRegularPrice(item.product) * item.qty).toFixed(2)}
+                                    </span>
+                                    <span>Por: R$ {(getCurrentPrice(item.product) * item.qty).toFixed(2)}</span>
+                                  </span>
+                                ) : (
+                                  <span>R$ {(getCurrentPrice(item.product) * item.qty).toFixed(2)}</span>
+                                )}
+                              </span>
                             </div>
                           </div>
                         ))}

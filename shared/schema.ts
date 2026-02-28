@@ -206,6 +206,7 @@ export const products = pgTable("products", {
   margin: decimal("margin", { precision: 5, scale: 2 }),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   promoPrice: decimal("promo_price", { precision: 10, scale: 2 }),
+  expirationDate: text("expiration_date"),
   promoStart: timestamp("promo_start"),
   promoEnd: timestamp("promo_end"),
   stock: integer("stock").notNull().default(0),

@@ -253,6 +253,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     if (type.includes("receivables") || referenceType === "receivables") {
       return "/finance?tab=receivables";
     }
+    if (type.includes("expiration") || referenceType === "products") {
+      return "/inventory";
+    }
     return "/notifications";
   };
 
@@ -472,13 +475,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   notifications.slice(0, 5).map((notification) => (
                     <DropdownMenuItem
                       key={notification.id}
-                      className="flex flex-col items-start gap-1 rounded-md border border-transparent p-3 focus:bg-transparent data-[highlighted]:bg-transparent data-[highlighted]:border-border"
+                      className="flex flex-col items-start gap-1 rounded-md border border-transparent p-3 text-foreground focus:bg-transparent focus:text-foreground data-[highlighted]:bg-transparent data-[highlighted]:border-border data-[highlighted]:text-foreground"
                       onClick={() => setLocation(getNotificationTarget(notification))}
                     >
-                      <span className="font-medium text-sm">
+                      <span className="font-medium text-sm text-foreground data-[highlighted]:text-foreground">
                         {notification.title}
                       </span>
-                      <span className="text-xs text-muted-foreground line-clamp-2">
+                      <span className="text-xs text-muted-foreground line-clamp-2 data-[highlighted]:text-muted-foreground">
                         {notification.message}
                       </span>
                     </DropdownMenuItem>
@@ -488,7 +491,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
-                      className="justify-center rounded-md border border-transparent text-primary focus:bg-transparent data-[highlighted]:bg-transparent data-[highlighted]:border-border"
+                      className="justify-center rounded-md border border-transparent text-primary focus:bg-transparent focus:text-primary data-[highlighted]:bg-transparent data-[highlighted]:border-border data-[highlighted]:text-primary"
                       onClick={() => setLocation("/notifications")}
                     >
                       Ver todas as notificações
