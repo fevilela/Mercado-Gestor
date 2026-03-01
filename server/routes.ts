@@ -3275,8 +3275,7 @@ export async function registerRoutes(
       const startOfDay = (date: Date) =>
         new Date(date.getFullYear(), date.getMonth(), date.getDate());
       const today = startOfDay(now);
-      const threeDaysLimit = new Date(today);
-      threeDaysLimit.setDate(threeDaysLimit.getDate() + 3);
+      const alertThresholdDays = [10, 5, 3];
 
       const productsWithExpiration = productsList
         .filter((product: any) => Boolean(product.expirationDate))
@@ -3294,10 +3293,17 @@ export async function registerRoutes(
       const expiredProducts = productsWithExpiration.filter(
         (item) => item.expirationDate < today
       );
-      const nearExpirationProducts = productsWithExpiration.filter(
-        (item) =>
-          item.expirationDate >= today && item.expirationDate <= threeDaysLimit
-      );
+      const toDayDiff = (target: Date) => {
+        const diffMs = target.getTime() - today.getTime();
+        return Math.round(diffMs / (24 * 60 * 60 * 1000));
+      };
+
+      const thresholdGroups = alertThresholdDays.map((days) => ({
+        days,
+        items: productsWithExpiration.filter(
+          (item) => toDayDiff(item.expirationDate) === days
+        ),
+      }));
 
       if (pendingFiscalSales.length > 0) {
         dynamicAlerts.push({
@@ -3344,17 +3350,16 @@ export async function registerRoutes(
         });
       }
 
-      if (expiredProducts.length > 0 || nearExpirationProducts.length > 0) {
-        const toDayDiff = (target: Date) => {
-          const diffMs = target.getTime() - today.getTime();
-          return Math.round(diffMs / (24 * 60 * 60 * 1000));
-        };
-
-        const nearMessages = nearExpirationProducts.map((item) => {
-          const daysToExpire = toDayDiff(item.expirationDate);
-          const dayText = daysToExpire === 1 ? "dia" : "dias";
-          return `O produto ${item.product.name} (${item.product.id}) vence em ${daysToExpire} ${dayText}.`;
-        });
+      if (
+        expiredProducts.length > 0 ||
+        thresholdGroups.some((group) => group.items.length > 0)
+      ) {
+        const nearMessages = thresholdGroups.flatMap((group) =>
+          group.items.map(
+            (item) =>
+              `O produto ${item.product.name} (${item.product.id}) vence em ${group.days} dias.`
+          )
+        );
 
         const expiredMessages = expiredProducts.map((item) => {
           const daysExpired = Math.abs(toDayDiff(item.expirationDate));
@@ -3367,8 +3372,8 @@ export async function registerRoutes(
           companyId,
           userId: userId || null,
           type: "products_expiration",
-          title: "Produtos proximos do vencimento",
-          message: [...nearMessages, ...expiredMessages].join(" "),
+          title: "Produtos com alerta de vencimento (10, 5 e 3 dias)",
+          message: `${[...nearMessages, ...expiredMessages].join(" ")} Considere aplicar promocao para reduzir perdas.`,
           referenceId: null,
           referenceType: "products",
           isRead: false,
