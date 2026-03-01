@@ -23,6 +23,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  TablePaginationControls,
+  useTablePagination,
+} from "@/components/ui/table-pagination-controls";
 import { Badge } from "@/components/ui/badge";
 import {
   ArrowUpRight,
@@ -117,6 +121,7 @@ export default function CashHistory() {
       return true;
     });
   }, [movements, filterType, searchTerm]);
+  const movementsPagination = useTablePagination(filteredMovements);
 
   const summary = useMemo(() => {
     const result = {
@@ -464,7 +469,7 @@ export default function CashHistory() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredMovements.map((movement) => (
+                      {movementsPagination.paginatedItems.map((movement) => (
                         <TableRow
                           key={movement.id}
                           data-testid={`movement-row-${movement.id}`}
@@ -507,6 +512,16 @@ export default function CashHistory() {
                       ))}
                     </TableBody>
                   </Table>
+                  <TablePaginationControls
+                    page={movementsPagination.page}
+                    pageSize={movementsPagination.pageSize}
+                    totalItems={movementsPagination.totalItems}
+                    totalPages={movementsPagination.totalPages}
+                    startItem={movementsPagination.startItem}
+                    endItem={movementsPagination.endItem}
+                    onPageChange={movementsPagination.setPage}
+                    onPageSizeChange={movementsPagination.setPageSize}
+                  />
                 </div>
               )}
             </CardContent>

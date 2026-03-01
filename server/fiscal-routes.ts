@@ -35,7 +35,7 @@ import {
   requirePermission,
   requireValidFiscalCertificate,
 } from "./middleware";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, or } from "drizzle-orm";
 import * as soap from "soap";
 import * as fs from "fs";
 import * as crypto from "crypto";
@@ -381,8 +381,14 @@ const resolveDocumentKeyFromLog = (log: any): string => {
   const fromResponseKey = String(responsePayload?.key || "").trim();
   if (fromResponseKey) return fromResponseKey.replace(/\D/g, "");
 
+  const fromResponseAccessKey = String(responsePayload?.accessKey || "").trim();
+  if (fromResponseAccessKey) return fromResponseAccessKey.replace(/\D/g, "");
+
   const fromRequestKey = String(requestPayload?.accessKey || "").trim();
   if (fromRequestKey) return fromRequestKey.replace(/\D/g, "");
+
+  const fromRequestKeyAlt = String(requestPayload?.key || "").trim();
+  if (fromRequestKeyAlt) return fromRequestKeyAlt.replace(/\D/g, "");
 
   const fromResponseXml = String(responsePayload?.xml || "").trim();
   if (fromResponseXml) {
@@ -397,6 +403,31 @@ const resolveDocumentKeyFromLog = (log: any): string => {
   }
 
   return "";
+};
+
+const extractProtocolFromPayload = (payload: any): string => {
+  if (!payload || typeof payload !== "object") return "";
+  const protocol = String(
+    payload?.protocol ||
+      payload?.nProt ||
+      payload?.infProt?.nProt ||
+      payload?.retEvento?.infEvento?.nProt ||
+      payload?.retEvento?.retEvento?.infEvento?.nProt ||
+      "",
+  ).trim();
+  return protocol;
+};
+
+const extractStatusFromPayload = (payload: any): string => {
+  if (!payload || typeof payload !== "object") return "";
+  return String(
+    payload?.status ||
+      payload?.cStat ||
+      payload?.infProt?.cStat ||
+      payload?.retEvento?.infEvento?.cStat ||
+      payload?.retEvento?.retEvento?.infEvento?.cStat ||
+      "",
+  ).trim();
 };
 
 const parseNfceAccessKey = (key: string) => {
@@ -3363,7 +3394,32 @@ router.get("/nfe/history", requireAuth, async (req, res) => {
       .where(
         and(
           eq(sefazTransmissionLogs.companyId, companyId),
-          eq(sefazTransmissionLogs.action, "cancel"),
+          or(
+            eq(sefazTransmissionLogs.action, "cancel"),
+            eq(sefazTransmissionLogs.action, "cancel-extemporaneous"),
+          ),
+        ),
+      )
+      .orderBy(desc(sefazTransmissionLogs.createdAt))
+      .limit(500);
+    const receiptLogs = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(
+        and(
+          eq(sefazTransmissionLogs.companyId, companyId),
+          eq(sefazTransmissionLogs.action, "receipt"),
+        ),
+      )
+      .orderBy(desc(sefazTransmissionLogs.createdAt))
+      .limit(500);
+    const inutilizeLogs = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(
+        and(
+          eq(sefazTransmissionLogs.companyId, companyId),
+          eq(sefazTransmissionLogs.action, "inutilize"),
         ),
       )
       .orderBy(desc(sefazTransmissionLogs.createdAt))
@@ -3371,6 +3427,14 @@ router.get("/nfe/history", requireAuth, async (req, res) => {
 
     const latestSubmitByKey = new Map<string, any>();
     const latestCancelByKey = new Map<string, any>();
+    const latestReceiptByKey = new Map<string, any>();
+    const successfulInutilizations: Array<{
+      log: any;
+      series: number;
+      startNumber: number;
+      endNumber: number;
+      protocol: string;
+    }> = [];
 
     for (const log of submitLogs) {
       const key = resolveDocumentKeyFromLog(log);
@@ -3383,6 +3447,122 @@ router.get("/nfe/history", requireAuth, async (req, res) => {
       if (!key || latestCancelByKey.has(key)) continue;
       latestCancelByKey.set(key, log);
     }
+    for (const log of receiptLogs) {
+      const key = resolveDocumentKeyFromLog(log);
+      if (!key || latestReceiptByKey.has(key)) continue;
+      latestReceiptByKey.set(key, log);
+    }
+
+    const shouldSyncWithSefaz = ["1", "true", "yes"].includes(
+      String(req.query?.sync || "")
+        .trim()
+        .toLowerCase(),
+    );
+    if (shouldSyncWithSefaz) {
+      try {
+        const settings = await storage.getCompanySettings(companyId);
+        const company = await storage.getCompanyById(companyId);
+        if (company) {
+          const { CertificateService } = await import("./certificate-service");
+          const certService = new CertificateService();
+          const certificateBuffer = await certService.getCertificate(companyId);
+          const certificatePassword =
+            await certService.getCertificatePassword(companyId);
+
+          if (certificateBuffer && certificatePassword) {
+            const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+            const { SefazService } = await import("./sefaz-service");
+            const sefazService = new SefazService({
+              environment: resolvedEnvironment,
+              uf: String(settings?.sefazUf || company.state || "SP").toUpperCase(),
+              certificateBuffer,
+              certificatePassword,
+              cnpj: String(company.cnpj || "").replace(/\D/g, ""),
+            });
+
+            const now = Date.now();
+            const tenMinutesMs = 10 * 60 * 1000;
+            const candidateKeys = Array.from(
+              new Set(
+                logs
+                  .map((log) => resolveDocumentKeyFromLog(log))
+                  .filter((key) => /^\d{44}$/.test(String(key || ""))),
+              ),
+            ).slice(0, 8);
+
+            for (const key of candidateKeys) {
+              const submit = latestSubmitByKey.get(key);
+              if (!submit?.success) continue;
+
+              const cancel = latestCancelByKey.get(key);
+              const cancelStatus = extractStatusFromPayload(
+                (cancel?.responsePayload || {}) as any,
+              );
+              const alreadyCanceled =
+                Boolean(cancel?.success) ||
+                ["101", "151", "135", "136", "155"].includes(cancelStatus);
+              if (alreadyCanceled) continue;
+
+              const latestReceipt = latestReceiptByKey.get(key);
+              const latestReceiptStatus = extractStatusFromPayload(
+                (latestReceipt?.responsePayload || {}) as any,
+              );
+              if (
+                latestReceipt?.createdAt &&
+                now - new Date(latestReceipt.createdAt).getTime() < tenMinutesMs &&
+                latestReceiptStatus !== "error"
+              ) {
+                continue;
+              }
+
+              const queryXml =
+                `<NFe xmlns="http://www.portalfiscal.inf.br/nfe">` +
+                `<infNFe Id="NFe${key}" versao="4.00"></infNFe>` +
+                `</NFe>`;
+              const result = await sefazService.queryReceipt(queryXml);
+              await logSefazTransmission({
+                companyId,
+                action: "receipt",
+                environment: resolvedEnvironment,
+                requestPayload: { accessKey: key, source: "history-sync" },
+                responsePayload: result,
+                success: result.success,
+              });
+              latestReceiptByKey.set(key, {
+                responsePayload: result,
+                success: result.success,
+                createdAt: new Date(),
+                requestPayload: { accessKey: key, source: "history-sync" },
+              });
+            }
+          }
+        }
+      } catch {
+        // Falha de sincronizacao online nao deve impedir retorno do historico local.
+      }
+    }
+    for (const log of inutilizeLogs) {
+      if (!log?.success) continue;
+      const requestPayload = (log.requestPayload || {}) as any;
+      const responsePayload = (log.responsePayload || {}) as any;
+      const series = Number(String(requestPayload?.series || "").replace(/\D/g, ""));
+      const startNumber = Number(
+        String(requestPayload?.startNumber || "").replace(/\D/g, ""),
+      );
+      const endNumber = Number(
+        String(requestPayload?.endNumber || "").replace(/\D/g, ""),
+      );
+      if (!Number.isFinite(series) || !Number.isFinite(startNumber) || !Number.isFinite(endNumber)) {
+        continue;
+      }
+      successfulInutilizations.push({
+        log,
+        series,
+        startNumber: Math.min(startNumber, endNumber),
+        endNumber: Math.max(startNumber, endNumber),
+        protocol: String(responsePayload?.protocol || ""),
+      });
+    }
 
     const generatedHistory = logs.map((log) => {
       const responsePayload = (log.responsePayload || {}) as any;
@@ -3390,18 +3570,52 @@ router.get("/nfe/history", requireAuth, async (req, res) => {
       const xmlContent = String(responsePayload?.xml || "");
       const nfeNumber = extractXmlTag(xmlContent, "nNF");
       const nfeSeries = extractXmlTag(xmlContent, "serie");
+      const nfeNumberNum = Number(String(nfeNumber || "").replace(/\D/g, ""));
+      const nfeSeriesNum = Number(String(nfeSeries || "").replace(/\D/g, ""));
 
       const submit = documentKey ? latestSubmitByKey.get(documentKey) : null;
       const cancel = documentKey ? latestCancelByKey.get(documentKey) : null;
+      const receipt = documentKey ? latestReceiptByKey.get(documentKey) : null;
+      const matchedInutilization =
+        Number.isFinite(nfeNumberNum) && Number.isFinite(nfeSeriesNum)
+          ? successfulInutilizations.find(
+              (item) =>
+                item.series === nfeSeriesNum &&
+                nfeNumberNum >= item.startNumber &&
+                nfeNumberNum <= item.endNumber,
+            )
+          : undefined;
       const submitPayload = (submit?.responsePayload || {}) as any;
+      const cancelPayload = (cancel?.responsePayload || {}) as any;
+      const receiptPayload = (receipt?.responsePayload || {}) as any;
+      const submitStatusCode = extractStatusFromPayload(submitPayload);
+      const cancelStatusCode = extractStatusFromPayload(cancelPayload);
+      const receiptStatus = extractStatusFromPayload(receiptPayload);
+      const submitProtocol = extractProtocolFromPayload(submitPayload);
+      const cancelProtocol = extractProtocolFromPayload(cancelPayload);
+      const receiptProtocol = extractProtocolFromPayload(receiptPayload);
+      const cancelSucceeded =
+        Boolean(cancel?.success) ||
+        ["101", "151", "135", "136", "155"].includes(cancelStatusCode);
 
       let status = "gerada";
       if (submit?.success) status = "autorizada";
-      if (cancel?.success) status = "cancelada";
-      const submitStatusCode = String(submitPayload?.status || "").trim();
+      if (cancelSucceeded) status = "cancelada";
+      if (["101", "151", "135", "136", "155"].includes(receiptStatus)) {
+        status = "cancelada";
+      }
+      if (matchedInutilization) {
+        status = "inutilizada";
+      }
       if (!submit?.success && submitStatusCode === "103" && status === "gerada") {
         status = "processando";
       }
+      const protocol =
+        status === "cancelada"
+          ? String(cancelProtocol || receiptProtocol || submitProtocol || "")
+          : status === "inutilizada"
+            ? String(matchedInutilization?.protocol || "")
+            : String(submitProtocol || "");
 
       return {
         id: log.id,
@@ -3410,13 +3624,18 @@ router.get("/nfe/history", requireAuth, async (req, res) => {
         nfeSeries: nfeSeries || null,
         environment: log.environment,
         xmlContent,
-        protocol: String(submitPayload?.protocol || ""),
+        protocol,
         status,
         canSend: status === "gerada",
-        canCancel: status === "autorizada" && Boolean(submitPayload?.protocol),
+        canCancel: status === "autorizada" && Boolean(submitProtocol),
         createdAt: log.createdAt,
         updatedAt:
-          cancel?.createdAt || submit?.createdAt || log.createdAt || new Date(),
+          matchedInutilization?.log?.createdAt ||
+          receipt?.createdAt ||
+          cancel?.createdAt ||
+          submit?.createdAt ||
+          log.createdAt ||
+          new Date(),
       };
     });
     const draftsHistory = draftLogs.map((log) => {
@@ -3599,7 +3818,10 @@ router.post(
         .where(
           and(
             eq(sefazTransmissionLogs.companyId, companyId),
-            eq(sefazTransmissionLogs.action, "cancel"),
+            or(
+              eq(sefazTransmissionLogs.action, "cancel"),
+              eq(sefazTransmissionLogs.action, "cancel-extemporaneous"),
+            ),
           ),
         )
         .orderBy(desc(sefazTransmissionLogs.createdAt))
@@ -3923,7 +4145,11 @@ router.post(
       // Alguns XMLs antigos do historico passam na assinatura, mas a SEFAZ
       // devolve cStat 225 (falha de schema). Fazemos 1 tentativa de
       // autocorrecao: normaliza para estrutura NF-e 4.00 e re-assina.
-      if (!result.success && String(result.status || "") === "225") {
+      if (
+        !result.success &&
+        String(result.status || "") === "225" &&
+        (appearsLegacyXml || missingRequiredAddressBlocks)
+      ) {
         const expectedTpAmb: "1" | "2" =
           resolvedEnvironment === "producao" ? "1" : "2";
         const retryXml = forceXmlTpAmb(
@@ -4187,6 +4413,112 @@ router.post(
 );
 
 router.post(
+  "/sefaz/cancel-extemporaneous",
+  requireAuth,
+  requirePermission("fiscal:cancel_nfe"),
+  requireValidFiscalCertificate(),
+  async (req, res) => {
+    try {
+      const { nfeNumber, nfeSeries, reason, uf, accessKey, protocol } = req.body;
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Empresa nao identificada" });
+      }
+      const normalizedReason = String(reason || "").trim();
+      if (normalizedReason.length < 15) {
+        return res.status(400).json({
+          error: "Justificativa obrigatoria (min 15 caracteres)",
+        });
+      }
+
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+      const company = await storage.getCompanyById(companyId);
+      if (!company) {
+        return res.status(400).json({ error: "Empresa nao configurada" });
+      }
+
+      const { CertificateService } = await import("./certificate-service");
+      const certService = new CertificateService();
+      const certificateBuffer = await certService.getCertificate(companyId);
+      const certificatePassword =
+        await certService.getCertificatePassword(companyId);
+
+      if (!certificateBuffer || !certificatePassword) {
+        return res.status(400).json({
+          error: "Certificado digital nao configurado para esta empresa",
+        });
+      }
+
+      const resolvedAccessKey = String(accessKey || "").replace(/\D/g, "");
+      const resolvedProtocol = String(protocol || "").trim();
+      if (!resolvedAccessKey || resolvedAccessKey.length !== 44) {
+        return res.status(400).json({
+          error: "Chave de acesso (44 digitos) obrigatoria para cancelamento",
+        });
+      }
+      if (!resolvedProtocol) {
+        return res.status(400).json({
+          error: "Protocolo de autorizacao (nProt) obrigatorio para cancelamento",
+        });
+      }
+
+      const sefazService = new SefazService({
+        environment: resolvedEnvironment,
+        uf: String(uf || "SP").toUpperCase(),
+        certificateBuffer,
+        certificatePassword,
+        cnpj: String(company.cnpj || "").replace(/\D/g, ""),
+      });
+
+      const result = await sefazService.cancelNFe(
+        resolvedAccessKey,
+        resolvedProtocol,
+        normalizedReason,
+      );
+
+      await logSefazTransmission({
+        companyId,
+        action: "cancel-extemporaneous",
+        environment: resolvedEnvironment,
+        requestPayload: {
+          nfeNumber,
+          nfeSeries,
+          reason: normalizedReason,
+          uf,
+          accessKey: resolvedAccessKey,
+          protocol: resolvedProtocol,
+        },
+        responsePayload: result,
+        success: result.success,
+      });
+
+      if (!result.success) {
+        return res.status(400).json({
+          error: result.message || "Falha no cancelamento extemporaneo de NF-e",
+          status: result.status,
+          rawResponse: result.rawResponse,
+        });
+      }
+
+      res.json({
+        success: true,
+        message: result.message,
+        protocol: result.protocol,
+        eventId: result.eventId,
+        timestamp: result.timestamp,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao cancelar NF-e extemporanea",
+      });
+    }
+  },
+);
+
+router.post(
   "/sefaz/correction-letter",
   requireAuth,
   requirePermission("fiscal:manage"),
@@ -4348,6 +4680,13 @@ router.post(
         success: result.success,
       });
 
+      if (!result.success) {
+        return res.status(400).json({
+          ...result,
+          error: result.message || "Falha ao inutilizar numeracao",
+        });
+      }
+
       res.json({
         success: result.success,
         message: result.message,
@@ -4360,6 +4699,83 @@ router.post(
           error instanceof Error
             ? error.message
             : "Erro ao inutilizar numeracao",
+      });
+    }
+  },
+);
+
+router.get(
+  "/sefaz/inutilize/history",
+  requireAuth,
+  requirePermission("fiscal:view"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Empresa nao identificada" });
+      }
+
+      const [nfeLogs, nfceLogs] = await Promise.all([
+        db
+          .select()
+          .from(sefazTransmissionLogs)
+          .where(
+            and(
+              eq(sefazTransmissionLogs.companyId, companyId),
+              eq(sefazTransmissionLogs.action, "inutilize"),
+            ),
+          )
+          .orderBy(desc(sefazTransmissionLogs.createdAt))
+          .limit(100),
+        db
+          .select()
+          .from(sefazTransmissionLogs)
+          .where(
+            and(
+              eq(sefazTransmissionLogs.companyId, companyId),
+              eq(sefazTransmissionLogs.action, "nfce-inutilize"),
+            ),
+          )
+          .orderBy(desc(sefazTransmissionLogs.createdAt))
+          .limit(100),
+      ]);
+
+      const logs = [...nfeLogs, ...nfceLogs]
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt || 0).getTime() -
+            new Date(a.createdAt || 0).getTime(),
+        )
+        .slice(0, 100);
+
+      const parsed = logs.map((log) => {
+        const requestPayload = (log.requestPayload || {}) as any;
+        const responsePayload = (log.responsePayload || {}) as any;
+        const model = String(requestPayload?.model || "").trim() ||
+          (log.action === "nfce-inutilize" ? "65" : "55");
+        return {
+          id: log.id,
+          action: log.action,
+          model,
+          success: Boolean(log.success),
+          status: String(responsePayload?.status || ""),
+          message: String(responsePayload?.message || ""),
+          protocol: String(responsePayload?.protocol || ""),
+          series: String(requestPayload?.series || requestPayload?.serie || ""),
+          startNumber: String(requestPayload?.startNumber || ""),
+          endNumber: String(requestPayload?.endNumber || ""),
+          reason: String(requestPayload?.reason || ""),
+          createdAt: log.createdAt,
+        };
+      });
+
+      res.json(parsed);
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao buscar historico de inutilizacao",
       });
     }
   },

@@ -8,6 +8,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  TablePaginationControls,
+  useTablePagination,
+} from "@/components/ui/table-pagination-controls";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -1062,6 +1066,9 @@ export default function Inventory() {
       categoryValue.toLowerCase().includes(search)
     );
   });
+  const productsPagination = useTablePagination(filteredProducts);
+  const manifestNotesPagination = useTablePagination(filteredManifestNotes);
+  const xmlPreviewPagination = useTablePagination(xmlPreviewProducts);
 
   const categoryOptions: string[] = Array.from(
     new Set<string>(
@@ -1283,7 +1290,7 @@ export default function Inventory() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredProducts.map((product: any) => {
+                {productsPagination.paginatedItems.map((product: any) => {
                   const maxStock = product.maxStock || 100;
                   const stockPercentage = Math.min(
                     (product.stock / maxStock) * 100,
@@ -1450,7 +1457,7 @@ export default function Inventory() {
             )}
             {viewMode === "grid" && (
               <div className="grid gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredProducts.map((product: any) => {
+                {productsPagination.paginatedItems.map((product: any) => {
                   const maxStock = product.maxStock || 100;
                   const stockPercentage = Math.min((product.stock / maxStock) * 100, 100);
                   const minStock = product.minStock || 10;
@@ -1535,9 +1542,22 @@ export default function Inventory() {
               </div>
             )}
             <div className="flex items-center justify-between border-t border-border px-3 py-2 text-xs text-muted-foreground">
-              <span>Exibindo 1 a {filteredProducts.length} de {products.length} produtos</span>
+              <span>
+                Exibindo {productsPagination.startItem} a {productsPagination.endItem} de{" "}
+                {filteredProducts.length} produtos
+              </span>
               <span>{viewMode === "list" ? "Lista" : "Grade"}</span>
             </div>
+            <TablePaginationControls
+              page={productsPagination.page}
+              pageSize={productsPagination.pageSize}
+              totalItems={productsPagination.totalItems}
+              totalPages={productsPagination.totalPages}
+              startItem={productsPagination.startItem}
+              endItem={productsPagination.endItem}
+              onPageChange={productsPagination.setPage}
+              onPageSizeChange={productsPagination.setPageSize}
+            />
           </div>
         )}
       </div>
@@ -1787,7 +1807,7 @@ export default function Inventory() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredManifestNotes.map((note) => (
+                    manifestNotesPagination.paginatedItems.map((note) => (
                       <TableRow
                         key={note.id}
                         className="cursor-pointer"
@@ -1835,6 +1855,16 @@ export default function Inventory() {
                   )}
                 </TableBody>
               </Table>
+              <TablePaginationControls
+                page={manifestNotesPagination.page}
+                pageSize={manifestNotesPagination.pageSize}
+                totalItems={manifestNotesPagination.totalItems}
+                totalPages={manifestNotesPagination.totalPages}
+                startItem={manifestNotesPagination.startItem}
+                endItem={manifestNotesPagination.endItem}
+                onPageChange={manifestNotesPagination.setPage}
+                onPageSizeChange={manifestNotesPagination.setPageSize}
+              />
             </div>
 
             {manifestLastSyncResult && (
@@ -2220,7 +2250,7 @@ export default function Inventory() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {xmlPreviewProducts.map((product) => (
+                    {xmlPreviewPagination.paginatedItems.map((product) => (
                       <TableRow
                         key={product.tempId}
                         onDoubleClick={() => setXmlFiscalEditTempId(product.tempId)}
@@ -2389,6 +2419,16 @@ export default function Inventory() {
                     ))}
                   </TableBody>
                 </Table>
+                <TablePaginationControls
+                  page={xmlPreviewPagination.page}
+                  pageSize={xmlPreviewPagination.pageSize}
+                  totalItems={xmlPreviewPagination.totalItems}
+                  totalPages={xmlPreviewPagination.totalPages}
+                  startItem={xmlPreviewPagination.startItem}
+                  endItem={xmlPreviewPagination.endItem}
+                  onPageChange={xmlPreviewPagination.setPage}
+                  onPageSizeChange={xmlPreviewPagination.setPageSize}
+                />
               </div>
             )}
           </div>

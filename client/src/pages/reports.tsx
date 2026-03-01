@@ -37,6 +37,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  TablePaginationControls,
+  useTablePagination,
+} from "@/components/ui/table-pagination-controls";
 import { Loader2, Download, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Receipt, Percent, BookOpen, Wallet, Users } from "lucide-react";
@@ -1666,6 +1670,7 @@ export default function Reports() {
   };
 
   const canExport = rawReport && hasAppliedFilter;
+  const reportRowsPagination = useTablePagination(filteredRows);
   const chartModel = useMemo(
     () => (hasAppliedFilter ? buildChartModel(rawReport, filteredRows) : null),
     [hasAppliedFilter, rawReport, filteredRows],
@@ -1913,7 +1918,7 @@ export default function Reports() {
                                 </TableCell>
                               </TableRow>
                             ) : (
-                              filteredRows.map((row, index) => (
+                              reportRowsPagination.paginatedItems.map((row, index) => (
                                 <TableRow key={`${rawReport.id}-${index}`}>
                                   {rawReport.columns.map((col) => (
                                     <TableCell key={`${rawReport.id}-${index}-${col}`}>
@@ -1925,6 +1930,16 @@ export default function Reports() {
                             )}
                           </TableBody>
                         </Table>
+                        <TablePaginationControls
+                          page={reportRowsPagination.page}
+                          pageSize={reportRowsPagination.pageSize}
+                          totalItems={reportRowsPagination.totalItems}
+                          totalPages={reportRowsPagination.totalPages}
+                          startItem={reportRowsPagination.startItem}
+                          endItem={reportRowsPagination.endItem}
+                          onPageChange={reportRowsPagination.setPage}
+                          onPageSizeChange={reportRowsPagination.setPageSize}
+                        />
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button

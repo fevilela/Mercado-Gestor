@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Layout from "@/components/layout";
 import {
@@ -31,6 +31,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  TablePaginationControls,
+  useTablePagination,
+} from "@/components/ui/table-pagination-controls";
 import {
   Dialog,
   DialogContent,
@@ -65,7 +69,13 @@ interface NFeHistoryRecord {
   environment: "homologacao" | "producao";
   xmlContent: string;
   protocol: string;
-  status: "rascunho" | "gerada" | "processando" | "autorizada" | "cancelada";
+  status:
+    | "rascunho"
+    | "gerada"
+    | "processando"
+    | "autorizada"
+    | "cancelada"
+    | "inutilizada";
   canSend: boolean;
   canCancel: boolean;
   createdAt: string;
@@ -92,6 +102,17 @@ interface AccessoryHistoryRecord {
   createdAt: string;
 }
 
+type NfeSortKey =
+  | "nfeNumber"
+  | "nfeSeries"
+  | "documentKey"
+  | "protocol"
+  | "environment"
+  | "status"
+  | "updatedAt";
+
+type SortDirection = "asc" | "desc";
+
 export default function FiscalCentralPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -100,6 +121,12 @@ export default function FiscalCentralPage() {
     doc: NFeHistoryRecord | null;
     reason: string;
   }>({ open: false, doc: null, reason: "" });
+  const [nfeExtemporaneousCancelDialog, setNfeExtemporaneousCancelDialog] =
+    useState<{
+      open: boolean;
+      doc: NFeHistoryRecord | null;
+      reason: string;
+    }>({ open: false, doc: null, reason: "" });
   const [nfeCceDialog, setNfeCceDialog] = useState<{
     open: boolean;
     doc: NFeHistoryRecord | null;
@@ -125,6 +152,8 @@ export default function FiscalCentralPage() {
   const [nfeStatusFilter, setNfeStatusFilter] = useState("all");
   const [nfeDateFrom, setNfeDateFrom] = useState("");
   const [nfeDateTo, setNfeDateTo] = useState("");
+  const [nfeSortKey, setNfeSortKey] = useState<NfeSortKey>("updatedAt");
+  const [nfeSortDirection, setNfeSortDirection] = useState<SortDirection>("desc");
   const [selectedNfeIds, setSelectedNfeIds] = useState<number[]>([]);
   const [nfceCancelDialog, setNfceCancelDialog] = useState<{
     open: boolean;
@@ -182,7 +211,7 @@ export default function FiscalCentralPage() {
   >({
     queryKey: ["/api/fiscal/nfe/history"],
     queryFn: async () => {
-      const res = await fetch("/api/fiscal/nfe/history");
+      const res = await fetch("/api/fiscal/nfe/history?sync=1");
       if (!res.ok) throw new Error("Falha ao carregar historico de NF-e");
       return res.json();
     },
@@ -467,10 +496,29 @@ export default function FiscalCentralPage() {
       if (!res.ok) {
         throw new Error(payload?.error || "Falha ao cancelar NF-e");
       }
+      if (payload?.success === false) {
+        throw new Error(payload?.message || payload?.error || "Falha ao cancelar NF-e");
+      }
       return payload;
     },
-    onSuccess: () => {
+    onSuccess: (_, doc) => {
       toast({ title: "Sucesso", description: "NF-e cancelada." });
+      queryClient.setQueryData<NFeHistoryRecord[]>(
+        ["/api/fiscal/nfe/history"],
+        (current) =>
+          Array.isArray(current)
+            ? current.map((item) =>
+                item.id === doc.id
+                  ? {
+                      ...item,
+                      status: "cancelada",
+                      canCancel: false,
+                      canSend: false,
+                    }
+                  : item,
+              )
+            : current,
+      );
       setNfeCancelDialog({ open: false, doc: null, reason: "" });
       queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
     },
@@ -574,6 +622,49 @@ export default function FiscalCentralPage() {
     },
   });
 
+  const cancelNfeExtemporaneousMutation = useMutation({
+    mutationFn: async (doc: NFeHistoryRecord) => {
+      const res = await fetch("/api/fiscal/sefaz/cancel-extemporaneous", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nfeLogId: doc.id,
+          nfeNumber: doc.nfeNumber,
+          nfeSeries: doc.nfeSeries,
+          accessKey: doc.documentKey,
+          protocol: doc.protocol,
+          reason: nfeExtemporaneousCancelDialog.reason,
+          uf: sefazUf,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          payload?.error || "Falha no cancelamento extemporaneo de NF-e",
+        );
+      }
+      return payload;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Sucesso",
+        description: "Cancelamento extemporaneo da NF-e enviado.",
+      });
+      setNfeExtemporaneousCancelDialog({ open: false, doc: null, reason: "" });
+      queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Falha no cancelamento extemporaneo de NF-e",
+        variant: "destructive",
+      });
+    },
+  });
+
   const cceNfeMutation = useMutation({
     mutationFn: async () => {
       if (!nfeCceDialog.doc) throw new Error("NF-e nao selecionada");
@@ -632,10 +723,16 @@ export default function FiscalCentralPage() {
       if (!res.ok) {
         throw new Error(payload?.error || "Falha ao inutilizar numeracao");
       }
+      if (payload?.success === false) {
+        throw new Error(payload?.message || payload?.error || "Falha ao inutilizar numeracao");
+      }
       return payload;
     },
-    onSuccess: () => {
-      toast({ title: "Sucesso", description: "Inutilização registrada." });
+    onSuccess: (payload: any) => {
+      toast({
+        title: "Sucesso",
+        description: `Inutilizacao homologada. Protocolo: ${payload?.protocol || "-"}`,
+      });
       setNfeInutilizeDialog({
         open: false,
         doc: null,
@@ -644,6 +741,7 @@ export default function FiscalCentralPage() {
         endNumber: "",
         reason: "",
       });
+      queryClient.invalidateQueries({ queryKey: ["/api/fiscal/sefaz/inutilize/history"] });
     },
     onError: (error) => {
       toast({
@@ -711,10 +809,16 @@ export default function FiscalCentralPage() {
       if (!res.ok) {
         throw new Error(payload?.error || "Falha ao inutilizar numeracao");
       }
+      if (payload?.success === false) {
+        throw new Error(payload?.message || payload?.error || "Falha ao inutilizar numeracao");
+      }
       return payload;
     },
-    onSuccess: () => {
-      toast({ title: "Sucesso", description: "Inutilizacao registrada." });
+    onSuccess: (payload: any) => {
+      toast({
+        title: "Sucesso",
+        description: `Inutilizacao homologada. Protocolo: ${payload?.protocol || "-"}`,
+      });
       setNfceInutilizeDialog({
         open: false,
         sale: null,
@@ -723,6 +827,7 @@ export default function FiscalCentralPage() {
         endNumber: "",
         reason: "",
       });
+      queryClient.invalidateQueries({ queryKey: ["/api/fiscal/sefaz/inutilize/history"] });
     },
     onError: (error) => {
       toast({
@@ -948,6 +1053,9 @@ export default function FiscalCentralPage() {
     if (normalized.includes("cancel")) {
       return <Badge variant="destructive">Cancelada</Badge>;
     }
+    if (normalized.includes("inutil")) {
+      return <Badge className="bg-slate-600">Inutilizada</Badge>;
+    }
     if (normalized.includes("autoriz")) {
       return <Badge className="bg-green-600">Autorizada</Badge>;
     }
@@ -1087,6 +1195,54 @@ export default function FiscalCentralPage() {
     });
   }, [orderedNfe, nfeSearch, nfeStatusFilter, nfeDateFrom, nfeDateTo]);
 
+  const sortedNfe = useMemo(() => {
+    const compareText = (a: string, b: string) =>
+      a.localeCompare(b, "pt-BR", { sensitivity: "base" });
+    const compareNumber = (a: number, b: number) => a - b;
+    const dir = nfeSortDirection === "asc" ? 1 : -1;
+
+    return [...filteredNfe].sort((a, b) => {
+      let result = 0;
+      switch (nfeSortKey) {
+        case "nfeNumber":
+          result = compareNumber(
+            Number(String(a.nfeNumber || "").replace(/\D/g, "") || 0),
+            Number(String(b.nfeNumber || "").replace(/\D/g, "") || 0),
+          );
+          break;
+        case "nfeSeries":
+          result = compareNumber(
+            Number(String(a.nfeSeries || "").replace(/\D/g, "") || 0),
+            Number(String(b.nfeSeries || "").replace(/\D/g, "") || 0),
+          );
+          break;
+        case "documentKey":
+          result = compareText(String(a.documentKey || ""), String(b.documentKey || ""));
+          break;
+        case "protocol":
+          result = compareText(String(a.protocol || ""), String(b.protocol || ""));
+          break;
+        case "environment":
+          result = compareText(String(a.environment || ""), String(b.environment || ""));
+          break;
+        case "status":
+          result = compareText(String(a.status || ""), String(b.status || ""));
+          break;
+        case "updatedAt":
+        default:
+          result = compareNumber(
+            new Date(a.updatedAt || a.createdAt).getTime(),
+            new Date(b.updatedAt || b.createdAt).getTime(),
+          );
+          break;
+      }
+
+      if (result !== 0) return result * dir;
+      return new Date(b.updatedAt || b.createdAt).getTime() -
+        new Date(a.updatedAt || a.createdAt).getTime();
+    });
+  }, [filteredNfe, nfeSortDirection, nfeSortKey]);
+
   const filteredNfce = useMemo(() => {
     const query = nfceSearch.trim().toLowerCase();
     const dateFrom = parseDateRangeStart(nfceDateFrom);
@@ -1112,6 +1268,8 @@ export default function FiscalCentralPage() {
 
   const selectableNfe = filteredNfe.filter((doc) => doc.canSend);
   const selectableNfce = filteredNfce.filter((sale) => canSendNfce(sale.nfceStatus));
+  const nfePagination = useTablePagination(sortedNfe);
+  const nfcePagination = useTablePagination(filteredNfce);
 
   const allNfeSelected =
     selectableNfe.length > 0 &&
@@ -1119,6 +1277,18 @@ export default function FiscalCentralPage() {
   const allNfceSelected =
     selectableNfce.length > 0 &&
     selectableNfce.every((sale) => selectedNfceIds.includes(sale.id));
+
+  const toggleNfeSort = (key: NfeSortKey) => {
+    if (nfeSortKey === key) {
+      setNfeSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setNfeSortKey(key);
+    setNfeSortDirection(key === "updatedAt" ? "desc" : "asc");
+  };
+
+  const nfeSortLabel = (key: NfeSortKey) =>
+    nfeSortKey === key ? (nfeSortDirection === "asc" ? " ▲" : " ▼") : "";
 
   return (
     <Layout>
@@ -1165,6 +1335,7 @@ export default function FiscalCentralPage() {
                     <option value="processando">Processando</option>
                     <option value="autorizada">Autorizada</option>
                     <option value="cancelada">Cancelada</option>
+                    <option value="inutilizada">Inutilizada</option>
                   </select>
                   <Input
                     type="date"
@@ -1212,7 +1383,7 @@ export default function FiscalCentralPage() {
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Carregando NF-e...
                   </div>
-                ) : filteredNfe.length === 0 ? (
+                ) : sortedNfe.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     Nenhuma NF-e encontrada para os filtros aplicados.
                   </p>
@@ -1234,18 +1405,49 @@ export default function FiscalCentralPage() {
                               disabled={selectableNfe.length === 0}
                             />
                           </TableHead>
-                          <TableHead>Numero</TableHead>
-                          <TableHead>Serie</TableHead>
-                          <TableHead>Chave</TableHead>
-                          <TableHead>Protocolo</TableHead>
-                          <TableHead>Ambiente</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Atualizado em</TableHead>
+                          <TableHead>
+                            <button type="button" onClick={() => toggleNfeSort("nfeNumber")}>
+                              Numero{nfeSortLabel("nfeNumber")}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button type="button" onClick={() => toggleNfeSort("nfeSeries")}>
+                              Serie{nfeSortLabel("nfeSeries")}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button type="button" onClick={() => toggleNfeSort("documentKey")}>
+                              Chave{nfeSortLabel("documentKey")}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button type="button" onClick={() => toggleNfeSort("protocol")}>
+                              Protocolo{nfeSortLabel("protocol")}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button type="button" onClick={() => toggleNfeSort("environment")}>
+                              Ambiente{nfeSortLabel("environment")}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            <button type="button" onClick={() => toggleNfeSort("status")}>
+                              Status{nfeSortLabel("status")}
+                            </button>
+                          </TableHead>
+                          <TableHead>
+                            Criada em
+                          </TableHead>
+                          <TableHead>
+                            <button type="button" onClick={() => toggleNfeSort("updatedAt")}>
+                              Atualizado em{nfeSortLabel("updatedAt")}
+                            </button>
+                          </TableHead>
                           <TableHead className="text-right">Acoes</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredNfe.map((doc) => {
+                        {nfePagination.paginatedItems.map((doc) => {
                           const rowCanSend = canSendNfe(doc);
                           const rowCanCancel = canCancelNfe(doc);
                           const rowCanCce = canCceNfe(doc);
@@ -1283,6 +1485,7 @@ export default function FiscalCentralPage() {
                                   : "Homologacao"}
                               </TableCell>
                               <TableCell>{badgeForStatus(doc.status)}</TableCell>
+                              <TableCell>{formatDateTime(doc.createdAt)}</TableCell>
                               <TableCell>
                                 {formatDateTime(doc.updatedAt || doc.createdAt)}
                               </TableCell>
@@ -1329,6 +1532,21 @@ export default function FiscalCentralPage() {
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() =>
+                                        setNfeExtemporaneousCancelDialog({
+                                          open: true,
+                                          doc,
+                                          reason: "",
+                                        })
+                                      }
+                                      disabled={
+                                        !rowCanCancel ||
+                                        cancelNfeExtemporaneousMutation.isPending
+                                      }
+                                    >
+                                      Cancelamento extemporaneo
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() =>
                                         setNfeCceDialog({
                                           open: true,
                                           doc,
@@ -1354,6 +1572,16 @@ export default function FiscalCentralPage() {
                         })}
                       </TableBody>
                     </Table>
+                    <TablePaginationControls
+                      page={nfePagination.page}
+                      pageSize={nfePagination.pageSize}
+                      totalItems={nfePagination.totalItems}
+                      totalPages={nfePagination.totalPages}
+                      startItem={nfePagination.startItem}
+                      endItem={nfePagination.endItem}
+                      onPageChange={nfePagination.setPage}
+                      onPageSizeChange={nfePagination.setPageSize}
+                    />
                   </div>
                 )}
               </CardContent>
@@ -1469,7 +1697,7 @@ export default function FiscalCentralPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredNfce.map((sale) => {
+                        {nfcePagination.paginatedItems.map((sale) => {
                           const rowCanSend = canSendNfce(sale.nfceStatus);
                           const rowCanCancel = canCancelNfce(
                             sale.nfceStatus,
@@ -1583,6 +1811,16 @@ export default function FiscalCentralPage() {
                         })}
                       </TableBody>
                     </Table>
+                    <TablePaginationControls
+                      page={nfcePagination.page}
+                      pageSize={nfcePagination.pageSize}
+                      totalItems={nfcePagination.totalItems}
+                      totalPages={nfcePagination.totalPages}
+                      startItem={nfcePagination.startItem}
+                      endItem={nfcePagination.endItem}
+                      onPageChange={nfcePagination.setPage}
+                      onPageSizeChange={nfcePagination.setPageSize}
+                    />
                   </div>
                 )}
               </CardContent>
@@ -1811,6 +2049,67 @@ export default function FiscalCentralPage() {
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Confirmar cancelamento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={nfeExtemporaneousCancelDialog.open}
+        onOpenChange={(open) =>
+          setNfeExtemporaneousCancelDialog((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancelamento extemporaneo NF-e</DialogTitle>
+            <DialogDescription>
+              Informe a justificativa do cancelamento extemporaneo (minimo 15 caracteres).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Justificativa</Label>
+            <Input
+              value={nfeExtemporaneousCancelDialog.reason}
+              onChange={(e) =>
+                setNfeExtemporaneousCancelDialog((prev) => ({
+                  ...prev,
+                  reason: e.target.value,
+                }))
+              }
+              placeholder="Motivo do cancelamento extemporaneo"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() =>
+                setNfeExtemporaneousCancelDialog({
+                  open: false,
+                  doc: null,
+                  reason: "",
+                })
+              }
+            >
+              Fechar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!nfeExtemporaneousCancelDialog.doc) return;
+                cancelNfeExtemporaneousMutation.mutate(
+                  nfeExtemporaneousCancelDialog.doc,
+                );
+              }}
+              disabled={
+                cancelNfeExtemporaneousMutation.isPending ||
+                nfeExtemporaneousCancelDialog.reason.trim().length < 15
+              }
+            >
+              {cancelNfeExtemporaneousMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Confirmar extemporaneo
             </Button>
           </DialogFooter>
         </DialogContent>

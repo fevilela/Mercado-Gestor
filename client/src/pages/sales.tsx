@@ -7,6 +7,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  TablePaginationControls,
+  useTablePagination,
+} from "@/components/ui/table-pagination-controls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -524,6 +528,8 @@ export default function Sales() {
   );
 
   const selectableSales = filteredSales.filter(canTransmitSale);
+  const salesPagination = useTablePagination<Sale>(filteredSales as Sale[]);
+  const closingSalesPagination = useTablePagination(closingReport?.sales || []);
   const allSelected =
     selectableSales.length > 0 &&
     selectableSales.every((sale: Sale) => selectedSaleIds.includes(sale.id));
@@ -807,7 +813,7 @@ export default function Sales() {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {closingReport.sales.map((sale) => (
+                              {closingSalesPagination.paginatedItems.map((sale) => (
                                 <TableRow key={sale.id}>
                                   <TableCell>{sale.time}</TableCell>
                                   <TableCell>{sale.customer}</TableCell>
@@ -830,6 +836,16 @@ export default function Sales() {
                               ))}
                             </TableBody>
                           </Table>
+                          <TablePaginationControls
+                            page={closingSalesPagination.page}
+                            pageSize={closingSalesPagination.pageSize}
+                            totalItems={closingSalesPagination.totalItems}
+                            totalPages={closingSalesPagination.totalPages}
+                            startItem={closingSalesPagination.startItem}
+                            endItem={closingSalesPagination.endItem}
+                            onPageChange={closingSalesPagination.setPage}
+                            onPageSizeChange={closingSalesPagination.setPageSize}
+                          />
                         </div>
                       </div>
                     )}
@@ -929,7 +945,7 @@ export default function Sales() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredSales.map((sale: Sale) => (
+                {salesPagination.paginatedItems.map((sale: Sale) => (
                   <TableRow key={sale.id}>
                     <TableCell>
                       <Checkbox
@@ -1105,6 +1121,16 @@ export default function Sales() {
                 ))}
               </TableBody>
             </Table>
+            <TablePaginationControls
+              page={salesPagination.page}
+              pageSize={salesPagination.pageSize}
+              totalItems={salesPagination.totalItems}
+              totalPages={salesPagination.totalPages}
+              startItem={salesPagination.startItem}
+              endItem={salesPagination.endItem}
+              onPageChange={salesPagination.setPage}
+              onPageSizeChange={salesPagination.setPageSize}
+            />
           </div>
         )}
       </div>

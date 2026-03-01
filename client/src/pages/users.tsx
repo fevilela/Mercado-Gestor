@@ -37,6 +37,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  TablePaginationControls,
+  useTablePagination,
+} from "@/components/ui/table-pagination-controls";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Plus,
@@ -120,6 +124,8 @@ export default function Users() {
       return res.json();
     },
   });
+  const usersPagination = useTablePagination(users);
+  const rolesPagination = useTablePagination(roles);
 
   const {
     data: rolePermissions = [],
@@ -535,6 +541,7 @@ export default function Users() {
                   Nenhum usuario cadastrado
                 </div>
               ) : (
+                <>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -550,7 +557,7 @@ export default function Users() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {users.map((user) => (
+                    {usersPagination.paginatedItems.map((user) => (
                       <TableRow
                         key={user.id}
                         data-testid={`row-user-${user.id}`}
@@ -632,6 +639,17 @@ export default function Users() {
                     ))}
                   </TableBody>
                 </Table>
+                <TablePaginationControls
+                  page={usersPagination.page}
+                  pageSize={usersPagination.pageSize}
+                  totalItems={usersPagination.totalItems}
+                  totalPages={usersPagination.totalPages}
+                  startItem={usersPagination.startItem}
+                  endItem={usersPagination.endItem}
+                  onPageChange={usersPagination.setPage}
+                  onPageSizeChange={usersPagination.setPageSize}
+                />
+                </>
               )}
             </CardContent>
           </Card>
@@ -657,7 +675,7 @@ export default function Users() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {roles.map((role) => (
+                    {rolesPagination.paginatedItems.map((role) => (
                       <TableRow
                         key={role.id}
                         data-testid={`row-role-${role.id}`}
@@ -681,6 +699,16 @@ export default function Users() {
                     ))}
                   </TableBody>
                 </Table>
+                <TablePaginationControls
+                  page={rolesPagination.page}
+                  pageSize={rolesPagination.pageSize}
+                  totalItems={rolesPagination.totalItems}
+                  totalPages={rolesPagination.totalPages}
+                  startItem={rolesPagination.startItem}
+                  endItem={rolesPagination.endItem}
+                  onPageChange={rolesPagination.setPage}
+                  onPageSizeChange={rolesPagination.setPageSize}
+                />
               </CardContent>
             </Card>
           )}

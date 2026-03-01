@@ -39,7 +39,7 @@ interface NFeHistoryRecord {
   environment: "homologacao" | "producao";
   xmlContent: string;
   protocol: string;
-  status: "gerada" | "processando" | "autorizada" | "cancelada";
+  status: "gerada" | "processando" | "autorizada" | "cancelada" | "inutilizada";
   canSend: boolean;
   canCancel: boolean;
   createdAt: string;
@@ -99,7 +99,7 @@ export default function NfeHistoryPage() {
   const { data: records = [], isLoading } = useQuery<NFeHistoryRecord[]>({
     queryKey: ["/api/fiscal/nfe/history"],
     queryFn: async () => {
-      const res = await fetch("/api/fiscal/nfe/history");
+      const res = await fetch("/api/fiscal/nfe/history?sync=1");
       if (!res.ok) throw new Error("Falha ao carregar historico de NF-e");
       return res.json();
     },
@@ -166,10 +166,30 @@ export default function NfeHistoryPage() {
         const error = await res.json().catch(() => ({}));
         throw new Error(error.error || "Falha ao cancelar NF-e");
       }
-      return res.json();
+      const payload = await res.json().catch(() => ({}));
+      if (payload?.success === false) {
+        throw new Error(payload?.message || payload?.error || "Falha ao cancelar NF-e");
+      }
+      return payload;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       toast({ title: "Sucesso", description: "Cancelamento enviado para SEFAZ." });
+      queryClient.setQueryData<NFeHistoryRecord[]>(
+        ["/api/fiscal/nfe/history"],
+        (current) =>
+          Array.isArray(current)
+            ? current.map((item) =>
+                item.id === variables.doc.id
+                  ? {
+                      ...item,
+                      status: "cancelada",
+                      canCancel: false,
+                      canSend: false,
+                    }
+                  : item,
+              )
+            : current,
+      );
       setCancelDialog({ open: false, doc: null, reason: "" });
       queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
     },
@@ -241,6 +261,9 @@ export default function NfeHistoryPage() {
   const statusBadge = (status: NFeHistoryRecord["status"]) => {
     if (status === "cancelada") {
       return <Badge variant="destructive">Cancelada</Badge>;
+    }
+    if (status === "inutilizada") {
+      return <Badge className="bg-slate-600">Inutilizada</Badge>;
     }
     if (status === "autorizada") {
       return <Badge className="bg-green-600">Autorizada</Badge>;

@@ -105,6 +105,15 @@ type OnboardingUserRow = {
   danfeLogoUrl: string | null;
 };
 
+type CompanyUnit = {
+  id: number;
+  companyId: number;
+  code: string;
+  name: string;
+  isActive: boolean | null;
+  createdAt: string | null;
+};
+
 export default function ManagerOnboarding() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -137,6 +146,15 @@ export default function ManagerOnboarding() {
     email: "",
     roleName: "Caixa",
     password: "",
+  });
+  const [unitsCompanyId, setUnitsCompanyId] = useState<number | null>(null);
+  const [companyUnits, setCompanyUnits] = useState<CompanyUnit[]>([]);
+  const [loadingUnits, setLoadingUnits] = useState(false);
+  const [editingUnitId, setEditingUnitId] = useState<number | null>(null);
+  const [unitForm, setUnitForm] = useState({
+    code: "",
+    name: "",
+    isActive: true,
   });
 
   const [managerLogin, setManagerLogin] = useState({
@@ -256,6 +274,28 @@ export default function ManagerOnboarding() {
     }
   };
 
+  const loadCompanyUnits = async (companyId: number) => {
+    setLoadingUnits(true);
+    try {
+      const res = await fetch(
+        `/api/auth/manager/company-units?companyId=${encodeURIComponent(String(companyId))}`,
+      );
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body.error || "Falha ao buscar unidades");
+      }
+      setCompanyUnits(Array.isArray(body) ? body : []);
+    } catch (error: any) {
+      toast({
+        title: "Erro ao carregar unidades",
+        description: error.message || "Falha inesperada",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingUnits(false);
+    }
+  };
+
   useEffect(() => {
     const check = async () => {
       try {
@@ -317,6 +357,9 @@ export default function ManagerOnboarding() {
       setShowCreateForm(false);
       setEditingTarget(null);
       setUserCreateTarget(null);
+      setUnitsCompanyId(null);
+      setCompanyUnits([]);
+      resetUnitForm();
     },
   });
 
@@ -565,6 +608,100 @@ export default function ManagerOnboarding() {
     onError: (error: any) => {
       toast({
         title: "Erro ao excluir empresa",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const createUnitMutation = useMutation({
+    mutationFn: async (data: { companyId: number; code: string; name: string }) => {
+      const res = await fetch("/api/auth/manager/company-units", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body.error || "Nao foi possivel criar unidade");
+      }
+      return body;
+    },
+    onSuccess: async () => {
+      toast({ title: "Unidade criada com sucesso" });
+      setUnitForm({ code: "", name: "", isActive: true });
+      setEditingUnitId(null);
+      if (unitsCompanyId) await loadCompanyUnits(unitsCompanyId);
+      await loadUsers(searchQuery);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro ao criar unidade",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateUnitMutation = useMutation({
+    mutationFn: async (data: {
+      unitId: number;
+      companyId: number;
+      code: string;
+      name: string;
+      isActive: boolean;
+    }) => {
+      const res = await fetch("/api/auth/manager/company-unit", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body.error || "Nao foi possivel atualizar unidade");
+      }
+      return body;
+    },
+    onSuccess: async () => {
+      toast({ title: "Unidade atualizada com sucesso" });
+      setUnitForm({ code: "", name: "", isActive: true });
+      setEditingUnitId(null);
+      if (unitsCompanyId) await loadCompanyUnits(unitsCompanyId);
+      await loadUsers(searchQuery);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro ao atualizar unidade",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteUnitMutation = useMutation({
+    mutationFn: async (data: { companyId: number; unitId: number }) => {
+      const res = await fetch(
+        `/api/auth/manager/company-unit?companyId=${encodeURIComponent(String(
+          data.companyId,
+        ))}&unitId=${encodeURIComponent(String(data.unitId))}`,
+        { method: "DELETE" },
+      );
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body.error || "Nao foi possivel excluir unidade");
+      }
+      return body;
+    },
+    onSuccess: async () => {
+      toast({ title: "Unidade excluida com sucesso" });
+      setUnitForm({ code: "", name: "", isActive: true });
+      setEditingUnitId(null);
+      if (unitsCompanyId) await loadCompanyUnits(unitsCompanyId);
+      await loadUsers(searchQuery);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro ao excluir unidade",
         description: error.message,
         variant: "destructive",
       });
@@ -1132,6 +1269,72 @@ export default function ManagerOnboarding() {
     );
   }, [usersRows]);
 
+  useEffect(() => {
+    if (companyRows.length === 0) {
+      setUnitsCompanyId(null);
+      setCompanyUnits([]);
+      return;
+    }
+    setUnitsCompanyId((prev) =>
+      prev && companyRows.some((row) => row.companyId === prev)
+        ? prev
+        : companyRows[0].companyId,
+    );
+  }, [companyRows]);
+
+  useEffect(() => {
+    if (!unitsCompanyId) return;
+    loadCompanyUnits(unitsCompanyId);
+  }, [unitsCompanyId]);
+
+  const selectedUnitsCompany =
+    unitsCompanyId !== null
+      ? companyRows.find((row) => row.companyId === unitsCompanyId) || null
+      : null;
+
+  const resetUnitForm = () => {
+    setEditingUnitId(null);
+    setUnitForm({ code: "", name: "", isActive: true });
+  };
+
+  const startEditUnit = (unit: CompanyUnit) => {
+    setEditingUnitId(unit.id);
+    setUnitForm({
+      code: unit.code || "",
+      name: unit.name || "",
+      isActive: Boolean(unit.isActive),
+    });
+  };
+
+  const handleSubmitUnit = () => {
+    if (!unitsCompanyId) return;
+    if (!unitForm.code.trim() || !unitForm.name.trim()) {
+      toast({
+        title: "Dados incompletos",
+        description: "Informe codigo e nome da unidade.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (editingUnitId) {
+      updateUnitMutation.mutate({
+        unitId: editingUnitId,
+        companyId: unitsCompanyId,
+        code: unitForm.code.trim().toUpperCase(),
+        name: unitForm.name.trim(),
+        isActive: unitForm.isActive,
+      });
+      return;
+    }
+
+    createUnitMutation.mutate({
+      companyId: unitsCompanyId,
+      code: unitForm.code.trim().toUpperCase(),
+      name: unitForm.name.trim(),
+    });
+  };
+
   if (isCheckingSession) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -1529,6 +1732,191 @@ export default function ManagerOnboarding() {
                   Próximo
                 </button>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-xl border-[#dbe1ff]">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Unidades por empresa</CardTitle>
+            <CardDescription>
+              Cadastre unidades (filiais/lojas) para separar operacao e estoque.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[2fr_1fr]">
+              <div className="space-y-2">
+                <Label htmlFor="units-company-select">Empresa</Label>
+                <select
+                  id="units-company-select"
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={unitsCompanyId ?? ""}
+                  onChange={(e) =>
+                    setUnitsCompanyId(e.target.value ? Number(e.target.value) : null)
+                  }
+                >
+                  {companyRows.map((company) => (
+                    <option key={company.companyId} value={company.companyId}>
+                      {company.companyName} ({formatCNPJ(company.cnpj || "")})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="units-status">Status</Label>
+                <Input
+                  id="units-status"
+                  value={selectedUnitsCompany?.companyIsActive ? "Empresa ativa" : "Empresa inativa"}
+                  readOnly
+                />
+              </div>
+            </div>
+
+            <div className="rounded-md border p-3">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="unit-code">Codigo</Label>
+                  <Input
+                    id="unit-code"
+                    placeholder="MATRIZ, LOJA01..."
+                    value={unitForm.code}
+                    onChange={(e) =>
+                      setUnitForm((prev) => ({
+                        ...prev,
+                        code: e.target.value.toUpperCase(),
+                      }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="unit-name">Nome</Label>
+                  <Input
+                    id="unit-name"
+                    placeholder="Loja Centro"
+                    value={unitForm.name}
+                    onChange={(e) =>
+                      setUnitForm((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="unit-active">Ativa</Label>
+                  <select
+                    id="unit-active"
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={unitForm.isActive ? "1" : "0"}
+                    onChange={(e) =>
+                      setUnitForm((prev) => ({
+                        ...prev,
+                        isActive: e.target.value === "1",
+                      }))
+                    }
+                  >
+                    <option value="1">Ativa</option>
+                    <option value="0">Inativa</option>
+                  </select>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  onClick={handleSubmitUnit}
+                  disabled={
+                    !unitsCompanyId ||
+                    createUnitMutation.isPending ||
+                    updateUnitMutation.isPending
+                  }
+                >
+                  {createUnitMutation.isPending || updateUnitMutation.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : editingUnitId ? (
+                    "Atualizar unidade"
+                  ) : (
+                    "Criar unidade"
+                  )}
+                </Button>
+                {editingUnitId ? (
+                  <Button type="button" variant="outline" onClick={resetUnitForm}>
+                    Cancelar edicao
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="rounded-md border overflow-auto">
+              <table className="w-full min-w-[620px] text-sm">
+                <thead className="bg-muted/40">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Codigo</th>
+                    <th className="px-3 py-2 text-left">Nome</th>
+                    <th className="px-3 py-2 text-left">Status</th>
+                    <th className="px-3 py-2 text-left">Acoes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingUnits ? (
+                    <tr>
+                      <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
+                        Carregando unidades...
+                      </td>
+                    </tr>
+                  ) : companyUnits.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
+                        Nenhuma unidade cadastrada.
+                      </td>
+                    </tr>
+                  ) : (
+                    companyUnits.map((unit) => (
+                      <tr key={unit.id} className="border-t">
+                        <td className="px-3 py-2 font-medium">{unit.code}</td>
+                        <td className="px-3 py-2">{unit.name}</td>
+                        <td className="px-3 py-2">
+                          {unit.isActive ? "Ativa" : "Inativa"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => startEditUnit(unit)}
+                            >
+                              Editar
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-600"
+                              disabled={deleteUnitMutation.isPending}
+                              onClick={() => {
+                                if (!unitsCompanyId) return;
+                                if (
+                                  !window.confirm(
+                                    `Deseja excluir a unidade ${unit.name}?`,
+                                  )
+                                ) {
+                                  return;
+                                }
+                                deleteUnitMutation.mutate({
+                                  companyId: unitsCompanyId,
+                                  unitId: unit.id,
+                                });
+                              }}
+                            >
+                              Excluir
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </CardContent>
         </Card>

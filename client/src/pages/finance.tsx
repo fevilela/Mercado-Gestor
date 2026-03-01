@@ -33,6 +33,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  TablePaginationControls,
+  useTablePagination,
+} from "@/components/ui/table-pagination-controls";
 import { Badge } from "@/components/ui/badge";
 import {
   ArrowUpRight,
@@ -370,6 +374,10 @@ export default function Finance() {
       return false;
     }
   });
+  const payablesPagination = useTablePagination<Payable>(filteredPayables as Payable[]);
+  const receivablesPagination = useTablePagination<Receivable>(
+    filteredReceivables as Receivable[],
+  );
 
   const currentMonthSales = sales.filter((sale: Sale) => {
     try {
@@ -899,6 +907,7 @@ export default function Finance() {
                     </p>
                   </div>
                 ) : (
+                  <>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -912,7 +921,7 @@ export default function Finance() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredPayables.map((payable: Payable) => (
+                      {payablesPagination.paginatedItems.map((payable: Payable) => (
                         <TableRow key={payable.id}>
                           <TableCell className="font-medium">
                             {payable.description}
@@ -966,6 +975,17 @@ export default function Finance() {
                       ))}
                     </TableBody>
                   </Table>
+                  <TablePaginationControls
+                    page={payablesPagination.page}
+                    pageSize={payablesPagination.pageSize}
+                    totalItems={payablesPagination.totalItems}
+                    totalPages={payablesPagination.totalPages}
+                    startItem={payablesPagination.startItem}
+                    endItem={payablesPagination.endItem}
+                    onPageChange={payablesPagination.setPage}
+                    onPageSizeChange={payablesPagination.setPageSize}
+                  />
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -1100,6 +1120,7 @@ export default function Finance() {
                     </p>
                   </div>
                 ) : (
+                  <>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1113,7 +1134,7 @@ export default function Finance() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredReceivables.map((receivable: Receivable) => (
+                      {receivablesPagination.paginatedItems.map((receivable: Receivable) => (
                         <TableRow key={receivable.id}>
                           <TableCell className="font-medium">
                             {receivable.description}
@@ -1173,6 +1194,17 @@ export default function Finance() {
                       ))}
                     </TableBody>
                   </Table>
+                  <TablePaginationControls
+                    page={receivablesPagination.page}
+                    pageSize={receivablesPagination.pageSize}
+                    totalItems={receivablesPagination.totalItems}
+                    totalPages={receivablesPagination.totalPages}
+                    startItem={receivablesPagination.startItem}
+                    endItem={receivablesPagination.endItem}
+                    onPageChange={receivablesPagination.setPage}
+                    onPageSizeChange={receivablesPagination.setPageSize}
+                  />
+                  </>
                 )}
               </CardContent>
             </Card>

@@ -110,7 +110,20 @@ export const resolveSefazEventEndpoints = (uf: string, versao: string): any => {
         ? mod.urlEventos(uf, versao)
         : null;
     } catch {
-      return null;
+      try {
+        const entryPath = requireFromRoot.resolve("node-sped-nfe");
+        const eventosPath = path.join(
+          path.dirname(entryPath),
+          "utils",
+          "eventos.js",
+        );
+        const mod = requireFromRoot(eventosPath);
+        return typeof mod?.urlEventos === "function"
+          ? mod.urlEventos(uf, versao)
+          : null;
+      } catch {
+        return null;
+      }
     }
   }
 };

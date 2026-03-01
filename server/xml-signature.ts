@@ -35,7 +35,8 @@ export class XMLSignatureService {
     xmlContent: string,
     certificateDataBase64: string,
     certificatePassword: string,
-    referenceId: string = "nfe"
+    referenceId: string = "nfe",
+    signatureAnchorTag?: string
   ): string {
     try {
       // Decode base64 certificate data
@@ -118,7 +119,10 @@ export class XMLSignatureService {
         digestAlgorithm: "http://www.w3.org/2000/09/xmldsig#sha1",
         uri: `#${referenceId}`,
       });
-      const signatureAnchor = "//*[local-name()='infNFe']";
+      const resolvedAnchorTag =
+        signatureAnchorTag ||
+        (/infEvento/i.test(xmlContent) ? "infEvento" : "infNFe");
+      const signatureAnchor = `//*[local-name()='${resolvedAnchorTag}']`;
       signedXmlAny.computeSignature(xmlContent, {
         location: {
           reference: signatureAnchor,

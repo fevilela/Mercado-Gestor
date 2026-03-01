@@ -24,6 +24,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  TablePaginationControls,
+  useTablePagination,
+} from "@/components/ui/table-pagination-controls";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Layout from "@/components/layout";
@@ -62,6 +66,9 @@ export default function SequentialNumberingConfig() {
       return res.json();
     },
   });
+  const numberingsPagination = useTablePagination<SequentialNumbering>(
+    numberings as SequentialNumbering[],
+  );
 
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -355,7 +362,7 @@ export default function SequentialNumberingConfig() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {numberings.map((n: SequentialNumbering) => {
+                  {numberingsPagination.paginatedItems.map((n: SequentialNumbering) => {
                     const used = n.currentNumber - n.rangeStart;
                     const total = n.rangeEnd - n.rangeStart + 1;
                     const percentage = ((used / total) * 100).toFixed(1);
@@ -426,6 +433,16 @@ export default function SequentialNumberingConfig() {
                   )}
                 </TableBody>
               </Table>
+              <TablePaginationControls
+                page={numberingsPagination.page}
+                pageSize={numberingsPagination.pageSize}
+                totalItems={numberingsPagination.totalItems}
+                totalPages={numberingsPagination.totalPages}
+                startItem={numberingsPagination.startItem}
+                endItem={numberingsPagination.endItem}
+                onPageChange={numberingsPagination.setPage}
+                onPageSizeChange={numberingsPagination.setPageSize}
+              />
             </div>
           </CardContent>
         </Card>

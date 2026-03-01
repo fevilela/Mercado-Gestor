@@ -164,11 +164,20 @@ const buildIcmsForSimples = (params: {
   const benefitXml = buildBenefitXml(params);
 
   if (csosn === "101") {
+    // Quando nao ha credito de ICMS informado, evita montar 101 com credito zero
+    // e usa 102 para manter consistencia fiscal/schema.
+    if (icmsAliquot <= 0 || icmsValue <= 0) {
+      return `<ICMSSN102>
+            <orig>${orig}</orig>
+            <CSOSN>102</CSOSN>
+            ${benefitXml}
+          </ICMSSN102>`;
+    }
     return `<ICMSSN101>
             <orig>${orig}</orig>
             <CSOSN>101</CSOSN>
-            <pCredSN>0.00</pCredSN>
-            <vCredICMSSN>0.00</vCredICMSSN>
+            <pCredSN>${pICMS}</pCredSN>
+            <vCredICMSSN>${vICMS}</vCredICMSSN>
           </ICMSSN101>`;
   }
 
@@ -329,8 +338,9 @@ const buildPisXml = (params: {
   aliquot: number;
   value: number;
 }) => {
-  const cst = padNumber(params.cst || "07", 2);
+  const cstInput = padNumber(params.cst || "07", 2);
   const aliquot = Math.max(0, toNumber(params.aliquot, 0));
+  const cst = cstInput === "00" && aliquot <= 0 ? "07" : cstInput;
   if ((cst === "01" || cst === "02") && aliquot > 0) {
     return `<PIS>
           <PISAliq>
@@ -354,8 +364,9 @@ const buildCofinsXml = (params: {
   aliquot: number;
   value: number;
 }) => {
-  const cst = padNumber(params.cst || "07", 2);
+  const cstInput = padNumber(params.cst || "07", 2);
   const aliquot = Math.max(0, toNumber(params.aliquot, 0));
+  const cst = cstInput === "00" && aliquot <= 0 ? "07" : cstInput;
   if ((cst === "01" || cst === "02") && aliquot > 0) {
     return `<COFINS>
           <COFINSAliq>
@@ -459,6 +470,9 @@ export class NFEGenerator {
     const emitNro = escapeXml(config.companyNumber || "S/N");
     const emitXBairro = escapeXml(config.companyNeighborhood || "CENTRO");
     const emitCEP = padNumber(config.companyZipCode || "37200000", 8);
+    const cnpjDest = String(config.customerCNPJ || "").replace(/\D/g, "");
+    const cpfDest = String(config.customerCPF || "").replace(/\D/g, "");
+    const destIeDigits = String(config.customerIE || "").replace(/\D/g, "");
 
     const destUF = (config.customerState || emitUF || "MG").toUpperCase();
     const interstate = destUF !== emitUF;
@@ -473,7 +487,17 @@ export class NFEGenerator {
     const emitIE = String(config.ie || "").replace(/\D/g, "") || "ISENTO";
     const crt = resolveCRT(config);
     const natOp = escapeXml(config.naturezaOperacao || "Venda");
-    const indIEDest = config.customerIeIndicator || "9";
+    const requestedIndIEDest = String(config.customerIeIndicator || "9");
+    const normalizedIndIEDest =
+      requestedIndIEDest === "1" ||
+      requestedIndIEDest === "2" ||
+      requestedIndIEDest === "9"
+        ? requestedIndIEDest
+        : "9";
+    const indIEDest =
+      cpfDest.length === 11 || (normalizedIndIEDest === "1" && !destIeDigits)
+        ? "9"
+        : normalizedIndIEDest;
 
     const items = Array.isArray(config.items) && config.items.length > 0
       ? config.items
@@ -693,9 +717,6 @@ export class NFEGenerator {
     const vTotTrib = asMoney(totalTrib);
     const vNF = asMoney(totalProd + totalIpi + totalSt + totalDifal + totalFcpDifal);
 
-    const cnpjDest = String(config.customerCNPJ || "").replace(/\D/g, "");
-    const cpfDest = String(config.customerCPF || "").replace(/\D/g, "");
-    const destIeDigits = String(config.customerIE || "").replace(/\D/g, "");
     const destDocXml =
       cnpjDest.length === 14
         ? `<CNPJ>${cnpjDest}</CNPJ>`
@@ -765,14 +786,14 @@ export class NFEGenerator {
         <vBC>${vBC}</vBC>
         <vICMS>${vIcms}</vICMS>
         <vICMSDeson>${vIcmsDeson}</vICMSDeson>
+        <vFCPUFDest>${vFcpDifal}</vFCPUFDest>
+        <vICMSUFDest>${vIcmsUfDest}</vICMSUFDest>
+        <vICMSUFRemet>0.00</vICMSUFRemet>
         <vFCP>0.00</vFCP>
         <vBCST>0.00</vBCST>
         <vST>${vSt}</vST>
         <vFCPST>0.00</vFCPST>
         <vFCPSTRet>0.00</vFCPSTRet>
-        <vFCPUFDest>${vFcpDifal}</vFCPUFDest>
-        <vICMSUFDest>${vIcmsUfDest}</vICMSUFDest>
-        <vICMSUFRemet>0.00</vICMSUFRemet>
         <vProd>${vProd}</vProd>
         <vFrete>0.00</vFrete>
         <vSeg>0.00</vSeg>

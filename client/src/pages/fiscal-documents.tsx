@@ -46,6 +46,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  TablePaginationControls,
+  useTablePagination,
+} from "@/components/ui/table-pagination-controls";
 
 interface Product {
   id: number;
@@ -951,7 +955,15 @@ export default function FiscalDocuments() {
         const error = await res.json().catch(() => ({}));
         throw new Error(error.error || "Falha ao inutilizar numeracao");
       }
-      return res.json();
+      const responsePayload = await res.json().catch(() => ({}));
+      if (responsePayload?.success === false) {
+        throw new Error(
+          responsePayload?.message ||
+            responsePayload?.error ||
+            "Falha ao inutilizar numeracao",
+        );
+      }
+      return responsePayload;
     },
     onSuccess: () => {
       toast.success("Inutilizacao registrada");
@@ -2218,6 +2230,8 @@ export default function FiscalDocuments() {
       nfceStatus: sale.nfceStatus || "Pendente",
     }));
   }, [sales]);
+  const nfeItemsPagination = useTablePagination(formData.items);
+  const nfceSalesPagination = useTablePagination(nfceSales);
 
   const normalizeNfceStatus = (status: string) => {
     if (status === "Autorizada") return "Autorizada";
@@ -2420,8 +2434,11 @@ export default function FiscalDocuments() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {formData.items.map((item, index) => (
-                              <TableRow key={index} onClick={() => setSelectedNfeItemIndex(index)} onDoubleClick={() => setEditingTaxItemIndex(index)} className={index === selectedNfeItemIndex ? "bg-muted/40" : ""}>
+                            {nfeItemsPagination.paginatedItems.map((item, index) => {
+                              const absoluteIndex =
+                                (nfeItemsPagination.page - 1) * nfeItemsPagination.pageSize + index;
+                              return (
+                              <TableRow key={absoluteIndex} onClick={() => setSelectedNfeItemIndex(absoluteIndex)} onDoubleClick={() => setEditingTaxItemIndex(absoluteIndex)} className={absoluteIndex === selectedNfeItemIndex ? "bg-muted/40" : ""}>
                                 <TableCell>{item.productId || "-"}</TableCell>
                                 <TableCell>{item.productName || "Produto nao selecionado"}</TableCell>
                                 <TableCell>{item.ncm || "-"}</TableCell>
@@ -2430,9 +2447,20 @@ export default function FiscalDocuments() {
                                 <TableCell>R$ {toAmount(item.unitPrice).toFixed(2)}</TableCell>
                                 <TableCell>R$ {(toAmount(item.quantity) * toAmount(item.unitPrice)).toFixed(2)}</TableCell>
                               </TableRow>
-                            ))}
+                              );
+                            })}
                           </TableBody>
                         </Table>
+                        <TablePaginationControls
+                          page={nfeItemsPagination.page}
+                          pageSize={nfeItemsPagination.pageSize}
+                          totalItems={nfeItemsPagination.totalItems}
+                          totalPages={nfeItemsPagination.totalPages}
+                          startItem={nfeItemsPagination.startItem}
+                          endItem={nfeItemsPagination.endItem}
+                          onPageChange={nfeItemsPagination.setPage}
+                          onPageSizeChange={nfeItemsPagination.setPageSize}
+                        />
                       </div>
                       <Card className="h-fit">
                         <CardHeader>
@@ -3476,7 +3504,7 @@ export default function FiscalDocuments() {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        nfceSales.map((sale) => {
+                        nfceSalesPagination.paginatedItems.map((sale) => {
                           const normalizedStatus = normalizeNfceStatus(
                             sale.nfceStatus
                           );
@@ -3549,6 +3577,16 @@ export default function FiscalDocuments() {
                       )}
                     </TableBody>
                   </Table>
+                  <TablePaginationControls
+                    page={nfceSalesPagination.page}
+                    pageSize={nfceSalesPagination.pageSize}
+                    totalItems={nfceSalesPagination.totalItems}
+                    totalPages={nfceSalesPagination.totalPages}
+                    startItem={nfceSalesPagination.startItem}
+                    endItem={nfceSalesPagination.endItem}
+                    onPageChange={nfceSalesPagination.setPage}
+                    onPageSizeChange={nfceSalesPagination.setPageSize}
+                  />
                 </div>
 
                 <Dialog

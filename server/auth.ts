@@ -13,6 +13,10 @@ import {
   paymentMachines,
   companyOnboardingCodes,
   businessUnits,
+  sales,
+  inventoryMovements,
+  cashRegisters,
+  cashMovements,
   passwordResetCodes,
   posTerminals,
   userCompanyAccesses,
@@ -862,6 +866,29 @@ const managerSetCompanyActiveSchema = z.object({
 
 const managerDeleteCompanySchema = z.object({
   companyId: z.number().int().positive(),
+});
+
+const managerCompanyUnitsQuerySchema = z.object({
+  companyId: z.coerce.number().int().positive(),
+});
+
+const managerCreateCompanyUnitSchema = z.object({
+  companyId: z.number().int().positive(),
+  code: z.string().min(2).max(20),
+  name: z.string().min(2).max(120),
+});
+
+const managerUpdateCompanyUnitSchema = z.object({
+  unitId: z.number().int().positive(),
+  companyId: z.number().int().positive(),
+  code: z.string().min(2).max(20),
+  name: z.string().min(2).max(120),
+  isActive: z.boolean().optional(),
+});
+
+const managerDeleteCompanyUnitSchema = z.object({
+  unitId: z.coerce.number().int().positive(),
+  companyId: z.coerce.number().int().positive(),
 });
 
 const completeInviteSchema = z.object({
@@ -1733,6 +1760,323 @@ authRouter.post("/manager/company-users", async (req, res) => {
       return res.status(400).json({ error: "Dados invalidos", details: error.errors });
     }
     res.status(500).json({ error: "Erro ao cadastrar usuario da empresa" });
+  }
+});
+
+authRouter.get("/manager/company-units", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const { companyId } = managerCompanyUnitsQuerySchema.parse(req.query);
+
+    const [company] = await db
+      .select()
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .limit(1);
+    if (!company) {
+      return res.status(404).json({ error: "Empresa nao encontrada" });
+    }
+
+    const units = await db
+      .select({
+        id: businessUnits.id,
+        companyId: businessUnits.companyId,
+        code: businessUnits.code,
+        name: businessUnits.name,
+        isActive: businessUnits.isActive,
+        createdAt: businessUnits.createdAt,
+      })
+      .from(businessUnits)
+      .where(eq(businessUnits.companyId, companyId))
+      .orderBy(asc(businessUnits.id));
+
+    res.json(units);
+  } catch (error) {
+    console.error("Manager company units list error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao listar unidades" });
+  }
+});
+
+authRouter.post("/manager/company-units", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerCreateCompanyUnitSchema.parse(req.body);
+    const normalizedCode = normalizeCode(data.code).slice(0, 20);
+    if (!normalizedCode) {
+      return res.status(400).json({ error: "Codigo da unidade invalido" });
+    }
+
+    const [company] = await db
+      .select()
+      .from(companies)
+      .where(eq(companies.id, data.companyId))
+      .limit(1);
+    if (!company) {
+      return res.status(404).json({ error: "Empresa nao encontrada" });
+    }
+
+    const [existingCode] = await db
+      .select({ id: businessUnits.id })
+      .from(businessUnits)
+      .where(
+        and(
+          eq(businessUnits.companyId, data.companyId),
+          eq(businessUnits.code, normalizedCode),
+        ),
+      )
+      .limit(1);
+    if (existingCode) {
+      return res.status(400).json({ error: "Codigo da unidade ja cadastrado" });
+    }
+
+    const [existingName] = await db
+      .select({ id: businessUnits.id })
+      .from(businessUnits)
+      .where(
+        and(
+          eq(businessUnits.companyId, data.companyId),
+          eq(businessUnits.name, data.name.trim()),
+        ),
+      )
+      .limit(1);
+    if (existingName) {
+      return res.status(400).json({ error: "Nome da unidade ja cadastrado" });
+    }
+
+    const createdUnit = await db.transaction(async (tx) => {
+      const [newUnit] = await tx
+        .insert(businessUnits)
+        .values({
+          companyId: data.companyId,
+          code: normalizedCode,
+          name: data.name.trim(),
+          isActive: true,
+        })
+        .returning();
+
+      const companyUsers = await tx
+        .select({ id: users.id, roleId: users.roleId })
+        .from(users)
+        .where(eq(users.companyId, data.companyId));
+
+      for (const companyUser of companyUsers) {
+        const [existingUnitAccess] = await tx
+          .select({ id: userUnitAccesses.id })
+          .from(userUnitAccesses)
+          .where(
+            and(
+              eq(userUnitAccesses.userId, companyUser.id),
+              eq(userUnitAccesses.unitId, newUnit.id),
+            ),
+          )
+          .limit(1);
+        if (!existingUnitAccess) {
+          await tx.insert(userUnitAccesses).values({
+            userId: companyUser.id,
+            unitId: newUnit.id,
+            roleId: companyUser.roleId,
+            isActive: true,
+          });
+        }
+      }
+
+      return newUnit;
+    });
+
+    res.json({
+      message: "Unidade criada com sucesso",
+      unit: createdUnit,
+    });
+  } catch (error) {
+    console.error("Manager create company unit error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao criar unidade" });
+  }
+});
+
+authRouter.patch("/manager/company-unit", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerUpdateCompanyUnitSchema.parse(req.body);
+    const normalizedCode = normalizeCode(data.code).slice(0, 20);
+    if (!normalizedCode) {
+      return res.status(400).json({ error: "Codigo da unidade invalido" });
+    }
+
+    const [unit] = await db
+      .select()
+      .from(businessUnits)
+      .where(
+        and(
+          eq(businessUnits.id, data.unitId),
+          eq(businessUnits.companyId, data.companyId),
+        ),
+      )
+      .limit(1);
+    if (!unit) {
+      return res.status(404).json({ error: "Unidade nao encontrada" });
+    }
+
+    const [existingCode] = await db
+      .select({ id: businessUnits.id })
+      .from(businessUnits)
+      .where(
+        and(
+          eq(businessUnits.companyId, data.companyId),
+          eq(businessUnits.code, normalizedCode),
+          ne(businessUnits.id, data.unitId),
+        ),
+      )
+      .limit(1);
+    if (existingCode) {
+      return res.status(400).json({ error: "Codigo da unidade ja cadastrado" });
+    }
+
+    const [existingName] = await db
+      .select({ id: businessUnits.id })
+      .from(businessUnits)
+      .where(
+        and(
+          eq(businessUnits.companyId, data.companyId),
+          eq(businessUnits.name, data.name.trim()),
+          ne(businessUnits.id, data.unitId),
+        ),
+      )
+      .limit(1);
+    if (existingName) {
+      return res.status(400).json({ error: "Nome da unidade ja cadastrado" });
+    }
+
+    const [updatedUnit] = await db
+      .update(businessUnits)
+      .set({
+        code: normalizedCode,
+        name: data.name.trim(),
+        isActive: data.isActive === undefined ? unit.isActive : data.isActive,
+      })
+      .where(
+        and(
+          eq(businessUnits.id, data.unitId),
+          eq(businessUnits.companyId, data.companyId),
+        ),
+      )
+      .returning();
+
+    res.json({
+      message: "Unidade atualizada com sucesso",
+      unit: updatedUnit,
+    });
+  } catch (error) {
+    console.error("Manager update company unit error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao atualizar unidade" });
+  }
+});
+
+authRouter.delete("/manager/company-unit", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerDeleteCompanyUnitSchema.parse(req.query);
+
+    const [unit] = await db
+      .select()
+      .from(businessUnits)
+      .where(
+        and(
+          eq(businessUnits.id, data.unitId),
+          eq(businessUnits.companyId, data.companyId),
+        ),
+      )
+      .limit(1);
+    if (!unit) {
+      return res.status(404).json({ error: "Unidade nao encontrada" });
+    }
+
+    const [linkedTerminal] = await db
+      .select({ id: posTerminals.id })
+      .from(posTerminals)
+      .where(eq(posTerminals.unitId, data.unitId))
+      .limit(1);
+    const [linkedMachine] = await db
+      .select({ id: paymentMachines.id })
+      .from(paymentMachines)
+      .where(eq(paymentMachines.unitId, data.unitId))
+      .limit(1);
+    const [linkedSale] = await db
+      .select({ id: sales.id })
+      .from(sales)
+      .where(eq(sales.unitId, data.unitId))
+      .limit(1);
+    const [linkedInv] = await db
+      .select({ id: inventoryMovements.id })
+      .from(inventoryMovements)
+      .where(eq(inventoryMovements.unitId, data.unitId))
+      .limit(1);
+    const [linkedRegister] = await db
+      .select({ id: cashRegisters.id })
+      .from(cashRegisters)
+      .where(eq(cashRegisters.unitId, data.unitId))
+      .limit(1);
+    const [linkedMovement] = await db
+      .select({ id: cashMovements.id })
+      .from(cashMovements)
+      .where(eq(cashMovements.unitId, data.unitId))
+      .limit(1);
+
+    if (
+      linkedTerminal ||
+      linkedMachine ||
+      linkedSale ||
+      linkedInv ||
+      linkedRegister ||
+      linkedMovement
+    ) {
+      return res.status(409).json({
+        error:
+          "Unidade possui vinculos operacionais. Inative a unidade em vez de excluir.",
+      });
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(userUnitAccesses)
+        .where(eq(userUnitAccesses.unitId, data.unitId));
+      await tx
+        .delete(businessUnits)
+        .where(
+          and(
+            eq(businessUnits.id, data.unitId),
+            eq(businessUnits.companyId, data.companyId),
+          ),
+        );
+    });
+
+    res.json({ message: "Unidade excluida com sucesso" });
+  } catch (error) {
+    console.error("Manager delete company unit error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao excluir unidade" });
   }
 });
 
