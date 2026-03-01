@@ -210,6 +210,9 @@ export default function Inventory() {
   const [xmlPreviewProducts, setXmlPreviewProducts] = useState<
     XmlPreviewProduct[]
   >([]);
+  const [xmlFieldDrafts, setXmlFieldDrafts] = useState<Record<string, string>>(
+    {}
+  );
   const [xmlReferenceTotals, setXmlReferenceTotals] =
     useState<XmlReferenceTotals | null>(null);
   const [xmlFiscalEditTempId, setXmlFiscalEditTempId] = useState<number | null>(
@@ -242,6 +245,28 @@ export default function Inventory() {
   >("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+
+  const draftKey = (tempId: number, field: string) => `${tempId}:${field}`;
+  const setXmlDraft = (tempId: number, field: string, value: string) => {
+    setXmlFieldDrafts((prev) => ({ ...prev, [draftKey(tempId, field)]: value }));
+  };
+  const clearXmlDraft = (tempId: number, field: string) => {
+    setXmlFieldDrafts((prev) => {
+      const next = { ...prev };
+      delete next[draftKey(tempId, field)];
+      return next;
+    });
+  };
+  const readXmlDraft = (
+    tempId: number,
+    field: string,
+    fallback: string | number
+  ) => {
+    const key = draftKey(tempId, field);
+    return Object.prototype.hasOwnProperty.call(xmlFieldDrafts, key)
+      ? xmlFieldDrafts[key]
+      : String(fallback ?? "");
+  };
 
   const toMoney = (value: string | number | null | undefined) => {
     const raw = String(value ?? "").trim();
@@ -642,6 +667,7 @@ export default function Inventory() {
       setXmlPreviewOpen(false);
       setXmlPreviewProducts([]);
       setXmlReferenceTotals(null);
+      setXmlFieldDrafts({});
 
       if (result.imported > 0 && result.updated > 0) {
         toast.success(
@@ -2124,6 +2150,7 @@ export default function Inventory() {
             setXmlPreviewProducts([]);
             setXmlFiscalEditTempId(null);
             setXmlReferenceTotals(null);
+            setXmlFieldDrafts({});
           }
         }}
       >
@@ -2329,17 +2356,31 @@ export default function Inventory() {
                             type="text"
                             inputMode="decimal"
                             className="w-28"
-                            value={(
-                              product.quantity > 0
-                                ? toMoney(product.totalPurchaseValue) / product.quantity
-                                : 0
-                            ).toFixed(2)}
+                            value={readXmlDraft(
+                              product.tempId,
+                              "packagePurchaseValue",
+                              (
+                                product.quantity > 0
+                                  ? toMoney(product.totalPurchaseValue) / product.quantity
+                                  : 0
+                              )
+                                .toFixed(2)
+                                .replace(".", ",")
+                            )}
                             onChange={(e) =>
-                              updatePreviewPackagePurchaseValue(
+                              setXmlDraft(
                                 product.tempId,
+                                "packagePurchaseValue",
                                 e.target.value
                               )
                             }
+                            onBlur={(e) => {
+                              updatePreviewPackagePurchaseValue(
+                                product.tempId,
+                                e.target.value
+                              );
+                              clearXmlDraft(product.tempId, "packagePurchaseValue");
+                            }}
                           />
                         </TableCell>
                         <TableCell>
@@ -2347,13 +2388,25 @@ export default function Inventory() {
                             type="text"
                             inputMode="decimal"
                             className="w-28"
-                            value={product.totalPurchaseValue}
+                            value={readXmlDraft(
+                              product.tempId,
+                              "totalPurchaseValue",
+                              String(product.totalPurchaseValue).replace(".", ",")
+                            )}
                             onChange={(e) =>
-                              updatePreviewTotalPurchaseValue(
+                              setXmlDraft(
                                 product.tempId,
+                                "totalPurchaseValue",
                                 e.target.value
                               )
                             }
+                            onBlur={(e) => {
+                              updatePreviewTotalPurchaseValue(
+                                product.tempId,
+                                e.target.value
+                              );
+                              clearXmlDraft(product.tempId, "totalPurchaseValue");
+                            }}
                           />
                         </TableCell>
                         <TableCell>
@@ -2371,13 +2424,25 @@ export default function Inventory() {
                             type="text"
                             inputMode="decimal"
                             className="w-24"
-                            value={product.marginPercent ?? 0}
+                            value={readXmlDraft(
+                              product.tempId,
+                              "marginPercent",
+                              String(product.marginPercent ?? 0).replace(".", ",")
+                            )}
                             onChange={(e) =>
-                              updatePreviewMarginPercent(
+                              setXmlDraft(
                                 product.tempId,
+                                "marginPercent",
                                 e.target.value
                               )
                             }
+                            onBlur={(e) => {
+                              updatePreviewMarginPercent(
+                                product.tempId,
+                                e.target.value
+                              );
+                              clearXmlDraft(product.tempId, "marginPercent");
+                            }}
                           />
                         </TableCell>
                         <TableCell>
@@ -2385,13 +2450,18 @@ export default function Inventory() {
                             type="text"
                             inputMode="decimal"
                             className="w-28"
-                            value={product.price}
+                            value={readXmlDraft(
+                              product.tempId,
+                              "price",
+                              String(product.price).replace(".", ",")
+                            )}
                             onChange={(e) =>
-                              updatePreviewSalePrice(
-                                product.tempId,
-                                e.target.value
-                              )
+                              setXmlDraft(product.tempId, "price", e.target.value)
                             }
+                            onBlur={(e) => {
+                              updatePreviewSalePrice(product.tempId, e.target.value);
+                              clearXmlDraft(product.tempId, "price");
+                            }}
                           />
                         </TableCell>
                         <TableCell>
@@ -2534,14 +2604,26 @@ export default function Inventory() {
                       <Input
                         type="text"
                         inputMode="decimal"
-                        value={editingXmlFiscalProduct.discountValue}
+                        value={readXmlDraft(
+                          editingXmlFiscalProduct.tempId,
+                          "discountValue",
+                          String(editingXmlFiscalProduct.discountValue).replace(".", ",")
+                        )}
                         onChange={(e) =>
-                          updatePreviewFiscalField(
+                          setXmlDraft(
                             editingXmlFiscalProduct.tempId,
                             "discountValue",
                             e.target.value
                           )
                         }
+                        onBlur={(e) => {
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "discountValue",
+                            e.target.value
+                          );
+                          clearXmlDraft(editingXmlFiscalProduct.tempId, "discountValue");
+                        }}
                       />
                     </div>
                     <div>
@@ -2549,14 +2631,26 @@ export default function Inventory() {
                       <Input
                         type="text"
                         inputMode="decimal"
-                        value={editingXmlFiscalProduct.bcIcmsValue}
+                        value={readXmlDraft(
+                          editingXmlFiscalProduct.tempId,
+                          "bcIcmsValue",
+                          String(editingXmlFiscalProduct.bcIcmsValue).replace(".", ",")
+                        )}
                         onChange={(e) =>
-                          updatePreviewFiscalField(
+                          setXmlDraft(
                             editingXmlFiscalProduct.tempId,
                             "bcIcmsValue",
                             e.target.value
                           )
                         }
+                        onBlur={(e) => {
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "bcIcmsValue",
+                            e.target.value
+                          );
+                          clearXmlDraft(editingXmlFiscalProduct.tempId, "bcIcmsValue");
+                        }}
                       />
                     </div>
                     <div>
@@ -2564,14 +2658,26 @@ export default function Inventory() {
                       <Input
                         type="text"
                         inputMode="decimal"
-                        value={editingXmlFiscalProduct.icmsValue}
+                        value={readXmlDraft(
+                          editingXmlFiscalProduct.tempId,
+                          "icmsValue",
+                          String(editingXmlFiscalProduct.icmsValue).replace(".", ",")
+                        )}
                         onChange={(e) =>
-                          updatePreviewFiscalField(
+                          setXmlDraft(
                             editingXmlFiscalProduct.tempId,
                             "icmsValue",
                             e.target.value
                           )
                         }
+                        onBlur={(e) => {
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "icmsValue",
+                            e.target.value
+                          );
+                          clearXmlDraft(editingXmlFiscalProduct.tempId, "icmsValue");
+                        }}
                       />
                     </div>
                     <div>
@@ -2579,14 +2685,26 @@ export default function Inventory() {
                       <Input
                         type="text"
                         inputMode="decimal"
-                        value={editingXmlFiscalProduct.ipiValue}
+                        value={readXmlDraft(
+                          editingXmlFiscalProduct.tempId,
+                          "ipiValue",
+                          String(editingXmlFiscalProduct.ipiValue).replace(".", ",")
+                        )}
                         onChange={(e) =>
-                          updatePreviewFiscalField(
+                          setXmlDraft(
                             editingXmlFiscalProduct.tempId,
                             "ipiValue",
                             e.target.value
                           )
                         }
+                        onBlur={(e) => {
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "ipiValue",
+                            e.target.value
+                          );
+                          clearXmlDraft(editingXmlFiscalProduct.tempId, "ipiValue");
+                        }}
                       />
                     </div>
                     <div>
@@ -2594,14 +2712,26 @@ export default function Inventory() {
                       <Input
                         type="text"
                         inputMode="decimal"
-                        value={editingXmlFiscalProduct.icmsAliquot}
+                        value={readXmlDraft(
+                          editingXmlFiscalProduct.tempId,
+                          "icmsAliquot",
+                          String(editingXmlFiscalProduct.icmsAliquot).replace(".", ",")
+                        )}
                         onChange={(e) =>
-                          updatePreviewFiscalField(
+                          setXmlDraft(
                             editingXmlFiscalProduct.tempId,
                             "icmsAliquot",
                             e.target.value
                           )
                         }
+                        onBlur={(e) => {
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "icmsAliquot",
+                            e.target.value
+                          );
+                          clearXmlDraft(editingXmlFiscalProduct.tempId, "icmsAliquot");
+                        }}
                       />
                     </div>
                     <div>
@@ -2609,14 +2739,26 @@ export default function Inventory() {
                       <Input
                         type="text"
                         inputMode="decimal"
-                        value={editingXmlFiscalProduct.ipiAliquot}
+                        value={readXmlDraft(
+                          editingXmlFiscalProduct.tempId,
+                          "ipiAliquot",
+                          String(editingXmlFiscalProduct.ipiAliquot).replace(".", ",")
+                        )}
                         onChange={(e) =>
-                          updatePreviewFiscalField(
+                          setXmlDraft(
                             editingXmlFiscalProduct.tempId,
                             "ipiAliquot",
                             e.target.value
                           )
                         }
+                        onBlur={(e) => {
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "ipiAliquot",
+                            e.target.value
+                          );
+                          clearXmlDraft(editingXmlFiscalProduct.tempId, "ipiAliquot");
+                        }}
                       />
                     </div>
                     <div>
@@ -2624,14 +2766,26 @@ export default function Inventory() {
                       <Input
                         type="text"
                         inputMode="decimal"
-                        value={editingXmlFiscalProduct.icmsStValue}
+                        value={readXmlDraft(
+                          editingXmlFiscalProduct.tempId,
+                          "icmsStValue",
+                          String(editingXmlFiscalProduct.icmsStValue).replace(".", ",")
+                        )}
                         onChange={(e) =>
-                          updatePreviewFiscalField(
+                          setXmlDraft(
                             editingXmlFiscalProduct.tempId,
                             "icmsStValue",
                             e.target.value
                           )
                         }
+                        onBlur={(e) => {
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "icmsStValue",
+                            e.target.value
+                          );
+                          clearXmlDraft(editingXmlFiscalProduct.tempId, "icmsStValue");
+                        }}
                       />
                     </div>
                     <div>
@@ -2666,6 +2820,7 @@ export default function Inventory() {
                 setXmlPreviewProducts([]);
                 setXmlFiscalEditTempId(null);
                 setXmlReferenceTotals(null);
+                setXmlFieldDrafts({});
               }}
             >
               Cancelar
