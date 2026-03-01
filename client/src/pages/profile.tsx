@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 
 export default function Profile() {
-  const { user, company } = useAuth();
+  const { user, company, unit, contexts, selectContext, refreshContexts } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
@@ -38,6 +38,8 @@ export default function Profile() {
     newPassword: "",
     confirmPassword: "",
   });
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
+  const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -47,6 +49,21 @@ export default function Profile() {
         email: user.email || "",
       }));
     }
+  }, [user]);
+
+  useEffect(() => {
+    if (!company) return;
+    setSelectedCompanyId(company.id);
+  }, [company]);
+
+  useEffect(() => {
+    if (!unit) return;
+    setSelectedUnitId(unit.id);
+  }, [unit]);
+
+  useEffect(() => {
+    if (!user) return;
+    refreshContexts().catch(() => null);
   }, [user]);
 
   const updateProfileMutation = useMutation({
@@ -138,6 +155,27 @@ export default function Profile() {
     });
   };
 
+  const contextMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedCompanyId) throw new Error("Selecione a empresa");
+      await selectContext(selectedCompanyId, selectedUnitId || undefined);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      toast({ title: "Contexto atualizado com sucesso!" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro ao trocar contexto",
+        description: error.message || "Tente novamente",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const availableUnits =
+    contexts.find((ctx) => ctx.companyId === selectedCompanyId)?.units || [];
+
   if (!user) {
     return (
       <Layout>
@@ -202,6 +240,11 @@ export default function Profile() {
                         {company.nomeFantasia || company.razaoSocial}
                       </span>
                     </div>
+                    {unit && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Unidade: {unit.code} - {unit.name}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -209,6 +252,76 @@ export default function Profile() {
           </Card>
 
           <div className="md:col-span-2 space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Building2 className="h-5 w-5" />
+                  Contexto Ativo
+                </CardTitle>
+                <CardDescription>
+                  Escolha a empresa e unidade para trabalhar no sistema.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="context-company">Empresa</Label>
+                    <select
+                      id="context-company"
+                      value={selectedCompanyId ?? ""}
+                      onChange={(e) => {
+                        const nextCompanyId = Number(e.target.value);
+                        setSelectedCompanyId(nextCompanyId);
+                        const firstUnit =
+                          contexts.find((ctx) => ctx.companyId === nextCompanyId)?.units?.[0];
+                        setSelectedUnitId(firstUnit?.unitId || null);
+                      }}
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      {contexts.map((ctx) => (
+                        <option key={ctx.companyId} value={ctx.companyId}>
+                          {ctx.company.nomeFantasia || ctx.company.razaoSocial}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="context-unit">Unidade</Label>
+                    <select
+                      id="context-unit"
+                      value={selectedUnitId ?? ""}
+                      onChange={(e) =>
+                        setSelectedUnitId(e.target.value ? Number(e.target.value) : null)
+                      }
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    >
+                      {availableUnits.map((unitCtx) => (
+                        <option key={unitCtx.unitId} value={unitCtx.unitId}>
+                          {unitCtx.unitCode} - {unitCtx.unitName} ({unitCtx.roleName})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <Button
+                    type="button"
+                    onClick={() => contextMutation.mutate()}
+                    disabled={contextMutation.isPending || !selectedCompanyId}
+                  >
+                    {contextMutation.isPending ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      "Trocar contexto"
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">

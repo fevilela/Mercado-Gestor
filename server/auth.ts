@@ -12,8 +12,11 @@ import {
   companySettings,
   paymentMachines,
   companyOnboardingCodes,
+  businessUnits,
   passwordResetCodes,
   posTerminals,
+  userCompanyAccesses,
+  userUnitAccesses,
   insertCompanySchema,
   insertUserSchema,
   type Company,
@@ -463,13 +466,213 @@ async function createDefaultRolesForCompany(tx: any, companyId: number) {
   }
 }
 
-async function getUserPermissions(userId: string): Promise<string[]> {
-  const user = await db
+type UserUnitContext = {
+  unitId: number;
+  unitName: string;
+  unitCode: string;
+  roleId: number;
+  roleName: string;
+};
+
+type UserCompanyContext = {
+  companyId: number;
+  isDefault: boolean;
+  company: {
+    id: number;
+    cnpj: string;
+    razaoSocial: string;
+    nomeFantasia: string | null;
+    isActive: boolean | null;
+  };
+  units: UserUnitContext[];
+};
+
+function normalizeCode(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+async function getCompanyDefaultUnit(companyId: number) {
+  const [unit] = await db
     .select()
-    .from(users)
-    .where(eq(users.id, userId))
+    .from(businessUnits)
+    .where(and(eq(businessUnits.companyId, companyId), eq(businessUnits.isActive, true)))
+    .orderBy(asc(businessUnits.id))
     .limit(1);
-  if (!user.length) return [];
+
+  return unit || null;
+}
+
+async function ensureDefaultBusinessUnit(tx: any, companyId: number) {
+  const [existingUnit] = await tx
+    .select()
+    .from(businessUnits)
+    .where(and(eq(businessUnits.companyId, companyId), eq(businessUnits.code, "MATRIZ")))
+    .limit(1);
+
+  if (existingUnit) return existingUnit;
+
+  const [newUnit] = await tx
+    .insert(businessUnits)
+    .values({
+      companyId,
+      code: "MATRIZ",
+      name: "Matriz",
+      isActive: true,
+    })
+    .returning();
+
+  return newUnit;
+}
+
+async function ensureUserAccessForCompany(
+  tx: any,
+  params: { userId: string; companyId: number; roleId: number; setDefault?: boolean },
+) {
+  const { userId, companyId, roleId, setDefault = false } = params;
+
+  const [existingCompanyAccess] = await tx
+    .select()
+    .from(userCompanyAccesses)
+    .where(
+      and(
+        eq(userCompanyAccesses.userId, userId),
+        eq(userCompanyAccesses.companyId, companyId),
+      ),
+    )
+    .limit(1);
+
+  if (!existingCompanyAccess) {
+    await tx.insert(userCompanyAccesses).values({
+      userId,
+      companyId,
+      isDefault: setDefault,
+      isActive: true,
+    });
+  } else if (!existingCompanyAccess.isActive || (setDefault && !existingCompanyAccess.isDefault)) {
+    await tx
+      .update(userCompanyAccesses)
+      .set({
+        isActive: true,
+        isDefault: setDefault ? true : existingCompanyAccess.isDefault,
+      })
+      .where(eq(userCompanyAccesses.id, existingCompanyAccess.id));
+  }
+
+  const companyUnits = await tx
+    .select()
+    .from(businessUnits)
+    .where(and(eq(businessUnits.companyId, companyId), eq(businessUnits.isActive, true)));
+
+  for (const unit of companyUnits) {
+    const [existingUnitAccess] = await tx
+      .select()
+      .from(userUnitAccesses)
+      .where(
+        and(eq(userUnitAccesses.userId, userId), eq(userUnitAccesses.unitId, unit.id)),
+      )
+      .limit(1);
+
+    if (!existingUnitAccess) {
+      await tx.insert(userUnitAccesses).values({
+        userId,
+        unitId: unit.id,
+        roleId,
+        isActive: true,
+      });
+      continue;
+    }
+
+    if (!existingUnitAccess.isActive || existingUnitAccess.roleId !== roleId) {
+      await tx
+        .update(userUnitAccesses)
+        .set({ roleId, isActive: true })
+        .where(eq(userUnitAccesses.id, existingUnitAccess.id));
+    }
+  }
+}
+
+async function getUserCompanyContexts(userId: string): Promise<UserCompanyContext[]> {
+  const companyRows = await db
+    .select({
+      companyId: userCompanyAccesses.companyId,
+      isDefault: userCompanyAccesses.isDefault,
+      company: {
+        id: companies.id,
+        cnpj: companies.cnpj,
+        razaoSocial: companies.razaoSocial,
+        nomeFantasia: companies.nomeFantasia,
+        isActive: companies.isActive,
+      },
+    })
+    .from(userCompanyAccesses)
+    .innerJoin(companies, eq(companies.id, userCompanyAccesses.companyId))
+    .where(
+      and(
+        eq(userCompanyAccesses.userId, userId),
+        eq(userCompanyAccesses.isActive, true),
+        eq(companies.isActive, true),
+      ),
+    )
+    .orderBy(desc(userCompanyAccesses.isDefault), asc(companies.nomeFantasia), asc(companies.razaoSocial));
+
+  const unitRows = await db
+    .select({
+      companyId: businessUnits.companyId,
+      unitId: businessUnits.id,
+      unitName: businessUnits.name,
+      unitCode: businessUnits.code,
+      roleId: userUnitAccesses.roleId,
+      roleName: roles.name,
+    })
+    .from(userUnitAccesses)
+    .innerJoin(businessUnits, eq(userUnitAccesses.unitId, businessUnits.id))
+    .innerJoin(roles, eq(userUnitAccesses.roleId, roles.id))
+    .where(
+      and(
+        eq(userUnitAccesses.userId, userId),
+        eq(userUnitAccesses.isActive, true),
+        eq(businessUnits.isActive, true),
+      ),
+    )
+    .orderBy(asc(businessUnits.id));
+
+  const unitByCompany = new Map<number, UserUnitContext[]>();
+  for (const unit of unitRows) {
+    const next = unitByCompany.get(unit.companyId) || [];
+    next.push({
+      unitId: unit.unitId,
+      unitName: unit.unitName,
+      unitCode: unit.unitCode,
+      roleId: unit.roleId,
+      roleName: unit.roleName,
+    });
+    unitByCompany.set(unit.companyId, next);
+  }
+
+  return companyRows.map((row) => ({
+    companyId: row.companyId,
+    isDefault: Boolean(row.isDefault),
+    company: row.company,
+    units: unitByCompany.get(row.companyId) || [],
+  }));
+}
+
+async function getUserPermissions(userId: string, roleIdOverride?: number): Promise<string[]> {
+  const roleId =
+    roleIdOverride ||
+    (
+      await db
+        .select({ roleId: users.roleId })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1)
+    )[0]?.roleId;
+
+  if (!roleId) return [];
 
   const rolePerms = await db
     .select({
@@ -478,7 +681,7 @@ async function getUserPermissions(userId: string): Promise<string[]> {
     })
     .from(rolePermissions)
     .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
-    .where(eq(rolePermissions.roleId, user[0].roleId));
+    .where(eq(rolePermissions.roleId, roleId));
 
   return rolePerms.map((p) => `${p.module}:${p.action}`);
 }
@@ -1079,6 +1282,7 @@ authRouter.post("/manager/companies", async (req, res) => {
       );
 
       await createDefaultRolesForCompany(tx, company.id);
+      const defaultUnit = await ensureDefaultBusinessUnit(tx, company.id);
 
       const nfcePrintLayoutSql = data.nfcePrintLayout
         ? sql`${JSON.stringify(data.nfcePrintLayout)}::jsonb`
@@ -1155,6 +1359,7 @@ authRouter.post("/manager/companies", async (req, res) => {
             key: m.key,
             row: {
               companyId: company.id,
+              unitId: defaultUnit.id,
               name: String(m.name || "").trim(),
               provider: m.provider,
               mpTerminalId: m.provider === "mercadopago" ? m.mpTerminalId || null : null,
@@ -1193,6 +1398,7 @@ authRouter.post("/manager/companies", async (req, res) => {
 
             return {
               companyId: company.id,
+              unitId: defaultUnit.id,
               name: String(t.name || "").trim(),
               code,
               paymentMachineId: linkedMachineId,
@@ -1247,6 +1453,13 @@ authRouter.post("/manager/companies", async (req, res) => {
           name: data.adminName,
         })
         .returning();
+
+      await ensureUserAccessForCompany(tx, {
+        userId: adminUser.id,
+        companyId: company.id,
+        roleId: adminRole.id,
+        setDefault: true,
+      });
 
       if (data.adminPassword && data.adminPassword.trim().length >= 6) {
         return { company, adminUser, passwordDefined: true as const };
@@ -1465,6 +1678,13 @@ authRouter.post("/manager/company-users", async (req, res) => {
           name: data.name,
         })
         .returning();
+
+      await ensureDefaultBusinessUnit(tx, company.id);
+      await ensureUserAccessForCompany(tx, {
+        userId: createdUser.id,
+        companyId: data.companyId,
+        roleId: targetRole.id,
+      });
 
       if (codeHash && expiresAt) {
         await tx.insert(companyOnboardingCodes).values({
@@ -1934,7 +2154,84 @@ authRouter.post("/forgot-password/reset", async (req, res) => {
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  companyId: z.number().int().positive().optional(),
+  unitId: z.number().int().positive().optional(),
 });
+
+const contextSelectSchema = z.object({
+  companyId: z.number().int().positive(),
+  unitId: z.number().int().positive().optional(),
+});
+
+async function buildAuthPayload(
+  user: User,
+  activeCompanyId: number,
+  activeUnitId: number | null,
+  activeRoleId: number,
+) {
+  const [company] = await db
+    .select()
+    .from(companies)
+    .where(eq(companies.id, activeCompanyId))
+    .limit(1);
+
+  if (!company || !company.isActive) {
+    throw new Error("Empresa inativa ou nao encontrada no contexto atual");
+  }
+
+  const [role] = await db
+    .select()
+    .from(roles)
+    .where(eq(roles.id, activeRoleId))
+    .limit(1);
+
+  if (!role) {
+    throw new Error("Perfil do contexto nao encontrado");
+  }
+
+  const [unit] = activeUnitId
+    ? await db
+        .select()
+        .from(businessUnits)
+        .where(eq(businessUnits.id, activeUnitId))
+        .limit(1)
+    : [null];
+
+  const userPermissions = await getUserPermissions(user.id, activeRoleId);
+  const userCodeMap = await getCompanyUserCodeMap(activeCompanyId);
+  const contexts = await getUserCompanyContexts(user.id);
+
+  return {
+    user: {
+      id: user.id,
+      displayCode: userCodeMap.get(user.id) || "00",
+      name: user.name,
+      email: user.email,
+      role,
+      permissions: userPermissions,
+    },
+    company: {
+      id: company.id,
+      cnpj: company.cnpj,
+      razaoSocial: company.razaoSocial,
+      nomeFantasia: company.nomeFantasia,
+    },
+    unit: unit
+      ? {
+          id: unit.id,
+          code: unit.code,
+          name: unit.name,
+        }
+      : null,
+    activeContext: {
+      companyId: activeCompanyId,
+      unitId: activeUnitId,
+      roleId: activeRoleId,
+    },
+    contexts,
+    permissions: userPermissions,
+  };
+}
 
 authRouter.post("/login", async (req, res) => {
   try {
@@ -1947,73 +2244,90 @@ authRouter.post("/login", async (req, res) => {
       .limit(1);
 
     if (!user) {
-      return res.status(401).json({ error: "Email ou senha inválidos" });
+      return res.status(401).json({ error: "Email ou senha invalidos" });
     }
 
     if (!user.isActive) {
-      return res.status(401).json({ error: "Usuário desativado" });
+      return res.status(401).json({ error: "Usuario desativado" });
     }
 
     const validPassword = await bcrypt.compare(data.password, user.password);
     if (!validPassword) {
-      return res.status(401).json({ error: "Email ou senha inválidos" });
+      return res.status(401).json({ error: "Email ou senha invalidos" });
     }
-
-    const [company] = await db
-      .select()
-      .from(companies)
-      .where(eq(companies.id, user.companyId))
-      .limit(1);
-
-    if (!company || !company.isActive) {
-      return res.status(401).json({ error: "Empresa desativada" });
-    }
-
-    const [role] = await db
-      .select()
-      .from(roles)
-      .where(eq(roles.id, user.roleId))
-      .limit(1);
-
-    const userPermissions = await getUserPermissions(user.id);
-    const userCodeMap = await getCompanyUserCodeMap(user.companyId);
 
     await db.transaction(async (tx) => {
       await tx.execute(
         sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: user.companyId })}, true)`,
       );
-
+      await ensureDefaultBusinessUnit(tx, user.companyId);
+      await ensureUserAccessForCompany(tx, {
+        userId: user.id,
+        companyId: user.companyId,
+        roleId: user.roleId,
+        setDefault: true,
+      });
       await tx
         .update(users)
         .set({ lastLogin: new Date() })
         .where(eq(users.id, user.id));
     });
 
-    req.session.userId = user.id;
-    req.session.companyId = user.companyId;
-    req.session.roleId = user.roleId;
-    req.session.userPermissions = userPermissions;
+    const contexts = await getUserCompanyContexts(user.id);
+    if (!contexts.length) {
+      return res.status(403).json({ error: "Usuario sem contexto ativo" });
+    }
 
-    res.json({
-      user: {
-        id: user.id,
-        displayCode: userCodeMap.get(user.id) || "00",
-        name: user.name,
-        email: user.email,
-        role,
-        permissions: userPermissions,
-      },
-      company: {
-        id: company.id,
-        cnpj: company.cnpj,
-        razaoSocial: company.razaoSocial,
-        nomeFantasia: company.nomeFantasia,
-      },
-    });
+    const selectedCompanyContext =
+      (data.companyId
+        ? contexts.find((ctx) => ctx.companyId === data.companyId)
+        : null) ||
+      contexts.find((ctx) => ctx.isDefault) ||
+      contexts[0];
+
+    if (!selectedCompanyContext) {
+      return res.status(403).json({ error: "Empresa nao encontrada para este usuario" });
+    }
+
+    let selectedUnit =
+      (data.unitId
+        ? selectedCompanyContext.units.find((unit) => unit.unitId === data.unitId)
+        : null) || selectedCompanyContext.units[0];
+
+    if (!selectedUnit) {
+      const fallbackUnit = await getCompanyDefaultUnit(selectedCompanyContext.companyId);
+      if (fallbackUnit) {
+        selectedUnit = {
+          unitId: fallbackUnit.id,
+          unitName: fallbackUnit.name,
+          unitCode: fallbackUnit.code,
+          roleId: user.roleId,
+          roleName: "Administrador",
+        };
+      }
+    }
+
+    const activeRoleId = selectedUnit?.roleId || user.roleId;
+    const activeUnitId = selectedUnit?.unitId || null;
+
+    const payload = await buildAuthPayload(
+      user,
+      selectedCompanyContext.companyId,
+      activeUnitId,
+      activeRoleId,
+    );
+
+    req.session.userId = user.id;
+    req.session.companyId = selectedCompanyContext.companyId;
+    req.session.unitId = activeUnitId || undefined;
+    req.session.roleId = activeRoleId;
+    req.session.userPermissions = payload.permissions;
+
+    res.json(payload);
   } catch (error) {
     console.error("Login error:", error);
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: "Dados inválidos" });
+      return res.status(400).json({ error: "Dados invalidos" });
     }
     res.status(500).json({ error: "Erro ao fazer login" });
   }
@@ -2030,7 +2344,7 @@ authRouter.post("/logout", (req, res) => {
 
 authRouter.get("/me", async (req, res) => {
   if (!req.session.userId) {
-    return res.status(401).json({ error: "Não autenticado" });
+    return res.status(401).json({ error: "Nao autenticado" });
   }
 
   try {
@@ -2041,46 +2355,107 @@ authRouter.get("/me", async (req, res) => {
       .limit(1);
 
     if (!user) {
-      return res.status(401).json({ error: "Usuário não encontrado" });
+      return res.status(401).json({ error: "Usuario nao encontrado" });
     }
 
-    const [company] = await db
-      .select()
-      .from(companies)
-      .where(eq(companies.id, user.companyId))
-      .limit(1);
+    const activeCompanyId = req.session.companyId || user.companyId;
+    const activeRoleId = req.session.roleId || user.roleId;
+    const activeUnitId = req.session.unitId || null;
 
-    const [role] = await db
-      .select()
-      .from(roles)
-      .where(eq(roles.id, user.roleId))
-      .limit(1);
+    const payload = await buildAuthPayload(
+      user,
+      activeCompanyId,
+      activeUnitId,
+      activeRoleId,
+    );
 
-    const userPermissions = await getUserPermissions(user.id);
-    const userCodeMap = await getCompanyUserCodeMap(user.companyId);
+    req.session.companyId = activeCompanyId;
+    req.session.roleId = activeRoleId;
+    req.session.unitId = activeUnitId || undefined;
+    req.session.userPermissions = payload.permissions;
 
-    res.json({
-      user: {
-        id: user.id,
-        displayCode: userCodeMap.get(user.id) || "00",
-        name: user.name,
-        email: user.email,
-        role,
-        permissions: userPermissions,
-      },
-      company: {
-        id: company.id,
-        cnpj: company.cnpj,
-        razaoSocial: company.razaoSocial,
-        nomeFantasia: company.nomeFantasia,
-      },
-    });
+    res.json(payload);
   } catch (error) {
     console.error("Get user error:", error);
-    res.status(500).json({ error: "Erro ao buscar usuário" });
+    res.status(500).json({ error: "Erro ao buscar usuario" });
   }
 });
 
+authRouter.get("/contexts", async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: "Nao autenticado" });
+  }
+
+  try {
+    const contexts = await getUserCompanyContexts(req.session.userId);
+    res.json({
+      contexts,
+      activeContext: {
+        companyId: req.session.companyId || null,
+        unitId: req.session.unitId || null,
+        roleId: req.session.roleId || null,
+      },
+    });
+  } catch (error) {
+    console.error("Get contexts error:", error);
+    res.status(500).json({ error: "Erro ao buscar contextos" });
+  }
+});
+
+authRouter.post("/context/select", async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: "Nao autenticado" });
+  }
+
+  try {
+    const data = contextSelectSchema.parse(req.body);
+
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, req.session.userId))
+      .limit(1);
+
+    if (!user) {
+      return res.status(401).json({ error: "Usuario nao encontrado" });
+    }
+
+    const contexts = await getUserCompanyContexts(user.id);
+    const selectedCompany = contexts.find((ctx) => ctx.companyId === data.companyId);
+    if (!selectedCompany) {
+      return res.status(403).json({ error: "Sem acesso para a empresa selecionada" });
+    }
+
+    const selectedUnit =
+      (data.unitId
+        ? selectedCompany.units.find((u) => u.unitId === data.unitId)
+        : null) || selectedCompany.units[0];
+
+    if (!selectedUnit) {
+      return res.status(400).json({ error: "Empresa sem unidade vinculada ao usuario" });
+    }
+
+    const payload = await buildAuthPayload(
+      user,
+      selectedCompany.companyId,
+      selectedUnit.unitId,
+      selectedUnit.roleId,
+    );
+
+    req.session.companyId = selectedCompany.companyId;
+    req.session.unitId = selectedUnit.unitId;
+    req.session.roleId = selectedUnit.roleId;
+    req.session.userPermissions = payload.permissions;
+
+    res.json(payload);
+  } catch (error) {
+    console.error("Select context error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos" });
+    }
+    res.status(500).json({ error: "Erro ao selecionar contexto" });
+  }
+});
 authRouter.get("/roles", async (req, res) => {
   if (!req.session.companyId) {
     return res.status(401).json({ error: "Não autenticado" });
@@ -2103,7 +2478,7 @@ authRouter.get("/users", async (req, res) => {
   }
 
   try {
-    const userPerms = await getUserPermissions(req.session.userId);
+    const userPerms = await getUserPermissions(req.session.userId, req.session.roleId);
     if (
       !userPerms.includes("users:view") &&
       !userPerms.includes("users:manage")
@@ -2153,7 +2528,8 @@ authRouter.post("/users", async (req, res) => {
   }
 
   try {
-    const userPerms = await getUserPermissions(req.session.userId);
+    const currentCompanyId = req.session.companyId;
+    const userPerms = await getUserPermissions(req.session.userId, req.session.roleId);
     if (!userPerms.includes("users:manage")) {
       return res.status(403).json({ error: "Sem permissão para esta ação" });
     }
@@ -2163,34 +2539,38 @@ authRouter.post("/users", async (req, res) => {
     const existingUser = await db
       .select()
       .from(users)
-      .where(
-        and(
-          eq(users.email, data.email),
-          eq(users.companyId, req.session.companyId)
-        )
-      )
+      .where(eq(users.email, data.email))
       .limit(1);
 
     if (existingUser.length > 0) {
-      return res
-        .status(400)
-        .json({ error: "Email já cadastrado nesta empresa" });
+      return res.status(400).json({ error: "Email ja cadastrado no sistema" });
     }
 
     const hashedPassword = await bcrypt.hash(data.password, 10);
 
-    const [newUser] = await db
-      .insert(users)
-      .values({
-        companyId: req.session.companyId,
+    const [newUser] = await db.transaction(async (tx) => {
+      const [createdUser] = await tx
+        .insert(users)
+        .values({
+          companyId: currentCompanyId,
+          roleId: data.roleId,
+          username: data.email.split("@")[0],
+          email: data.email,
+          password: hashedPassword,
+          name: data.name,
+          phone: data.phone,
+        })
+        .returning();
+
+      await ensureDefaultBusinessUnit(tx, currentCompanyId);
+      await ensureUserAccessForCompany(tx, {
+        userId: createdUser.id,
+        companyId: currentCompanyId,
         roleId: data.roleId,
-        username: data.email.split("@")[0],
-        email: data.email,
-        password: hashedPassword,
-        name: data.name,
-        phone: data.phone,
-      })
-      .returning();
+      });
+
+      return [createdUser];
+    });
 
     res.json({
       id: newUser.id,
@@ -2214,7 +2594,7 @@ authRouter.patch("/users/:id", async (req, res) => {
   }
 
   try {
-    const userPerms = await getUserPermissions(req.session.userId);
+    const userPerms = await getUserPermissions(req.session.userId, req.session.roleId);
     if (!userPerms.includes("users:manage")) {
       return res.status(403).json({ error: "Sem permissão para esta ação" });
     }
@@ -2249,7 +2629,7 @@ authRouter.delete("/users/:id", async (req, res) => {
   }
 
   try {
-    const userPerms = await getUserPermissions(req.session.userId);
+    const userPerms = await getUserPermissions(req.session.userId, req.session.roleId);
     if (!userPerms.includes("users:manage")) {
       return res.status(403).json({ error: "Sem permissão para esta ação" });
     }
@@ -2381,7 +2761,7 @@ authRouter.post("/refresh-session", async (req, res) => {
       }
     }
 
-    req.session.userPermissions = await getUserPermissions(req.session.userId);
+    req.session.userPermissions = await getUserPermissions(req.session.userId, req.session.roleId);
 res.json({ message: "Sessão atualizada com sucesso" });
   } catch (error) {
     console.error("Refresh session error:", error);
@@ -2395,7 +2775,7 @@ authRouter.get("/roles/:id/permissions", async (req, res) => {
   }
 
   try {
-    const userPerms = await getUserPermissions(req.session.userId);
+    const userPerms = await getUserPermissions(req.session.userId, req.session.roleId);
     if (
       !userPerms.includes("users:view") &&
       !userPerms.includes("users:manage")
@@ -2423,7 +2803,7 @@ authRouter.put("/roles/:id/permissions", async (req, res) => {
   }
 
   try {
-    const userPerms = await getUserPermissions(req.session.userId);
+    const userPerms = await getUserPermissions(req.session.userId, req.session.roleId);
     if (!userPerms.includes("users:manage")) {
       return res.status(403).json({ error: "Sem permissão para esta ação" });
     }
@@ -2444,3 +2824,5 @@ authRouter.put("/roles/:id/permissions", async (req, res) => {
 });
 
 export { authRouter, getUserPermissions, initializePermissions };
+
+

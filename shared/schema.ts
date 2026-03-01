@@ -43,6 +43,25 @@ export type InsertCompany = z.infer<typeof insertCompanySchema>;
 export type Company = typeof companies.$inferSelect;
 
 // ============================================
+// BUSINESS UNITS: Unidades operacionais por empresa
+// ============================================
+export const businessUnits = pgTable("business_units", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertBusinessUnitSchema = createInsertSchema(businessUnits).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertBusinessUnit = z.infer<typeof insertBusinessUnitSchema>;
+export type BusinessUnit = typeof businessUnits.$inferSelect;
+
+// ============================================
 // RBAC: Roles (Perfis/Funções)
 // ============================================
 export const roles = pgTable("roles", {
@@ -123,6 +142,50 @@ export type User = typeof users.$inferSelect;
 
 // User with role information for frontend
 export type UserWithRole = User & { role: Role; permissions: string[] };
+
+// ============================================
+// USER COMPANY ACCESSES: Vinculo de usuario com empresas
+// ============================================
+export const userCompanyAccesses = pgTable("user_company_accesses", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull(),
+  companyId: integer("company_id").notNull(),
+  isDefault: boolean("is_default").default(false),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertUserCompanyAccessSchema = createInsertSchema(
+  userCompanyAccesses
+).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertUserCompanyAccess = z.infer<
+  typeof insertUserCompanyAccessSchema
+>;
+export type UserCompanyAccess = typeof userCompanyAccesses.$inferSelect;
+
+// ============================================
+// USER UNIT ACCESSES: Vinculo de usuario com unidades e perfil
+// ============================================
+export const userUnitAccesses = pgTable("user_unit_accesses", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull(),
+  unitId: integer("unit_id").notNull(),
+  roleId: integer("role_id").notNull(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertUserUnitAccessSchema = createInsertSchema(userUnitAccesses).omit(
+  {
+    id: true,
+    createdAt: true,
+  }
+);
+export type InsertUserUnitAccess = z.infer<typeof insertUserUnitAccessSchema>;
+export type UserUnitAccess = typeof userUnitAccesses.$inferSelect;
 
 // ============================================
 // COMPANY ONBOARDING CODES: Convite para criar senha
@@ -265,6 +328,27 @@ export type InsertProductVariation = z.infer<
 >;
 export type ProductVariation = typeof productVariations.$inferSelect;
 
+// ============================================
+// PRODUCT STOCKS: Estoque por unidade
+// ============================================
+export const productStocks = pgTable("product_stocks", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull(),
+  unitId: integer("unit_id").notNull(),
+  productId: integer("product_id").notNull(),
+  variationId: integer("variation_id"),
+  stock: integer("stock").notNull().default(0),
+  minStock: integer("min_stock").default(10),
+  maxStock: integer("max_stock").default(100),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertProductStockSchema = createInsertSchema(productStocks).omit({
+  id: true,
+});
+export type InsertProductStock = z.infer<typeof insertProductStockSchema>;
+export type ProductStock = typeof productStocks.$inferSelect;
+
 export const productMedia = pgTable("product_media", {
   id: serial("id").primaryKey(),
   productId: integer("product_id").notNull(),
@@ -378,6 +462,7 @@ export type Transporter = typeof transporters.$inferSelect;
 export const sales = pgTable("sales", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id"),
+  unitId: integer("unit_id"),
   userId: varchar("user_id"),
   customerId: integer("customer_id"),
   customerName: text("customer_name").notNull().default("Consumidor Final"),
@@ -447,6 +532,7 @@ export type SaleItem = typeof saleItems.$inferSelect;
 export const inventoryMovements = pgTable("inventory_movements", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id"),
+  unitId: integer("unit_id"),
   productId: integer("product_id").notNull(),
   variationId: integer("variation_id"),
   type: text("type").notNull(),
@@ -653,6 +739,7 @@ export type Notification = typeof notifications.$inferSelect;
 export const posTerminals = pgTable("pos_terminals", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id").notNull(),
+  unitId: integer("unit_id"),
   name: text("name").notNull(),
   code: text("code"),
   description: text("description"),
@@ -683,6 +770,7 @@ export type PosTerminal = typeof posTerminals.$inferSelect;
 export const paymentMachines = pgTable("payment_machines", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id").notNull(),
+  unitId: integer("unit_id"),
   name: text("name").notNull(),
   provider: text("provider").notNull(), // mercadopago | stone
   mpTerminalId: text("mp_terminal_id"),
@@ -704,6 +792,7 @@ export type PaymentMachine = typeof paymentMachines.$inferSelect;
 export const cashRegisters = pgTable("cash_registers", {
   id: serial("id").primaryKey(),
   companyId: integer("company_id").notNull(),
+  unitId: integer("unit_id"),
   terminalId: integer("terminal_id"),
   userId: varchar("user_id").notNull(),
   userName: text("user_name").notNull(),
@@ -735,6 +824,7 @@ export const cashMovements = pgTable("cash_movements", {
   id: serial("id").primaryKey(),
   cashRegisterId: integer("cash_register_id").notNull(),
   companyId: integer("company_id").notNull(),
+  unitId: integer("unit_id"),
   userId: varchar("user_id").notNull(),
   userName: text("user_name").notNull(),
   type: text("type").notNull(),

@@ -22,6 +22,12 @@ interface Company {
   phone?: string | null;
 }
 
+interface Unit {
+  id: number;
+  code: string;
+  name: string;
+}
+
 interface User {
   id: string;
   displayCode?: string;
@@ -31,13 +37,32 @@ interface User {
   permissions: string[];
 }
 
+interface ContextUnit {
+  unitId: number;
+  unitName: string;
+  unitCode: string;
+  roleId: number;
+  roleName: string;
+}
+
+interface CompanyContext {
+  companyId: number;
+  isDefault: boolean;
+  company: Company & { isActive?: boolean | null };
+  units: ContextUnit[];
+}
+
 interface AuthContextType {
   user: User | null;
   company: Company | null;
+  unit: Unit | null;
+  contexts: CompanyContext[];
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refreshContexts: () => Promise<void>;
+  selectContext: (companyId: number, unitId?: number) => Promise<void>;
   hasPermission: (permission: string) => boolean;
   hasAnyPermission: (...permissions: string[]) => boolean;
 }
@@ -47,6 +72,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [isInitialized, setIsInitialized] = useState(false);
+  const [contexts, setContexts] = useState<CompanyContext[]>([]);
 
   const {
     data: authData,
@@ -62,7 +88,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         throw new Error("Failed to fetch user");
       }
-      return res.json();
+      const body = await res.json();
+      setContexts(Array.isArray(body?.contexts) ? body.contexts : []);
+      return body;
     },
     retry: false,
     staleTime: 5 * 60 * 1000,
@@ -116,6 +144,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await logoutMutation.mutateAsync();
+    setContexts([]);
+  };
+
+  const refreshContexts = async () => {
+    const res = await fetch("/api/auth/contexts");
+    if (!res.ok) {
+      if (res.status === 401) {
+        setContexts([]);
+        return;
+      }
+      throw new Error("Erro ao atualizar contextos");
+    }
+    const body = await res.json();
+    setContexts(Array.isArray(body?.contexts) ? body.contexts : []);
+  };
+
+  const selectContext = async (companyId: number, unitId?: number) => {
+    const res = await fetch("/api/auth/context/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ companyId, unitId }),
+    });
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || "Erro ao selecionar contexto");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+    await refreshContexts();
   };
 
   const hasPermission = (permission: string): boolean => {
@@ -131,10 +187,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value: AuthContextType = {
     user: authData?.user || null,
     company: authData?.company || null,
+    unit: authData?.unit || null,
+    contexts,
     isLoading: isLoading || !isInitialized,
     isAuthenticated: !!authData?.user,
     login,
     logout,
+    refreshContexts,
+    selectContext,
     hasPermission,
     hasAnyPermission,
   };

@@ -17,7 +17,10 @@ export function requirePermission(...requiredPermissions: string[]) {
     }
 
     try {
-      const userPermissions = await getUserPermissions(req.session.userId);
+      const userPermissions = await getUserPermissions(
+        req.session.userId,
+        req.session.roleId,
+      );
 
       const hasPermission = requiredPermissions.some((perm) =>
         userPermissions.includes(perm)
@@ -37,6 +40,10 @@ export function requirePermission(...requiredPermissions: string[]) {
 
 export function getCompanyId(req: Request): number | null {
   return req.session.companyId || null;
+}
+
+export function getUnitId(req: Request): number | null {
+  return req.session.unitId || null;
 }
 
 export function getUserId(req: Request): string | null {

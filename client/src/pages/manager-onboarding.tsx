@@ -3,13 +3,22 @@ import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import {
   Building2,
+  ChevronRight,
+  Ellipsis,
+  Filter,
   Loader2,
   Lock,
   Mail,
   MoreHorizontal,
+  Pencil,
+  Plus,
   Search,
+  Store,
+  Trash2,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -1215,37 +1224,66 @@ export default function ManagerOnboarding() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <div className="mx-auto w-full max-w-6xl space-y-4">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3 flex-wrap">
+    <div className="min-h-screen bg-[#eceffd] p-4 md:px-6 md:py-10">
+      <div className="mx-auto w-full max-w-5xl space-y-4">
+        <Card className="rounded-xl border-[#dbe1ff] bg-[#fcfcff] shadow-[0_6px_20px_rgba(50,74,136,0.08)]">
+          <CardHeader className="space-y-4 pb-2 pt-5">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
-                <CardTitle>Empresas (Manager)</CardTitle>
-                <CardDescription>
+                <CardTitle className="text-[16px] leading-tight text-[#2f3a57]">Empresas (Manager)</CardTitle>
+                <CardDescription className="mt-1 text-[11px] text-[#77819c]">
                   Tela principal por empresa. Usuarios ficam como detalhe de cada empresa.
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
-                <Button onClick={openCreateForm}>Criar nova empresa</Button>
                 <Button
-                  variant="outline"
-                  onClick={() => logoutMutation.mutate()}
-                  disabled={logoutMutation.isPending}
+                  onClick={openCreateForm}
+                  size="sm"
+                  className="h-8 rounded-md bg-[#2f6fdb] px-3 text-[11px] font-medium hover:bg-[#265fc0]"
                 >
-                  {logoutMutation.isPending ? "Saindo..." : "Sair do login do desenvolvedor"}
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Nova Empresa
                 </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 rounded-md border-[#d7dbec] bg-white"
+                    >
+                      <Ellipsis className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setSearchQuery("");
+                        loadUsers("");
+                      }}
+                    >
+                      Limpar busca
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => logoutMutation.mutate()}
+                      disabled={logoutMutation.isPending}
+                    >
+                      {logoutMutation.isPending
+                        ? "Saindo..."
+                        : "Sair do login do desenvolvedor"}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           </CardHeader>
 
-          <CardContent className="space-y-4">
-            <div className="flex gap-2">
+          <CardContent className="space-y-3 pb-4">
+            <div className="flex items-center gap-2">
               <div className="relative flex-1">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar por CNPJ, empresa, email ou usuario"
-                  className="pl-10"
+                  placeholder="Buscar por CNPJ, empresa, email ou usuario..."
+                  className="h-9 rounded-md border-[#d7dbec] bg-[#f9faff] pl-9 text-sm placeholder:text-[#9aa3bc]"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -1256,67 +1294,97 @@ export default function ManagerOnboarding() {
                   }}
                 />
               </div>
-              <Button onClick={() => loadUsers(searchQuery)} disabled={loadingUsers}>
-                {loadingUsers ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Buscando...
-                  </>
-                ) : (
-                  "Buscar"
-                )}
-              </Button>
+              <div className="inline-flex items-center rounded-md border border-[#d7dbec] bg-white">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-none border-r border-[#d7dbec] text-[#6f7b99]"
+                  onClick={() => loadUsers(searchQuery)}
+                  disabled={loadingUsers}
+                >
+                  {loadingUsers ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <MoreHorizontal className="h-4 w-4" />
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="h-9 rounded-none px-3 text-xs text-[#4f5a78]"
+                  onClick={() => loadUsers(searchQuery)}
+                  disabled={loadingUsers}
+                >
+                  <Filter className="mr-1.5 h-3.5 w-3.5" />
+                  Filtros
+                </Button>
+              </div>
               <Button
                 variant="outline"
+                size="icon"
+                className="h-9 w-9 rounded-md border-[#d7dbec]"
+                aria-label="Mais opcoes"
                 onClick={() => {
                   setSearchQuery("");
                   loadUsers("");
                 }}
                 disabled={loadingUsers}
               >
-                Limpar
+                <Ellipsis className="h-4 w-4" />
               </Button>
             </div>
 
-            <div className="rounded-md border overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="text-left p-3">Empresa</th>
-                    <th className="text-left p-3">CNPJ</th>
-                    <th className="text-left p-3">Responsavel</th>
-                    <th className="text-left p-3">Usuarios</th>
-                    <th className="text-left p-3">Status</th>
-                    <th className="text-left p-3 w-[80px]">Acoes</th>
+            <div className="overflow-auto rounded-lg border border-[#d7dbec] bg-white">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead className="bg-[#f4f6fd]">
+                  <tr className="text-[#5b6785]">
+                    <th className="px-3 py-2 text-left text-xs font-semibold">Empresa</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold">CNPJ</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold">Responsável</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold">Usuários</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold">Status</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold">Ações</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="bg-white">
                   {companyRows.length === 0 ? (
-                    <tr>
-                      <td className="p-4 text-muted-foreground" colSpan={6}>
+                    <tr className="border-t">
+                      <td className="px-3 py-4 text-sm text-muted-foreground" colSpan={6}>
                         Nenhuma empresa encontrada
                       </td>
                     </tr>
                   ) : (
                     companyRows.map((company) => (
-                      <tr key={company.companyId} className="border-t align-top">
-                        <td className="p-3">
-                          <div className="font-medium">{company.companyName}</div>
-                          <div className="text-xs text-muted-foreground">
-                            ID {company.companyId}
+                      <tr key={company.companyId} className="border-t border-[#edf0fb] align-top">
+                        <td className="px-3 py-3">
+                          <div className="flex items-start gap-2">
+                            <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded bg-[#e9f1ff] text-[#2f6fdb]">
+                              <Store className="h-3.5 w-3.5" />
+                            </span>
+                            <div>
+                              <div className="font-medium text-[#2b3550]">{company.companyName}</div>
+                              <div className="text-[11px] text-muted-foreground">
+                                ID {company.companyId}
+                              </div>
+                            </div>
                           </div>
                         </td>
-                        <td className="p-3">{formatCNPJ(company.cnpj || "")}</td>
-                        <td className="p-3">
-                          <div>{company.adminRow.name}</div>
-                          <div className="text-xs text-muted-foreground">
+                        <td className="px-3 py-3 text-[#3c4763]">
+                          {formatCNPJ(company.cnpj || "")}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="text-[#2b3550]">{company.adminRow.name}</div>
+                          <div className="text-[11px] text-muted-foreground">
                             {company.adminRow.email}
                           </div>
                         </td>
-                        <td className="p-3">
+                        <td className="px-3 py-3">
                           <details>
-                            <summary className="cursor-pointer">
-                              {company.users.length} usuario(s)
+                            <summary className="flex cursor-pointer items-center gap-1 text-[#2b3550]">
+                              <ChevronRight className="h-3.5 w-3.5" />
+                              <span className="inline-flex items-center gap-1 text-xs">
+                                <Users className="h-3 w-3" />
+                                {company.users.length} usuários
+                              </span>
                             </summary>
                             <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                               {company.users.slice(0, 6).map((u) => (
@@ -1324,8 +1392,8 @@ export default function ManagerOnboarding() {
                                   <div>
                                     {u.name} ({u.roleName || "Sem perfil"})
                                   </div>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <code className="text-[10px] break-all">{u.id}</code>
+                                  <div className="mt-1 flex items-center gap-2">
+                                    <code className="break-all text-[10px]">{u.id}</code>
                                     <Button
                                       type="button"
                                       variant="ghost"
@@ -1360,81 +1428,107 @@ export default function ManagerOnboarding() {
                             </div>
                           </details>
                         </td>
-                        <td className="p-3">
-                          {company.companyIsActive ? "Ativa" : "Inativa"}
+                        <td className="px-3 py-3">
+                          <Badge
+                            variant="secondary"
+                            className={
+                              company.companyIsActive
+                                ? "border-0 bg-[#c8f4dd] text-[#137a45]"
+                                : "border-0 bg-[#ffe1e1] text-[#9b2727]"
+                            }
+                          >
+                            {company.companyIsActive ? "Ativa" : "Inativa"}
+                          </Badge>
                         </td>
-                        <td className="p-3">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuLabel>Acoes</DropdownMenuLabel>
-                              <DropdownMenuItem
-                                onClick={() => openCreateUserForm(company.adminRow)}
-                              >
-                                Adicionar usuario
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  resendInviteMutation.mutate({
-                                    cnpj: company.adminRow.cnpj,
-                                    adminEmail: company.adminRow.email,
-                                  })
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-[#4a5675]"
+                              onClick={() => openEditForm(company.adminRow)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-[#d25555]"
+                              onClick={() => {
+                                if (
+                                  !window.confirm(
+                                    "Tem certeza que deseja excluir esta empresa? Essa acao pode falhar se houver dados vinculados.",
+                                  )
+                                ) {
+                                  return;
                                 }
-                              >
-                                Reenviar codigo
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => openEditForm(company.adminRow)}>
-                                Editar cadastro
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  const nextActive = !company.companyIsActive;
-                                  const label = nextActive ? "ativar" : "inativar";
-                                  if (
-                                    !window.confirm(
-                                      `Deseja ${label} a empresa ${
-                                        company.companyName
-                                      }?`,
-                                    )
-                                  ) {
-                                    return;
+                                deleteCompanyMutation.mutate(company.companyId);
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-7 w-7">
+                                  <MoreHorizontal className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuLabel>Acoes</DropdownMenuLabel>
+                                <DropdownMenuItem
+                                  onClick={() => openCreateUserForm(company.adminRow)}
+                                >
+                                  Adicionar usuario
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    resendInviteMutation.mutate({
+                                      cnpj: company.adminRow.cnpj,
+                                      adminEmail: company.adminRow.email,
+                                    })
                                   }
-                                  setCompanyActiveMutation.mutate({
-                                    companyId: company.companyId,
-                                    isActive: nextActive,
-                                  });
-                                }}
-                              >
-                                {company.companyIsActive ? "Inativar" : "Ativar"}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="text-red-600"
-                                onClick={() => {
-                                  if (
-                                    !window.confirm(
-                                      "Tem certeza que deseja excluir esta empresa? Essa acao pode falhar se houver dados vinculados.",
-                                    )
-                                  ) {
-                                    return;
-                                  }
-                                  deleteCompanyMutation.mutate(company.companyId);
-                                }}
-                              >
-                                Excluir
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                                >
+                                  Reenviar codigo
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    const nextActive = !company.companyIsActive;
+                                    const label = nextActive ? "ativar" : "inativar";
+                                    if (
+                                      !window.confirm(
+                                        `Deseja ${label} a empresa ${
+                                          company.companyName
+                                        }?`,
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    setCompanyActiveMutation.mutate({
+                                      companyId: company.companyId,
+                                      isActive: nextActive,
+                                    });
+                                  }}
+                                >
+                                  {company.companyIsActive ? "Inativar" : "Ativar"}
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                         </td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
+              <div className="flex items-center justify-end gap-1 border-t border-[#edf0fb] bg-white px-3 py-2 text-xs text-[#67738f]">
+                <button className="rounded border px-2 py-1 leading-none" type="button">
+                  ‹
+                </button>
+                <span className="px-1 font-medium">1</span>
+                <button className="rounded border px-2 py-1 leading-none" type="button">
+                  Próximo
+                </button>
+              </div>
             </div>
           </CardContent>
         </Card>
