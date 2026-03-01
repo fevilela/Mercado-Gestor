@@ -73,6 +73,23 @@ function parseNFeXML(xmlContent: string): Array<{
   quantity: number;
   price: string;
   purchasePrice: string;
+  cfop: string;
+  cstIcms: string;
+  cstIpi: string;
+  cstPisCofins: string;
+  csosnCode: string;
+  origin: string;
+  cest: string;
+  icmsAliquot: number;
+  icmsReduction: number;
+  ipiAliquot: number;
+  pisAliquot: number;
+  cofinsAliquot: number;
+  icmsValue: string;
+  ipiValue: string;
+  icmsStValue: string;
+  discountValue: string;
+  bcIcmsValue: string;
 }> {
   const produtos: Array<{
     name: string;
@@ -82,6 +99,23 @@ function parseNFeXML(xmlContent: string): Array<{
     quantity: number;
     price: string;
     purchasePrice: string;
+    cfop: string;
+    cstIcms: string;
+    cstIpi: string;
+    cstPisCofins: string;
+    csosnCode: string;
+    origin: string;
+    cest: string;
+    icmsAliquot: number;
+    icmsReduction: number;
+    ipiAliquot: number;
+    pisAliquot: number;
+    cofinsAliquot: number;
+    icmsValue: string;
+    ipiValue: string;
+    icmsStValue: string;
+    discountValue: string;
+    bcIcmsValue: string;
   }> = [];
 
   const detPattern = /<det[^>]*>([\s\S]*?)<\/det>/gi;
@@ -100,6 +134,12 @@ function parseNFeXML(xmlContent: string): Array<{
       const match = regex.exec(content);
       return match ? match[1].trim() : null;
     };
+    const toNumber = (value: string | null) => {
+      if (!value) return 0;
+      const parsed = Number(String(value).replace(",", "."));
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const asMoney = (value: string | null) => toNumber(value).toFixed(2);
 
     const name = getTagValue("xProd", prodContent);
     if (!name) continue;
@@ -107,13 +147,47 @@ function parseNFeXML(xmlContent: string): Array<{
     const ean =
       getTagValue("cEAN", prodContent) || getTagValue("cEANTrib", prodContent);
     const ncm = getTagValue("NCM", prodContent);
+    const cest = getTagValue("CEST", prodContent) || "";
+    const cfop = getTagValue("CFOP", prodContent) || "";
     const unit = getTagValue("uCom", prodContent) || "UN";
     const quantityStr = getTagValue("qCom", prodContent);
     const priceStr =
       getTagValue("vUnCom", prodContent) || getTagValue("vUnTrib", prodContent);
+    const discountValue = asMoney(getTagValue("vDesc", prodContent));
 
     const quantity = quantityStr ? parseFloat(quantityStr) : 0;
     const price = priceStr ? parseFloat(priceStr).toFixed(2) : "0.00";
+
+    const impostoMatch = /<imposto>([\s\S]*?)<\/imposto>/i.exec(detContent);
+    const impostoContent = impostoMatch?.[1] || detContent;
+    const icmsMatch = /<ICMS>([\s\S]*?)<\/ICMS>/i.exec(impostoContent);
+    const icmsContent = icmsMatch?.[1] || impostoContent;
+    const ipiMatch = /<IPI>([\s\S]*?)<\/IPI>/i.exec(impostoContent);
+    const ipiContent = ipiMatch?.[1] || impostoContent;
+    const pisMatch = /<PIS>([\s\S]*?)<\/PIS>/i.exec(impostoContent);
+    const pisContent = pisMatch?.[1] || impostoContent;
+    const cofinsMatch = /<COFINS>([\s\S]*?)<\/COFINS>/i.exec(impostoContent);
+    const cofinsContent = cofinsMatch?.[1] || impostoContent;
+
+    const csosnCode = getTagValue("CSOSN", icmsContent) || "";
+    const cstIcms = getTagValue("CST", icmsContent) || csosnCode || "00";
+    const cstIpi = getTagValue("CST", ipiContent) || "00";
+    const cstPis =
+      getTagValue("CST", pisContent) || getTagValue("CST", cofinsContent) || "00";
+    const origin = getTagValue("orig", icmsContent) || "0";
+
+    const icmsAliquot = toNumber(getTagValue("pICMS", icmsContent));
+    const icmsReduction = toNumber(getTagValue("pRedBC", icmsContent));
+    const ipiAliquot = toNumber(getTagValue("pIPI", ipiContent));
+    const pisAliquot = toNumber(getTagValue("pPIS", pisContent));
+    const cofinsAliquot = toNumber(getTagValue("pCOFINS", cofinsContent));
+
+    const icmsValue = asMoney(getTagValue("vICMS", icmsContent));
+    const ipiValue = asMoney(getTagValue("vIPI", ipiContent));
+    const icmsStValue = asMoney(
+      getTagValue("vICMSST", icmsContent) || getTagValue("vICMSSTRet", icmsContent),
+    );
+    const bcIcmsValue = asMoney(getTagValue("vBC", icmsContent));
 
     produtos.push({
       name,
@@ -123,6 +197,23 @@ function parseNFeXML(xmlContent: string): Array<{
       quantity: Math.floor(quantity),
       price,
       purchasePrice: price,
+      cfop,
+      cstIcms,
+      cstIpi,
+      cstPisCofins: cstPis,
+      csosnCode,
+      origin,
+      cest,
+      icmsAliquot,
+      icmsReduction,
+      ipiAliquot,
+      pisAliquot,
+      cofinsAliquot,
+      icmsValue,
+      ipiValue,
+      icmsStValue,
+      discountValue,
+      bcIcmsValue,
     });
   }
 
@@ -2390,12 +2481,29 @@ export async function registerRoutes(
           name: prod.name,
           ean: prod.ean,
           ncm: prod.ncm,
+          cfop: prod.cfop,
+          cstIcms: prod.cstIcms,
+          cstIpi: prod.cstIpi,
+          cstPisCofins: prod.cstPisCofins,
+          csosnCode: prod.csosnCode,
+          origin: prod.origin,
+          cest: prod.cest || existing?.cest || "",
           unit: prod.unit,
           quantity: prod.quantity,
           unitsPerPackage,
           stockQuantity,
           price: prod.price,
           purchasePrice: prod.purchasePrice,
+          icmsAliquot: prod.icmsAliquot,
+          icmsReduction: prod.icmsReduction,
+          ipiAliquot: prod.ipiAliquot,
+          pisAliquot: prod.pisAliquot,
+          cofinsAliquot: prod.cofinsAliquot,
+          icmsValue: prod.icmsValue,
+          ipiValue: prod.ipiValue,
+          icmsStValue: prod.icmsStValue,
+          discountValue: prod.discountValue,
+          bcIcmsValue: prod.bcIcmsValue,
           marginPercent: Number.isFinite(marginPercent)
             ? Number(marginPercent.toFixed(2))
             : 30,

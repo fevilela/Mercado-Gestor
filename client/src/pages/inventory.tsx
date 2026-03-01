@@ -177,20 +177,20 @@ const adjustmentTypes = [
     label: "Entrada (Compra/Recebimento)",
     icon: PackagePlus,
   },
-  { value: "saida", label: "SaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­da (Uso/TransferÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âªncia)", icon: PackageMinus },
-  { value: "ajuste", label: "Ajuste de InventÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio", icon: Package },
+  { value: "saida", label: "Saída (Uso/Transferência)", icon: PackageMinus },
+  { value: "ajuste", label: "Ajuste de Inventário", icon: Package },
   { value: "perda", label: "Perda/Avaria", icon: PackageMinus },
-  { value: "devolucao", label: "DevoluÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o", icon: PackagePlus },
+  { value: "devolucao", label: "Devolução", icon: PackagePlus },
 ];
 
 const adjustmentReasons = [
-  "Contagem de inventÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡rio",
+  "Contagem de inventário",
   "Compra de fornecedor",
-  "DevoluÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o de cliente",
+  "Devolução de cliente",
   "Produto avariado",
   "Produto vencido",
-  "TransferÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âªncia entre lojas",
-  "CorreÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o de erro",
+  "Transferência entre lojas",
+  "Correção de erro",
   "Outro",
 ];
 
@@ -244,7 +244,24 @@ export default function Inventory() {
   const queryClient = useQueryClient();
 
   const toMoney = (value: string | number | null | undefined) => {
-    const parsed = Number(String(value ?? "0").replace(",", "."));
+    const raw = String(value ?? "").trim();
+    if (!raw) return 0;
+
+    const compact = raw.replace(/\s/g, "");
+    let normalized = compact;
+
+    // Accept both BR (1.234,56) and US (1,234.56) formats while typing.
+    if (compact.includes(",") && compact.includes(".")) {
+      if (compact.lastIndexOf(",") > compact.lastIndexOf(".")) {
+        normalized = compact.replace(/\./g, "").replace(",", ".");
+      } else {
+        normalized = compact.replace(/,/g, "");
+      }
+    } else if (compact.includes(",")) {
+      normalized = compact.replace(/\./g, "").replace(",", ".");
+    }
+
+    const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
@@ -515,7 +532,7 @@ export default function Inventory() {
     if (!file) return;
 
     if (!file.name.toLowerCase().endsWith(".xml")) {
-      toast.error("Por favor, selecione um arquivo XML vÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido");
+      toast.error("Por favor, selecione um arquivo XML válido");
       return;
     }
 
@@ -755,7 +772,7 @@ export default function Inventory() {
     setXmlPreviewProducts((prev) =>
       prev.map((p) => {
         if (p.tempId !== tempId) return p;
-        const marginPercent = Math.max(0, Number(value || 0));
+        const marginPercent = Math.max(0, toMoney(value));
         const salePrice = calcSalePriceFromMargin(
           toMoney(p.purchasePrice),
           marginPercent
@@ -821,7 +838,7 @@ export default function Inventory() {
           "irrfAliquot",
         ];
         if (numericFields.includes(field)) {
-          return { ...p, [field]: Number(value || 0) } as XmlPreviewProduct;
+          return { ...p, [field]: toMoney(value) } as XmlPreviewProduct;
         }
         return { ...p, [field]: value } as XmlPreviewProduct;
       })
@@ -928,7 +945,7 @@ export default function Inventory() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast.success("Produto excluÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­do com sucesso!");
+      toast.success("Produto excluído com sucesso!");
       setDeleteProductId(null);
     },
     onError: () => {
@@ -1009,7 +1026,7 @@ export default function Inventory() {
 
     const quantity = parseInt(adjustQuantity);
     if (isNaN(quantity) || quantity <= 0) {
-      toast.error("Quantidade deve ser um nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âºmero positivo");
+      toast.error("Quantidade deve ser um número positivo");
       return;
     }
 
@@ -1944,7 +1961,7 @@ export default function Inventory() {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir Produto</AlertDialogTitle>
             <AlertDialogDescription>
-              Tem certeza que deseja excluir este produto? Esta aÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o pode
+              Tem certeza que deseja excluir este produto? Esta ação não pode
               ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1985,7 +2002,7 @@ export default function Inventory() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="adjustType">Tipo de MovimentaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o *</Label>
+                <Label htmlFor="adjustType">Tipo de Movimentação *</Label>
                 <Select value={adjustType} onValueChange={setAdjustType}>
                   <SelectTrigger
                     id="adjustType"
@@ -2039,7 +2056,7 @@ export default function Inventory() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="adjustNotes">ObservaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âµes (opcional)</Label>
+                <Label htmlFor="adjustNotes">Observações (opcional)</Label>
                 <Textarea
                   id="adjustNotes"
                   placeholder="Detalhes adicionais sobre o ajuste..."
@@ -2067,7 +2084,7 @@ export default function Inventory() {
                   </p>
                   {getNewStockPreview() < 0 && (
                     <p className="text-xs text-destructive mt-1">
-                      AtenÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o: O estoque nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o pode ficar negativo
+                      Atenção: O estoque não pode ficar negativo
                     </p>
                   )}
                 </div>
@@ -2112,7 +2129,7 @@ export default function Inventory() {
       >
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>PrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©-visualizaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o da ImportaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o XML</DialogTitle>
+            <DialogTitle>Pré-visualização da Importação XML</DialogTitle>
           </DialogHeader>
 
           <div className="flex-1 overflow-auto">
@@ -2225,9 +2242,9 @@ export default function Inventory() {
                 </div>
                 {xmlTotalsComparison && !xmlTotalsComparison.canImport && (
                   <p className="text-sm text-red-600">
-                    DivergÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âªncia com a capa da nota XML:{" "}
-                    {xmlTotalsComparison.mismatches.join(", ")}. A importaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o
-                    serÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡ bloqueada.
+                    Divergência com a capa da nota XML:{" "}
+                    {xmlTotalsComparison.mismatches.join(", ")}. A importação
+                    será bloqueada.
                   </p>
                 )}
 
@@ -2309,9 +2326,8 @@ export default function Inventory() {
                         </TableCell>
                         <TableCell>
                           <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
                             className="w-28"
                             value={(
                               product.quantity > 0
@@ -2328,9 +2344,8 @@ export default function Inventory() {
                         </TableCell>
                         <TableCell>
                           <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
                             className="w-28"
                             value={product.totalPurchaseValue}
                             onChange={(e) =>
@@ -2353,9 +2368,8 @@ export default function Inventory() {
                         </TableCell>
                         <TableCell>
                           <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
                             className="w-24"
                             value={product.marginPercent ?? 0}
                             onChange={(e) =>
@@ -2368,9 +2382,8 @@ export default function Inventory() {
                         </TableCell>
                         <TableCell>
                           <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
                             className="w-28"
                             value={product.price}
                             onChange={(e) =>
@@ -2404,7 +2417,7 @@ export default function Inventory() {
                               size="sm"
                               onClick={() => setXmlFiscalEditTempId(product.tempId)}
                             >
-                              TributaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o
+                              Tributação
                             </Button>
                             <Button
                               variant="ghost"
@@ -2441,7 +2454,7 @@ export default function Inventory() {
           >
             <DialogContent className="max-w-4xl">
               <DialogHeader>
-                <DialogTitle>TributaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o do item (ImportaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o XML)</DialogTitle>
+                <DialogTitle>Tributação do item (Importação XML)</DialogTitle>
               </DialogHeader>
               {editingXmlFiscalProduct && (
                 <div className="space-y-4">
@@ -2459,6 +2472,19 @@ export default function Inventory() {
                           updatePreviewFiscalField(
                             editingXmlFiscalProduct.tempId,
                             "cfop",
+                            e.target.value
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>CEST</Label>
+                      <Input
+                        value={editingXmlFiscalProduct.cest || ""}
+                        onChange={(e) =>
+                          updatePreviewFiscalField(
+                            editingXmlFiscalProduct.tempId,
+                            "cest",
                             e.target.value
                           )
                         }
@@ -2506,8 +2532,8 @@ export default function Inventory() {
                     <div>
                       <Label>V. desconto (R$)</Label>
                       <Input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={editingXmlFiscalProduct.discountValue}
                         onChange={(e) =>
                           updatePreviewFiscalField(
@@ -2521,8 +2547,8 @@ export default function Inventory() {
                     <div>
                       <Label>BC ICMS (R$)</Label>
                       <Input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={editingXmlFiscalProduct.bcIcmsValue}
                         onChange={(e) =>
                           updatePreviewFiscalField(
@@ -2536,8 +2562,8 @@ export default function Inventory() {
                     <div>
                       <Label>V. ICMS (R$)</Label>
                       <Input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={editingXmlFiscalProduct.icmsValue}
                         onChange={(e) =>
                           updatePreviewFiscalField(
@@ -2551,8 +2577,8 @@ export default function Inventory() {
                     <div>
                       <Label>V. IPI (R$)</Label>
                       <Input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={editingXmlFiscalProduct.ipiValue}
                         onChange={(e) =>
                           updatePreviewFiscalField(
@@ -2566,8 +2592,8 @@ export default function Inventory() {
                     <div>
                       <Label>Aliq. ICMS (%)</Label>
                       <Input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={editingXmlFiscalProduct.icmsAliquot}
                         onChange={(e) =>
                           updatePreviewFiscalField(
@@ -2581,8 +2607,8 @@ export default function Inventory() {
                     <div>
                       <Label>Aliq. IPI (%)</Label>
                       <Input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={editingXmlFiscalProduct.ipiAliquot}
                         onChange={(e) =>
                           updatePreviewFiscalField(
@@ -2596,8 +2622,8 @@ export default function Inventory() {
                     <div>
                       <Label>V. ICMS ST (R$)</Label>
                       <Input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={editingXmlFiscalProduct.icmsStValue}
                         onChange={(e) =>
                           updatePreviewFiscalField(
@@ -2658,7 +2684,7 @@ export default function Inventory() {
                   Importando...
                 </>
               ) : (
-                <>Confirmar ImportaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o ({xmlPreviewProducts.length} produtos)</>
+                <>Confirmar Importação ({xmlPreviewProducts.length} produtos)</>
               )}
             </Button>
           </DialogFooter>
