@@ -3083,26 +3083,32 @@ authRouter.post("/refresh-session", async (req, res) => {
         Object.values(ROLE_TEMPLATES).map((tpl) => [tpl.name, tpl]),
       );
 
-      for (const role of companyRoles) {
-        if (!role.isSystemRole) continue;
-        const template = templateByRoleName.get(role.name);
-        if (!template) continue;
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: req.session.companyId })}, true)`,
+        );
 
-        const permissionIds = template.permissions
-          .map((permKey) => permIdByKey.get(permKey))
-          .filter((id): id is number => typeof id === "number");
+        for (const role of companyRoles) {
+          if (!role.isSystemRole) continue;
+          const template = templateByRoleName.get(role.name);
+          if (!template) continue;
 
-        await db.delete(rolePermissions).where(eq(rolePermissions.roleId, role.id));
+          const permissionIds = template.permissions
+            .map((permKey) => permIdByKey.get(permKey))
+            .filter((id): id is number => typeof id === "number");
 
-        if (permissionIds.length > 0) {
-          await db.insert(rolePermissions).values(
-            permissionIds.map((permissionId) => ({
-              roleId: role.id,
-              permissionId,
-            })),
-          );
+          await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, role.id));
+
+          if (permissionIds.length > 0) {
+            await tx.insert(rolePermissions).values(
+              permissionIds.map((permissionId) => ({
+                roleId: role.id,
+                permissionId,
+              })),
+            );
+          }
         }
-      }
+      });
     }
 
     req.session.userPermissions = await getUserPermissions(req.session.userId, req.session.roleId);
@@ -3211,12 +3217,18 @@ authRouter.put("/roles/:id/permissions", async (req, res) => {
       }
     }
 
-    await db.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
-    if (permissionIds.length > 0) {
-      await db.insert(rolePermissions).values(
-        permissionIds.map((permissionId) => ({ roleId, permissionId })),
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: req.session.companyId })}, true)`,
       );
-    }
+
+      await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+      if (permissionIds.length > 0) {
+        await tx.insert(rolePermissions).values(
+          permissionIds.map((permissionId) => ({ roleId, permissionId })),
+        );
+      }
+    });
 
     if (req.session.roleId === roleId) {
       req.session.userPermissions = await getUserPermissions(req.session.userId, roleId);

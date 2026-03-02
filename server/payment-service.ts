@@ -18,7 +18,7 @@ export type PaymentResult = {
 const lastOrderByTerminal = new Map<string, string>();
 
 const normalizeStatus = (raw: string): PaymentStatus => {
-  const value = raw.toLowerCase();
+  const value = raw.toLowerCase().trim();
   if (
     [
       "approved",
@@ -27,7 +27,21 @@ const normalizeStatus = (raw: string): PaymentStatus => {
       "paid",
       "finished",
       "closed",
-    ].includes(value)
+      "processed",
+      "completed",
+      "captured",
+      "accredited",
+      "settled",
+      "succeeded",
+      "confirmed",
+      "done",
+    ].includes(value) ||
+    value.includes("approved") ||
+    value.includes("success") ||
+    value.includes("captur") ||
+    value.includes("accredit") ||
+    value.includes("settl") ||
+    value.includes("confirm")
   ) {
     return "approved";
   }
@@ -41,7 +55,16 @@ const normalizeStatus = (raw: string): PaymentStatus => {
       "refused",
       "failure",
       "failed",
+      "expired",
+      "voided",
     ].includes(value)
+    || value.includes("reject")
+    || value.includes("declin")
+    || value.includes("denied")
+    || value.includes("cancel")
+    || value.includes("refus")
+    || value.includes("fail")
+    || value.includes("expir")
   ) {
     return "declined";
   }

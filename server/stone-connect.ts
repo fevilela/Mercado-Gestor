@@ -3,7 +3,7 @@ import type { PaymentMethod, PaymentResult } from "./payment-service";
 type StoneEnvironment = "homologacao" | "producao";
 
 const normalizeStatus = (raw: string): PaymentResult["status"] => {
-  const value = raw.toLowerCase();
+  const value = raw.toLowerCase().trim();
   if (
     [
       "approved",
@@ -12,7 +12,21 @@ const normalizeStatus = (raw: string): PaymentResult["status"] => {
       "paid",
       "finished",
       "closed",
-    ].includes(value)
+      "processed",
+      "completed",
+      "captured",
+      "accredited",
+      "settled",
+      "succeeded",
+      "confirmed",
+      "done",
+    ].includes(value) ||
+    value.includes("approved") ||
+    value.includes("success") ||
+    value.includes("captur") ||
+    value.includes("accredit") ||
+    value.includes("settl") ||
+    value.includes("confirm")
   ) {
     return "approved";
   }
@@ -26,7 +40,16 @@ const normalizeStatus = (raw: string): PaymentResult["status"] => {
       "refused",
       "failure",
       "failed",
+      "expired",
+      "voided",
     ].includes(value)
+    || value.includes("reject")
+    || value.includes("declin")
+    || value.includes("denied")
+    || value.includes("cancel")
+    || value.includes("refus")
+    || value.includes("fail")
+    || value.includes("expir")
   ) {
     return "declined";
   }
