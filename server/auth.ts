@@ -3151,6 +3151,12 @@ authRouter.get("/roles/:id/permissions", async (req, res) => {
 
     res.json(rolePerms.map((p) => p.permissionId));
   } catch (error) {
+    console.error("Get role permissions error:", {
+      roleId: req.params.id,
+      companyId: req.session.companyId,
+      userId: req.session.userId,
+      error,
+    });
     res.status(500).json({ error: "Erro ao buscar permissões do perfil" });
   }
 });
@@ -3220,6 +3226,13 @@ authRouter.put("/roles/:id/permissions", async (req, res) => {
 
     res.json({ message: "Permissões atualizadas com sucesso" });
   } catch (error) {
+    console.error("Update role permissions error:", {
+      roleId: req.params.id,
+      companyId: req.session.companyId,
+      userId: req.session.userId,
+      payload: req.body,
+      error,
+    });
     res.status(500).json({ error: "Erro ao atualizar permissões" });
   }
 });
