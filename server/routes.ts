@@ -1144,11 +1144,45 @@ export async function registerRoutes(
     }
   );
 
+  const normalizePaymentText = (value: unknown): string | null => {
+    if (value == null) return null;
+    if (typeof value === "string") {
+      const normalized = value.trim();
+      return normalized.length > 0 ? normalized : null;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (typeof value === "object") {
+      const candidate = value as Record<string, unknown>;
+      const preferred =
+        candidate.brand ??
+        candidate.name ??
+        candidate.type ??
+        candidate.id ??
+        candidate.payment_method_id ??
+        candidate.payment_method;
+      if (typeof preferred === "string") {
+        const normalized = preferred.trim();
+        return normalized.length > 0 ? normalized : null;
+      }
+      if (typeof preferred === "number" || typeof preferred === "boolean") {
+        return String(preferred);
+      }
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
   const paymentInfoSchema = z.object({
     status: z.enum(["approved", "declined", "processing"]),
     nsu: z.string().optional().nullable(),
-    brand: z.string().optional().nullable(),
-    provider: z.string().optional().nullable(),
+    brand: z.unknown().optional().nullable(),
+    provider: z.unknown().optional().nullable(),
     authorizationCode: z.string().optional().nullable(),
     providerReference: z.string().optional().nullable(),
   });
@@ -1680,8 +1714,8 @@ export async function registerRoutes(
           userId,
           paymentStatus: payment.status,
           paymentNsu: payment.nsu || null,
-          paymentBrand: payment.brand || null,
-          paymentProvider: payment.provider || null,
+          paymentBrand: normalizePaymentText(payment.brand),
+          paymentProvider: normalizePaymentText(payment.provider),
           paymentAuthorization: payment.authorizationCode || null,
           paymentReference: payment.providerReference || null,
           nfceStatus: isNfceAuto ? "Pendente" : "Pendente Fiscal",
