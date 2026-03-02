@@ -1533,7 +1533,14 @@ router.post(
               valorUnitario: Number(item.unitPrice),
               valorTotal: Number(item.subtotal),
             })),
-            pagamento: { codigo: paymentCode, valor: Number(sale.total) },
+            pagamento: {
+              codigo: paymentCode,
+              valor: Number(sale.total),
+              brand: sale.paymentBrand || null,
+              authorizationCode: sale.paymentAuthorization || null,
+              nsu: sale.paymentNsu || null,
+              providerReference: sale.paymentReference || null,
+            },
             crt: settings.crt || "1",
             dest: {
               cpfCnpj: customerCpfCnpj || null,

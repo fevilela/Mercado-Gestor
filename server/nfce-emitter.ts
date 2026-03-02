@@ -192,6 +192,48 @@ export const mapPaymentCode = (code?: string | null, type?: string | null) => {
   }
 };
 
+const isCardPaymentCode = (code?: string | null) => {
+  const normalized = String(code || "").trim();
+  return normalized === "03" || normalized === "04";
+};
+
+const mapCardBrandToBand = (rawBrand?: string | null) => {
+  const value = normalizeText(rawBrand).toLowerCase();
+  if (!value) return "99";
+  if (value.includes("visa")) return "01";
+  if (value.includes("master")) return "02";
+  if (value.includes("american") || value.includes("amex")) return "03";
+  if (value.includes("sorocred")) return "04";
+  if (value.includes("diners")) return "05";
+  if (value.includes("elo")) return "06";
+  if (value.includes("hipercard")) return "07";
+  if (value.includes("aura")) return "08";
+  if (value.includes("cabal")) return "09";
+  return "99";
+};
+
+const resolveCardBrand = (rawBrand?: string | null) => {
+  const source = String(rawBrand || "").trim();
+  if (!source) return "";
+  try {
+    const parsed = JSON.parse(source) as Record<string, unknown>;
+    const candidate =
+      parsed?.id ??
+      parsed?.brand ??
+      parsed?.name ??
+      parsed?.payment_method_id ??
+      "";
+    return String(candidate || source).trim();
+  } catch {
+    return source;
+  }
+};
+
+const normalizeCardAuth = (value?: string | null) =>
+  normalizeText(value)
+    .replace(/[^A-Za-z0-9]/g, "")
+    .slice(0, 128);
+
 export const buildNfceXml = (params: {
   key: string;
   cNF: string;
@@ -226,7 +268,14 @@ export const buildNfceXml = (params: {
     valorUnitario: number;
     valorTotal: number;
   }>;
-  pagamento: { codigo: string; valor: number };
+  pagamento: {
+    codigo: string;
+    valor: number;
+    brand?: string | null;
+    authorizationCode?: string | null;
+    nsu?: string | null;
+    providerReference?: string | null;
+  };
   crt?: string | null;
   dest?: {
     cpfCnpj?: string | null;
@@ -330,6 +379,17 @@ export const buildNfceXml = (params: {
 
   const xPagXml =
     params.pagamento.codigo === "99" ? "<xPag>OUTROS</xPag>" : "";
+  const cardBrand = resolveCardBrand(params.pagamento.brand);
+  const cardBand = mapCardBrandToBand(cardBrand);
+  const cardAuth =
+    normalizeCardAuth(params.pagamento.authorizationCode) ||
+    normalizeCardAuth(params.pagamento.nsu) ||
+    normalizeCardAuth(params.pagamento.providerReference);
+  const cardXml = isCardPaymentCode(params.pagamento.codigo)
+    ? `<card><tpIntegra>2</tpIntegra><tBand>${cardBand}</tBand>${
+        cardAuth ? `<cAut>${cardAuth}</cAut>` : ""
+      }</card>`
+    : "";
 
   return `<?xml version="1.0" encoding="UTF-8"?><NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe${params.key}" versao="4.00"><ide><cUF>${cUF}</cUF><cNF>${params.cNF}</cNF><natOp>Venda</natOp><mod>65</mod><serie>${serie}</serie><nNF>${nNF}</nNF><dhEmi>${dhEmi}</dhEmi><tpNF>1</tpNF><idDest>${idDest}</idDest><cMunFG>${municipioCodigo}</cMunFG><tpImp>4</tpImp><tpEmis>${tpEmis}</tpEmis><cDV>${params.key.slice(-1)}</cDV><tpAmb>${tpAmb}</tpAmb><finNFe>1</finNFe><indFinal>1</indFinal><indPres>1</indPres><indIntermed>0</indIntermed><procEmi>0</procEmi><verProc>1.0.0</verProc></ide><emit><CNPJ>${onlyDigits(
     params.emitente.cnpj,
@@ -355,7 +415,7 @@ export const buildNfceXml = (params: {
     params.pagamento.codigo
   }</tPag>${xPagXml}<vPag>${formatNumber(
     params.pagamento.valor,
-  )}</vPag></detPag>${
+  )}</vPag>${cardXml}</detPag>${
     vTrocoValue > 0 ? `<vTroco>${formatNumber(vTrocoValue)}</vTroco>` : ""
   }</pag>${respTecXml}</infNFe></NFe>`;
 };
