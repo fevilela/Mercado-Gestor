@@ -3211,14 +3211,12 @@ authRouter.put("/roles/:id/permissions", async (req, res) => {
       }
     }
 
-    await db.transaction(async (tx) => {
-      await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
-      if (permissionIds.length > 0) {
-        await tx.insert(rolePermissions).values(
-          permissionIds.map((permissionId) => ({ roleId, permissionId })),
-        );
-      }
-    });
+    await db.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+    if (permissionIds.length > 0) {
+      await db.insert(rolePermissions).values(
+        permissionIds.map((permissionId) => ({ roleId, permissionId })),
+      );
+    }
 
     if (req.session.roleId === roleId) {
       req.session.userPermissions = await getUserPermissions(req.session.userId, roleId);
