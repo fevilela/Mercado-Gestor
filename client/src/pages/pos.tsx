@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import {
   ArrowLeft,
   Search,
@@ -114,6 +114,8 @@ export default function POS() {
   const [showCancelReceipt, setShowCancelReceipt] = useState(false);
   const [showPixQrDialog, setShowPixQrDialog] = useState(false);
   const [showTerminalActionDialog, setShowTerminalActionDialog] = useState(false);
+  const [showExitPdvDialog, setShowExitPdvDialog] = useState(false);
+  const [exitPdvPassword, setExitPdvPassword] = useState("");
   const [terminalLockActive, setTerminalLockActive] = useState(false);
   const [terminalLockReference, setTerminalLockReference] = useState<
     string | null
@@ -595,6 +597,21 @@ export default function POS() {
     },
   });
 
+  const verifyExitPasswordMutation = useMutation({
+    mutationFn: async (password: string) => {
+      const res = await fetch("/api/auth/verify-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Senha invalida");
+      }
+      return res.json();
+    },
+  });
+
   const addToCart = useCallback((product: any) => {
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
@@ -817,6 +834,10 @@ export default function POS() {
         description: `Forma: ${method.name}`,
         className: "bg-emerald-500 text-white border-none",
       });
+      void handleFinishSale({
+        status: "approved",
+        provider: "manual",
+      });
       return;
     }
 
@@ -919,6 +940,7 @@ export default function POS() {
               : "Pagamento autorizado.",
             className: "bg-emerald-500 text-white border-none",
           });
+          void handleFinishSale(authResult);
           return;
         }
 
@@ -1007,6 +1029,7 @@ export default function POS() {
                 : "Pagamento autorizado.",
               className: "bg-emerald-500 text-white border-none",
             });
+            void handleFinishSale(statusResult);
             return;
           }
 
@@ -1079,7 +1102,11 @@ export default function POS() {
     }
   };
 
-  const handleFinishSale = async () => {
+  const handleFinishSale = async (approvedPayment?: PaymentResult | null) => {
+    if (isFinishing) {
+      return;
+    }
+
     if (terminalLockActive) {
       toast({
         title: "PDV bloqueado",
@@ -1100,7 +1127,8 @@ export default function POS() {
       return;
     }
 
-    if (paymentStatus !== "approved" || !paymentResult) {
+    const effectivePayment = approvedPayment ?? paymentResult;
+    if (!effectivePayment || effectivePayment.status !== "approved") {
       toast({
         title: "Pagamento pendente",
         description: "A venda so pode ser finalizada com pagamento aprovado.",
@@ -1129,12 +1157,12 @@ export default function POS() {
         subtotal: (parseFloat(item.product.price) * item.qty).toFixed(2),
       })),
       payment: {
-        status: paymentResult.status,
-        nsu: paymentResult.nsu || null,
-        brand: paymentResult.brand || null,
-        provider: paymentResult.provider || null,
-        authorizationCode: paymentResult.authorizationCode || null,
-        providerReference: paymentResult.providerReference || null,
+        status: effectivePayment.status,
+        nsu: effectivePayment.nsu || null,
+        brand: effectivePayment.brand || null,
+        provider: effectivePayment.provider || null,
+        authorizationCode: effectivePayment.authorizationCode || null,
+        providerReference: effectivePayment.providerReference || null,
       },
     };
 
@@ -1288,6 +1316,37 @@ export default function POS() {
     setShowCancelReceipt(false);
     setCancelledItems([]);
     setCancelledTotal(0);
+  };
+
+  const handleRequestExitPdv = () => {
+    setExitPdvPassword("");
+    setShowExitPdvDialog(true);
+  };
+
+  const handleConfirmExitPdv = async () => {
+    const password = String(exitPdvPassword || "").trim();
+    if (!password) {
+      toast({
+        title: "Senha obrigatoria",
+        description: "Informe a senha para sair do PDV.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await verifyExitPasswordMutation.mutateAsync(password);
+      setShowExitPdvDialog(false);
+      setExitPdvPassword("");
+      setLocation("/");
+    } catch (error) {
+      toast({
+        title: "Senha incorreta",
+        description:
+          error instanceof Error ? error.message : "Nao foi possivel validar a senha.",
+        variant: "destructive",
+      });
+    }
   };
 
   const subtotal = cart.reduce(
@@ -1469,15 +1528,15 @@ export default function POS() {
         {/* Cart Header */}
         <div className="h-12 border-b border-border flex items-center justify-between px-4 bg-primary text-primary-foreground">
           <div className="flex items-center gap-2.5">
-            <Link href="/">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-primary-foreground hover:bg-primary-foreground/20"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-            </Link>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-primary-foreground hover:bg-primary-foreground/20"
+              onClick={handleRequestExitPdv}
+              data-testid="button-request-exit-pdv"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
             <div className="flex items-center gap-1.5 font-bold text-[15px]">
               <User className="h-4 w-4" />
               <span>Consumidor Final</span>
@@ -1688,7 +1747,7 @@ export default function POS() {
                 <Button size="lg" variant="outline" className="h-10 gap-2 rounded-xl border-[#cfd6e6] bg-white text-[13px] text-[#4d5871] hover:bg-white/80" disabled={cart.length === 0} onClick={() => setShowCancelDialog(true)} data-testid="button-cancel-sale">
                   <Ban className="h-4 w-4" />Cancelar venda
                 </Button>
-                <Button size="lg" className="h-10 gap-2 rounded-xl bg-[linear-gradient(90deg,#43bc74_0%,#1fa16f_100%)] text-[13px] font-semibold" disabled={cart.length === 0 || paymentStatus !== "approved"} onClick={handleFinishSale} data-testid="button-finish-sale">
+                <Button size="lg" className="h-10 gap-2 rounded-xl bg-[linear-gradient(90deg,#43bc74_0%,#1fa16f_100%)] text-[13px] font-semibold" disabled={cart.length === 0 || paymentStatus !== "approved" || isFinishing} onClick={() => void handleFinishSale()} data-testid="button-finish-sale">
                   Finalizar venda<FileCheck className="h-4 w-4" />
                 </Button>
               </div>
@@ -1816,7 +1875,7 @@ export default function POS() {
                   </div>
                 )}
                 <div className="mt-2">
-                  <Button size="lg" className="h-9 w-full gap-1.5 rounded-xl bg-[linear-gradient(90deg,#43bc74_0%,#1fa16f_100%)] text-[13px] font-semibold" disabled={cart.length === 0 || paymentStatus !== "approved"} onClick={handleFinishSale} data-testid="button-finish-sale">
+                  <Button size="lg" className="h-9 w-full gap-1.5 rounded-xl bg-[linear-gradient(90deg,#43bc74_0%,#1fa16f_100%)] text-[13px] font-semibold" disabled={cart.length === 0 || paymentStatus !== "approved" || isFinishing} onClick={() => void handleFinishSale()} data-testid="button-finish-sale">
                     Finalizar venda<FileCheck className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -2136,6 +2195,50 @@ export default function POS() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={showExitPdvDialog} onOpenChange={setShowExitPdvDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Senha para sair do PDV</DialogTitle>
+            <DialogDescription>
+              Informe sua senha para encerrar a tela do PDV.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            type="password"
+            value={exitPdvPassword}
+            onChange={(e) => setExitPdvPassword(e.target.value)}
+            placeholder="Digite sua senha"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void handleConfirmExitPdv();
+              }
+            }}
+            data-testid="input-exit-pdv-password"
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowExitPdvDialog(false);
+                setExitPdvPassword("");
+              }}
+              disabled={verifyExitPasswordMutation.isPending}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => void handleConfirmExitPdv()}
+              disabled={verifyExitPasswordMutation.isPending}
+              data-testid="button-confirm-exit-pdv"
+            >
+              {verifyExitPasswordMutation.isPending ? "Validando..." : "Sair do PDV"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={terminalLockActive}>
         <DialogContent
           className="sm:max-w-lg"
@@ -2310,12 +2413,10 @@ export default function POS() {
               </p>
             </div>
             <div className="flex gap-4 justify-center">
-              <Link href="/">
-                <Button variant="outline" size="lg">
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Voltar
-                </Button>
-              </Link>
+              <Button variant="outline" size="lg" onClick={() => setLocation("/")}>
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Voltar
+              </Button>
               {hasPermission("pos:cash_open") ? (
                 <Button size="lg" onClick={() => setShowOpenCashDialog(true)}>
                   <Wallet className="mr-2 h-4 w-4" />

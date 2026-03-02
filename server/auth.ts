@@ -3002,6 +3002,9 @@ const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(6),
 });
+const verifyPasswordSchema = z.object({
+  password: z.string().min(1),
+});
 
 authRouter.post("/change-password", async (req, res) => {
   if (!req.session.userId) {
@@ -3041,6 +3044,39 @@ authRouter.post("/change-password", async (req, res) => {
       return res.status(400).json({ error: "Dados inválidos" });
     }
     res.status(500).json({ error: "Erro ao alterar senha" });
+  }
+});
+
+authRouter.post("/verify-password", async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: "NÃ£o autenticado" });
+  }
+
+  try {
+    const { password } = verifyPasswordSchema.parse(req.body);
+
+    const [user] = await db
+      .select({ id: users.id, password: users.password })
+      .from(users)
+      .where(eq(users.id, req.session.userId))
+      .limit(1);
+
+    if (!user) {
+      return res.status(404).json({ error: "UsuÃ¡rio nÃ£o encontrado" });
+    }
+
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(401).json({ error: "Senha incorreta" });
+    }
+
+    res.json({ valid: true });
+  } catch (error) {
+    console.error("Verify password error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invÃ¡lidos" });
+    }
+    res.status(500).json({ error: "Erro ao validar senha" });
   }
 });
 
