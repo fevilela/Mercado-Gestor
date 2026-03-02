@@ -3127,7 +3127,21 @@ authRouter.get("/roles/:id/permissions", async (req, res) => {
       return res.status(403).json({ error: "Sem permissão para esta ação" });
     }
 
-    const roleId = parseInt(req.params.id);
+    const roleId = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(roleId)) {
+      return res.status(400).json({ error: "Perfil invalido" });
+    }
+
+    const [targetRole] = await db
+      .select({ id: roles.id })
+      .from(roles)
+      .where(and(eq(roles.id, roleId), eq(roles.companyId, req.session.companyId)))
+      .limit(1);
+
+    if (!targetRole) {
+      return res.status(404).json({ error: "Perfil nao encontrado" });
+    }
+
     const rolePerms = await db
       .select({
         permissionId: rolePermissions.permissionId,
@@ -3152,13 +3166,56 @@ authRouter.put("/roles/:id/permissions", async (req, res) => {
       return res.status(403).json({ error: "Sem permissão para esta ação" });
     }
 
-    const roleId = parseInt(req.params.id);
-    const { permissionIds } = req.body as { permissionIds: number[] };
+    const roleId = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(roleId)) {
+      return res.status(400).json({ error: "Perfil invalido" });
+    }
 
-    await db.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+    const payload = req.body as { permissionIds?: unknown };
+    if (!Array.isArray(payload.permissionIds)) {
+      return res.status(400).json({ error: "permissionIds invalido" });
+    }
 
-    for (const permissionId of permissionIds) {
-      await db.insert(rolePermissions).values({ roleId, permissionId });
+    const permissionIds = Array.from(
+      new Set(
+        payload.permissionIds
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+
+    const [targetRole] = await db
+      .select({ id: roles.id })
+      .from(roles)
+      .where(and(eq(roles.id, roleId), eq(roles.companyId, req.session.companyId)))
+      .limit(1);
+
+    if (!targetRole) {
+      return res.status(404).json({ error: "Perfil nao encontrado" });
+    }
+
+    if (permissionIds.length > 0) {
+      const validPermissionRows = await db
+        .select({ id: permissions.id })
+        .from(permissions)
+        .where(inArray(permissions.id, permissionIds));
+      const validIds = new Set(validPermissionRows.map((row) => row.id));
+      if (validIds.size !== permissionIds.length) {
+        return res.status(400).json({ error: "Permissoes invalidas no payload" });
+      }
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
+      if (permissionIds.length > 0) {
+        await tx.insert(rolePermissions).values(
+          permissionIds.map((permissionId) => ({ roleId, permissionId })),
+        );
+      }
+    });
+
+    if (req.session.roleId === roleId) {
+      req.session.userPermissions = await getUserPermissions(req.session.userId, roleId);
     }
 
     res.json({ message: "Permissões atualizadas com sucesso" });
@@ -3166,7 +3223,7 @@ authRouter.put("/roles/:id/permissions", async (req, res) => {
     res.status(500).json({ error: "Erro ao atualizar permissões" });
   }
 });
-
 export { authRouter, getUserPermissions, initializePermissions };
+
 
 

@@ -160,6 +160,7 @@ export default function Users() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/roles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
       toast({ title: "Permissoes atualizadas com sucesso!" });
       setPermDialogOpen(false);
       setSelectedRole(null);
@@ -310,7 +311,7 @@ export default function Users() {
     if (selectedRole && !isLoadingRolePerms) {
       setSelectedPermissions(rolePermissions);
     }
-  }, [selectedRole?.id, isLoadingRolePerms]);
+  }, [selectedRole, rolePermissions, isLoadingRolePerms]);
 
   const openPermissionDialog = async (role: Role) => {
     setSelectedRole(role);
