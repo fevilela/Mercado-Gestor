@@ -447,15 +447,21 @@ export const storage = {
   },
 
   async createSale(saleData: InsertSale, items: InsertSaleItem[]) {
-    const [sale] = await db.insert(sales).values(saleData).returning();
-    if (items.length > 0) {
-      const itemsWithSaleId = items.map((item) => ({
-        ...item,
-        saleId: sale.id,
-      }));
-      await db.insert(saleItems).values(itemsWithSaleId);
-    }
-    return sale;
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: saleData.companyId })}, true)`,
+      );
+
+      const [sale] = await tx.insert(sales).values(saleData).returning();
+      if (items.length > 0) {
+        const itemsWithSaleId = items.map((item) => ({
+          ...item,
+          saleId: sale.id,
+        }));
+        await tx.insert(saleItems).values(itemsWithSaleId);
+      }
+      return sale;
+    });
   },
 
   async updateSaleNfceStatus(

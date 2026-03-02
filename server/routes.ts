@@ -1740,6 +1740,12 @@ export async function registerRoutes(
         if (error instanceof z.ZodError) {
           return res.status(400).json({ error: error.errors });
         }
+        console.error("Create sale error:", {
+          companyId: getCompanyId(req),
+          userId: getUserId(req),
+          body: req.body,
+          error,
+        });
         res.status(500).json({ error: "Failed to create sale" });
       }
     }
