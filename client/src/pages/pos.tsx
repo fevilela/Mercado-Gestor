@@ -944,12 +944,41 @@ export default function POS() {
             : "Aguardando confirmacao do terminal.",
       });
 
-      if (
-        result &&
-        result.provider === "mercadopago" &&
-        result.providerReference &&
-        result.status === "processing"
-      ) {
+      if (result && result.status === "processing") {
+        const provider = String(result.provider || "").toLowerCase();
+        const providerReference = String(result.providerReference || "").trim();
+        if (!providerReference) {
+          setPaymentStatus("error");
+          setShowPixQrDialog(false);
+          setShowTerminalActionDialog(false);
+          toast({
+            title: "Referencia de pagamento ausente",
+            description:
+              "A maquininha nao retornou o identificador da transacao. Tente novamente.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const statusEndpoint =
+          provider === "mercadopago"
+            ? `/api/payments/mercadopago/status/${encodeURIComponent(providerReference)}`
+            : provider === "stone"
+              ? `/api/payments/stone/status/${encodeURIComponent(providerReference)}`
+              : null;
+
+        if (!statusEndpoint) {
+          setPaymentStatus("error");
+          setShowPixQrDialog(false);
+          setShowTerminalActionDialog(false);
+          toast({
+            title: "Provedor sem monitoramento",
+            description: `O provedor "${provider || "desconhecido"}" nao tem consulta de status configurada.`,
+            variant: "destructive",
+          });
+          return;
+        }
+
         const maxAttempts = Math.ceil(
           PAYMENT_TIMEOUT_MS / PAYMENT_POLL_INTERVAL_MS
         );
@@ -958,15 +987,9 @@ export default function POS() {
             return;
           }
           await sleep(PAYMENT_POLL_INTERVAL_MS);
-          const statusRes = await fetch(
-            `/api/payments/mercadopago/status/${encodeURIComponent(
-              result.providerReference
-            )}`
-            ,
-            {
-              cache: "no-store",
-            }
-          );
+          const statusRes = await fetch(statusEndpoint, {
+            cache: "no-store",
+          });
           if (!statusRes.ok) {
             continue;
           }
@@ -1001,30 +1024,32 @@ export default function POS() {
         }
 
         let autoCancelled = false;
-        const cancelRes = await fetch("/api/payments/mercadopago/cancel", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            providerReference: result.providerReference,
-          }),
-        }).catch(() => null);
-        if (cancelRes?.ok) {
-          const cancelBody = await cancelRes.json().catch(() => ({}));
-          autoCancelled = Boolean(cancelBody?.ok || cancelBody?.cancelled);
-        }
-
-        if (!autoCancelled) {
-          const clearRes = await fetch("/api/payments/mercadopago/clear-queue", {
+        if (provider === "mercadopago") {
+          const cancelRes = await fetch("/api/payments/mercadopago/cancel", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              providerReference: result.providerReference,
-              terminalId: selectedMpTerminalRef || undefined,
+              providerReference,
             }),
           }).catch(() => null);
-          if (clearRes?.ok) {
-            const clearBody = await clearRes.json().catch(() => ({}));
-            autoCancelled = Boolean(clearBody?.ok || clearBody?.cleared);
+          if (cancelRes?.ok) {
+            const cancelBody = await cancelRes.json().catch(() => ({}));
+            autoCancelled = Boolean(cancelBody?.ok || cancelBody?.cancelled);
+          }
+
+          if (!autoCancelled) {
+            const clearRes = await fetch("/api/payments/mercadopago/clear-queue", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                providerReference,
+                terminalId: selectedMpTerminalRef || undefined,
+              }),
+            }).catch(() => null);
+            if (clearRes?.ok) {
+              const clearBody = await clearRes.json().catch(() => ({}));
+              autoCancelled = Boolean(clearBody?.ok || clearBody?.cleared);
+            }
           }
         }
 
