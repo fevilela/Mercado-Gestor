@@ -1189,7 +1189,7 @@ export async function registerRoutes(
 
   const createSaleRequestSchema = z.object({
     sale: insertSaleSchema,
-    items: z.array(insertSaleItemSchema.omit({ saleId: true })),
+    items: z.array(insertSaleItemSchema.omit({ saleId: true })).min(1),
     payment: paymentInfoSchema,
   });
 
@@ -1662,6 +1662,16 @@ export async function registerRoutes(
             return res.status(409).json({
               error:
                 "Ja existe uma cobranca pendente nesta maquininha. Finalize ou cancele no terminal antes de tentar novamente.",
+            });
+          }
+          if (
+            msg.includes("property_value") ||
+            msg.includes("invalid value for property") ||
+            msg.includes("status 400")
+          ) {
+            return res.status(400).json({
+              error:
+                "Dados de pagamento invalidados pela maquininha/provedor. Revise terminal, metodo (credito/debito) e configuracoes do Mercado Pago.",
             });
           }
           if (msg.includes("nao autorizado") || msg.includes("declined") || msg.includes("rejected")) {

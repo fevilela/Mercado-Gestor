@@ -2240,6 +2240,14 @@ export default function FiscalDocuments() {
     return "Pendente";
   };
 
+  const extractNfceNumberFromKey = (key?: string | null) => {
+    const digits = String(key || "").replace(/\D/g, "");
+    if (digits.length !== 44) return "-";
+    const numberPart = digits.slice(25, 34);
+    const normalized = Number.parseInt(numberPart, 10);
+    return Number.isFinite(normalized) ? String(normalized) : numberPart;
+  };
+
   const toggleSelectNfce = (saleId: number, checked: boolean) => {
     if (checked) {
       setSelectedNfceIds((prev) => [...prev, saleId]);
@@ -3482,6 +3490,7 @@ export default function FiscalDocuments() {
                       <TableRow>
                         <TableHead className="w-8" />
                         <TableHead>ID</TableHead>
+                        <TableHead>Número NFC-e</TableHead>
                         <TableHead>Cliente</TableHead>
                         <TableHead>Valor</TableHead>
                         <TableHead>Status</TableHead>
@@ -3493,13 +3502,13 @@ export default function FiscalDocuments() {
                     <TableBody>
                       {isLoadingSales ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center">
+                          <TableCell colSpan={9} className="text-center">
                             Carregando NFC-e...
                           </TableCell>
                         </TableRow>
                       ) : nfceSales.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={8} className="text-center">
+                          <TableCell colSpan={9} className="text-center">
                             Nenhuma NFC-e encontrada
                           </TableCell>
                         </TableRow>
@@ -3524,6 +3533,9 @@ export default function FiscalDocuments() {
                                 />
                               </TableCell>
                               <TableCell>{sale.id}</TableCell>
+                              <TableCell>
+                                {extractNfceNumberFromKey(sale.nfceKey)}
+                              </TableCell>
                               <TableCell>{sale.customerName}</TableCell>
                               <TableCell>
                                 R$ {parseFloat(sale.total).toFixed(2)}

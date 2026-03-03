@@ -1048,6 +1048,14 @@ export default function FiscalCentralPage() {
     });
   };
 
+  const extractNfceNumberFromKey = (key?: string | null) => {
+    const digits = String(key || "").replace(/\D/g, "");
+    if (digits.length !== 44) return "-";
+    const numberPart = digits.slice(25, 34);
+    const normalized = Number.parseInt(numberPart, 10);
+    return Number.isFinite(normalized) ? String(normalized) : numberPart;
+  };
+
   const badgeForStatus = (status: string) => {
     const normalized = String(status || "").toLowerCase();
     if (normalized.includes("cancel")) {
@@ -1254,6 +1262,7 @@ export default function FiscalCentralPage() {
       const matchesQuery =
         !query ||
         String(sale.id).includes(query) ||
+        extractNfceNumberFromKey(sale.nfceKey).toLowerCase().includes(query) ||
         String(sale.customerName || "").toLowerCase().includes(query) ||
         String(sale.nfceKey || "").toLowerCase().includes(query) ||
         String(sale.nfceProtocol || "").toLowerCase().includes(query) ||
@@ -1686,6 +1695,7 @@ export default function FiscalCentralPage() {
                             />
                           </TableHead>
                           <TableHead>Venda</TableHead>
+                          <TableHead>Número NFC-e</TableHead>
                           <TableHead>Cliente</TableHead>
                           <TableHead>Total</TableHead>
                           <TableHead>Chave</TableHead>
@@ -1723,6 +1733,9 @@ export default function FiscalCentralPage() {
                               </TableCell>
                               <TableCell className="font-medium">
                                 #{sale.id}
+                              </TableCell>
+                              <TableCell>
+                                {extractNfceNumberFromKey(sale.nfceKey)}
                               </TableCell>
                               <TableCell>{sale.customerName || "Consumidor"}</TableCell>
                               <TableCell>{formatCurrency(sale.total)}</TableCell>

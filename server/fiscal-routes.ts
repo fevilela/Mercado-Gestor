@@ -1312,6 +1312,23 @@ router.post(
         try {
           const diagnostics = await buildDiagnostics();
           const items = await storage.getSaleItems(saleId);
+          if (!items.length) {
+            await storage.updateSaleNfceStatus(
+              saleId,
+              companyId,
+              "Pendente Fiscal",
+              sale.nfceProtocol || undefined,
+              sale.nfceKey || undefined,
+              "Venda sem itens. Reabra a venda no PDV e finalize novamente.",
+            );
+            results.push({
+              id: saleId,
+              success: false,
+              error:
+                "Venda sem itens para emissao da NFC-e. Reabra a venda no PDV e finalize novamente.",
+            });
+            continue;
+          }
           const resolvedItems = await Promise.all(
             items.map(async (item) => {
               const product = await storage.getProduct(

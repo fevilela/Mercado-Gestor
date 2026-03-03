@@ -327,81 +327,110 @@ const authorizeMercadoPago = async (
     throw new Error("POS ID do Mercado Pago nao informado");
   }
   const createUrl = "https://api.mercadopago.com/v1/orders";
-  const paymentMethodConfig =
+  const paymentMethodVariants: Array<Record<string, any>> =
     method === "pix"
-      ? {
-          default_type: mapPaymentType(method),
-        }
-      : {
-          default_type: mapPaymentType(method),
-          default_installments: 1,
-          installments_cost: "seller",
-        };
+      ? [{ default_type: mapPaymentType(method) }]
+      : method === "credito"
+        ? [
+            {
+              default_type: "credit_card",
+              default_installments: 1,
+              installments_cost: "seller",
+            },
+            {
+              default_type: "credit",
+              default_installments: 1,
+              installments_cost: "seller",
+            },
+          ]
+        : [
+            {
+              default_type: "debit_card",
+            },
+            {
+              default_type: "debit",
+            },
+          ];
   const wait = (ms: number) =>
     new Promise((resolve) => setTimeout(resolve, ms));
 
   let createRes: Response | null = null;
   let createErrorMessage = "";
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const externalReference = `pdv-${Date.now()}-${attempt}`;
-    const idempotencyKey = `${resolvedTerminalId}-${externalReference}`;
-    const payload = {
-      type: "point",
-      external_reference: externalReference,
-      expiration_time: "PT15M",
-      description,
-      transactions: {
-        payments: [
-          {
-            amount: amount.toFixed(2),
-          },
-        ],
-      },
-      config: {
-        point: {
-          terminal_id: resolvedTerminalId,
-          print_on_terminal: "no_ticket",
+    for (let variantIndex = 0; variantIndex < paymentMethodVariants.length; variantIndex++) {
+      const paymentMethodConfig = paymentMethodVariants[variantIndex];
+      const externalReference = `pdv-${Date.now()}-${attempt}-${variantIndex + 1}`;
+      const idempotencyKey = `${resolvedTerminalId}-${externalReference}`;
+      const payload = {
+        type: "point",
+        external_reference: externalReference,
+        expiration_time: "PT15M",
+        description,
+        transactions: {
+          payments: [
+            {
+              amount: amount.toFixed(2),
+            },
+          ],
         },
-        payment_method: paymentMethodConfig,
-      },
-    };
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "X-Idempotency-Key": idempotencyKey,
-    };
-    createRes = await fetch(createUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-    });
+        config: {
+          point: {
+            terminal_id: resolvedTerminalId,
+            print_on_terminal: "no_ticket",
+          },
+          payment_method: paymentMethodConfig,
+        },
+      };
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Idempotency-Key": idempotencyKey,
+      };
+      createRes = await fetch(createUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
 
-    if (createRes.ok) break;
+      if (createRes.ok) break;
 
-    const raw = await createRes.text().catch(() => "");
-    const data = parseProviderBody(raw);
-    const firstCode = String(data?.errors?.[0]?.code || "").trim();
-    const message =
-      [firstCode, String(data?.errors?.[0]?.message || "").trim()]
-        .filter(Boolean)
-        .join(" - ") || raw.slice(0, 240).trim();
-    createErrorMessage = message
-      ? `${message} (status ${createRes.status})`
-      : `Pagamento nao autorizado (status ${createRes.status})`;
+      const raw = await createRes.text().catch(() => "");
+      const data = parseProviderBody(raw);
+      const firstCode = String(data?.errors?.[0]?.code || "").trim();
+      const firstMessage = String(data?.errors?.[0]?.message || "").trim();
+      const firstDetail = String(data?.errors?.[0]?.details?.[0] || "").trim();
+      const message =
+        [firstCode, firstMessage, firstDetail]
+          .filter(Boolean)
+          .join(" - ") || raw.slice(0, 240).trim();
+      createErrorMessage = message
+        ? `${message} (status ${createRes.status})`
+        : `Pagamento nao autorizado (status ${createRes.status})`;
 
-    const isQueuedOrder =
-      createRes.status === 409 &&
-      firstCode.toLowerCase() === "already_queued_order_on_terminal";
-    if (isQueuedOrder && attempt < 3) {
-      const previousOrderId = lastOrderByTerminal.get(resolvedTerminalId);
-      if (previousOrderId) {
-        await cancelMercadoPagoOrder(token, previousOrderId).catch(() => false);
+      const isQueuedOrder =
+        createRes.status === 409 &&
+        firstCode.toLowerCase() === "already_queued_order_on_terminal";
+      if (isQueuedOrder && attempt < 3) {
+        const previousOrderId = lastOrderByTerminal.get(resolvedTerminalId);
+        if (previousOrderId) {
+          await cancelMercadoPagoOrder(token, previousOrderId).catch(() => false);
+        }
+        await wait(2500);
+        break;
       }
-      await wait(2500);
-      continue;
+
+      const isPropertyValueError =
+        createRes.status === 400 && firstCode.toLowerCase() === "property_value";
+      const hasNextVariant = variantIndex < paymentMethodVariants.length - 1;
+      if (isPropertyValueError && hasNextVariant) {
+        continue;
+      }
     }
-    break;
+
+    if (createRes?.ok) {
+      break;
+    }
   }
 
   if (!createRes || !createRes.ok) {
