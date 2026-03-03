@@ -752,6 +752,16 @@ const managerCreateCompanySchema = z.object({
     })
     .optional(),
   danfeLogoUrl: z.string().optional(),
+  initialUnits: z
+    .array(
+      z.object({
+        key: z.string().min(1),
+        code: z.string().min(2).max(20),
+        name: z.string().min(2).max(120),
+      }),
+    )
+    .max(20)
+    .optional(),
   initialMachines: z
     .array(
       z.object({
@@ -760,6 +770,7 @@ const managerCreateCompanySchema = z.object({
         provider: z.enum(["mercadopago", "stone"]),
         mpTerminalId: z.string().optional(),
         stoneTerminalId: z.string().optional(),
+        unitKey: z.string().optional(),
       }),
     )
     .max(20)
@@ -775,6 +786,7 @@ const managerCreateCompanySchema = z.object({
         paymentMachineKey: z.string().optional(),
         mpTerminalId: z.string().optional(),
         stoneTerminalId: z.string().optional(),
+        unitKey: z.string().optional(),
       }),
     )
     .max(10)
@@ -968,6 +980,13 @@ function hashOnboardingCode(code: string) {
 }
 
 function normalizeTerminalCode(value?: string, fallback = "CX01") {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  return normalized || fallback;
+}
+
+function normalizeUnitCode(value?: string, fallback = "UN01") {
   const normalized = String(value || "")
     .trim()
     .toUpperCase();
@@ -1310,6 +1329,48 @@ authRouter.post("/manager/companies", async (req, res) => {
 
       await createDefaultRolesForCompany(tx, company.id);
       const defaultUnit = await ensureDefaultBusinessUnit(tx, company.id);
+      const unitIdByKey = new Map<string, number>();
+      unitIdByKey.set("DEFAULT_UNIT", defaultUnit.id);
+
+      if (Array.isArray(data.initialUnits) && data.initialUnits.length > 0) {
+        const usedCodes = new Set<string>([defaultUnit.code]);
+        const usedNames = new Set<string>([defaultUnit.name]);
+        const normalizedInitialUnits = data.initialUnits
+          .filter((u) => String(u.code || "").trim() && String(u.name || "").trim())
+          .map((u, index) => {
+            const key = String(u.key || "").trim() || `UNIT_${index + 1}`;
+            const code = normalizeUnitCode(u.code, `UN${String(index + 1).padStart(2, "0")}`);
+            const name = String(u.name || "").trim();
+            if (usedCodes.has(code)) {
+              throw new Error(`Codigo de unidade duplicado: ${code}`);
+            }
+            if (usedNames.has(name)) {
+              throw new Error(`Nome de unidade duplicado: ${name}`);
+            }
+            usedCodes.add(code);
+            usedNames.add(name);
+            return {
+              key,
+              row: {
+                companyId: company.id,
+                code,
+                name,
+                isActive: true,
+              },
+            };
+          });
+
+        if (normalizedInitialUnits.length > 0) {
+          const insertedUnits = await tx
+            .insert(businessUnits)
+            .values(normalizedInitialUnits.map((u) => u.row))
+            .returning();
+          insertedUnits.forEach((row, index) => {
+            const source = normalizedInitialUnits[index];
+            if (source?.key) unitIdByKey.set(source.key, row.id);
+          });
+        }
+      }
 
       const nfcePrintLayoutSql = data.nfcePrintLayout
         ? sql`${JSON.stringify(data.nfcePrintLayout)}::jsonb`
@@ -1386,7 +1447,9 @@ authRouter.post("/manager/companies", async (req, res) => {
             key: m.key,
             row: {
               companyId: company.id,
-              unitId: defaultUnit.id,
+              unitId:
+                (m.unitKey ? unitIdByKey.get(String(m.unitKey).trim()) : null) ||
+                defaultUnit.id,
               name: String(m.name || "").trim(),
               provider: m.provider,
               mpTerminalId: m.provider === "mercadopago" ? m.mpTerminalId || null : null,
@@ -1425,7 +1488,9 @@ authRouter.post("/manager/companies", async (req, res) => {
 
             return {
               companyId: company.id,
-              unitId: defaultUnit.id,
+              unitId:
+                (t.unitKey ? unitIdByKey.get(String(t.unitKey).trim()) : null) ||
+                defaultUnit.id,
               name: String(t.name || "").trim(),
               code,
               paymentMachineId: linkedMachineId,

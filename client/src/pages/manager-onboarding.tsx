@@ -168,7 +168,15 @@ export default function ManagerOnboarding() {
       provider: "mercadopago" | "stone";
       mpTerminalId: string;
       stoneTerminalId: string;
+      unitKey: string;
       enabled: boolean;
+    }>
+  >([]);
+  const [initialUnits, setInitialUnits] = useState<
+    Array<{
+      key: string;
+      code: string;
+      name: string;
     }>
   >([]);
   const [initialTerminals, setInitialTerminals] = useState([
@@ -176,6 +184,7 @@ export default function ManagerOnboarding() {
       enabled: true,
       name: "Caixa 1",
       code: "CX01",
+      unitKey: "DEFAULT_UNIT",
       paymentProvider: "company_default",
       paymentMachineKey: "",
       mpTerminalId: "",
@@ -185,6 +194,7 @@ export default function ManagerOnboarding() {
       enabled: false,
       name: "Caixa 2",
       code: "CX02",
+      unitKey: "DEFAULT_UNIT",
       paymentProvider: "company_default",
       paymentMachineKey: "",
       mpTerminalId: "",
@@ -251,6 +261,17 @@ export default function ManagerOnboarding() {
     },
     danfeLogoUrl: "",
   });
+
+  const initialUnitOptions = [
+    { key: "DEFAULT_UNIT", code: "MATRIZ", name: "Matriz (padrao)" },
+    ...initialUnits
+      .filter((u) => String(u.code || "").trim() && String(u.name || "").trim())
+      .map((u) => ({
+        key: u.key,
+        code: String(u.code || "").trim().toUpperCase(),
+        name: String(u.name || "").trim(),
+      })),
+  ];
 
   const loadUsers = async (query = "") => {
     setLoadingUsers(true);
@@ -424,6 +445,13 @@ export default function ManagerOnboarding() {
         cnpj: data.cnpj.replace(/\D/g, ""),
         state: data.state.toUpperCase(),
         nfcePrintLayout: data.nfcePrintLayout,
+        initialUnits: initialUnits
+          .filter((u) => String(u.code || "").trim() && String(u.name || "").trim())
+          .map((u) => ({
+            key: u.key,
+            code: String(u.code || "").trim().toUpperCase(),
+            name: String(u.name || "").trim(),
+          })),
         initialMachines: initialMachines
           .filter((m) => m.enabled && String(m.name || "").trim())
           .map((m) => ({
@@ -432,12 +460,14 @@ export default function ManagerOnboarding() {
             provider: m.provider,
             mpTerminalId: String(m.mpTerminalId || "").trim(),
             stoneTerminalId: String(m.stoneTerminalId || "").trim(),
+            unitKey: String(m.unitKey || "DEFAULT_UNIT").trim() || "DEFAULT_UNIT",
           })),
         initialTerminals: initialTerminals
           .filter((t) => t.enabled && String(t.name || "").trim())
           .map((t) => ({
             name: String(t.name || "").trim(),
             code: String(t.code || "").trim().toUpperCase(),
+            unitKey: String(t.unitKey || "DEFAULT_UNIT").trim() || "DEFAULT_UNIT",
             paymentProvider: t.paymentProvider,
             paymentMachineKey: String(t.paymentMachineKey || "").trim(),
             mpTerminalId: String(t.mpTerminalId || "").trim(),
@@ -864,6 +894,7 @@ export default function ManagerOnboarding() {
         enabled: true,
         name: "Caixa 1",
         code: "CX01",
+        unitKey: "DEFAULT_UNIT",
         paymentProvider: "company_default",
         paymentMachineKey: "",
         mpTerminalId: "",
@@ -873,12 +904,14 @@ export default function ManagerOnboarding() {
         enabled: false,
         name: "Caixa 2",
         code: "CX02",
+        unitKey: "DEFAULT_UNIT",
         paymentProvider: "company_default",
         paymentMachineKey: "",
         mpTerminalId: "",
         stoneTerminalId: "",
       },
     ]);
+    setInitialUnits([]);
     setInitialMachines([]);
   };
 
@@ -3067,6 +3100,96 @@ export default function ManagerOnboarding() {
                     <div className="rounded-md border p-3 space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
+                          <h4 className="font-medium">Unidades iniciais (filiais)</h4>
+                          <p className="text-xs text-muted-foreground">
+                            A unidade MATRIZ ja e criada automaticamente.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setInitialUnits((prev) => [
+                              ...prev,
+                              {
+                                key: `unit_${Date.now()}_${prev.length + 1}`,
+                                code: `UN${String(prev.length + 1).padStart(2, "0")}`,
+                                name: `Unidade ${prev.length + 1}`,
+                              },
+                            ])
+                          }
+                        >
+                          Adicionar unidade
+                        </Button>
+                      </div>
+
+                      {initialUnits.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Sem unidades adicionais. Apenas MATRIZ sera usada.
+                        </p>
+                      ) : (
+                        <div className="space-y-3">
+                          {initialUnits.map((unit, index) => (
+                            <div key={unit.key} className="rounded border p-3 space-y-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="font-medium text-sm">Unidade {index + 1}</div>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() =>
+                                    setInitialUnits((prev) =>
+                                      prev.filter((u) => u.key !== unit.key),
+                                    )
+                                  }
+                                >
+                                  Remover
+                                </Button>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <Label>Codigo da unidade</Label>
+                                  <Input
+                                    value={unit.code}
+                                    onChange={(e) =>
+                                      setInitialUnits((prev) =>
+                                        prev.map((u) =>
+                                          u.key === unit.key
+                                            ? { ...u, code: e.target.value.toUpperCase() }
+                                            : u,
+                                        ),
+                                      )
+                                    }
+                                    placeholder="LOJA-01"
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Nome da unidade</Label>
+                                  <Input
+                                    value={unit.name}
+                                    onChange={(e) =>
+                                      setInitialUnits((prev) =>
+                                        prev.map((u) =>
+                                          u.key === unit.key
+                                            ? { ...u, name: e.target.value }
+                                            : u,
+                                        ),
+                                      )
+                                    }
+                                    placeholder="Loja Centro"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-md border p-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
                           <h4 className="font-medium">Maquininhas iniciais</h4>
                           <p className="text-xs text-muted-foreground">
                             Cadastre as maquininhas e depois selecione no caixa abaixo.
@@ -3085,6 +3208,7 @@ export default function ManagerOnboarding() {
                                 provider: "mercadopago",
                                 mpTerminalId: "",
                                 stoneTerminalId: "",
+                                unitKey: "DEFAULT_UNIT",
                                 enabled: true,
                               },
                             ])
@@ -3119,7 +3243,7 @@ export default function ManagerOnboarding() {
                                   Remover
                                 </Button>
                               </div>
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                 <div className="space-y-2">
                                   <Label>Nome</Label>
                                   <Input
@@ -3134,6 +3258,31 @@ export default function ManagerOnboarding() {
                                       )
                                     }
                                   />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Unidade</Label>
+                                  <select
+                                    className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    value={machine.unitKey || "DEFAULT_UNIT"}
+                                    onChange={(e) =>
+                                      setInitialMachines((prev) =>
+                                        prev.map((m) =>
+                                          m.key === machine.key
+                                            ? {
+                                                ...m,
+                                                unitKey: e.target.value || "DEFAULT_UNIT",
+                                              }
+                                            : m,
+                                        ),
+                                      )
+                                    }
+                                  >
+                                    {initialUnitOptions.map((u) => (
+                                      <option key={u.key} value={u.key}>
+                                        {u.code} - {u.name}
+                                      </option>
+                                    ))}
+                                  </select>
                                 </div>
                                 <div className="space-y-2">
                                   <Label>Marca</Label>
@@ -3252,6 +3401,33 @@ export default function ManagerOnboarding() {
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div className="space-y-2">
+                            <Label>Unidade</Label>
+                            <select
+                              className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              value={terminal.unitKey || "DEFAULT_UNIT"}
+                              disabled={!terminal.enabled}
+                              onChange={(e) =>
+                                setInitialTerminals((prev) =>
+                                  prev.map((t, i) =>
+                                    i === index
+                                      ? {
+                                          ...t,
+                                          unitKey: e.target.value || "DEFAULT_UNIT",
+                                          paymentMachineKey: "",
+                                        }
+                                      : t,
+                                  ),
+                                )
+                              }
+                            >
+                              {initialUnitOptions.map((u) => (
+                                <option key={u.key} value={u.key}>
+                                  {u.code} - {u.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="space-y-2">
                             <Label>Maquininha cadastrada</Label>
                             <select
                               className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -3275,7 +3451,12 @@ export default function ManagerOnboarding() {
                             >
                               <option value="">Sem vinculo (usar campos abaixo/padrao)</option>
                               {initialMachines
-                                .filter((m) => m.enabled)
+                                .filter(
+                                  (m) =>
+                                    m.enabled &&
+                                    String(m.unitKey || "DEFAULT_UNIT") ===
+                                      String(terminal.unitKey || "DEFAULT_UNIT"),
+                                )
                                 .map((m) => (
                                   <option key={m.key} value={m.key}>
                                     {m.name} ({m.provider === "mercadopago" ? "MP" : "Stone"})
