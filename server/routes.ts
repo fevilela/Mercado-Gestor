@@ -41,6 +41,7 @@ import {
   requireAuth,
   requirePermission,
   getCompanyId,
+  getUnitId,
   getUserId,
 } from "./middleware";
 import { CFOPValidator } from "./cfop-validator";
@@ -1223,9 +1224,23 @@ export async function registerRoutes(
       return { ok: false as const, status: 404, error: "Terminal PDV nao encontrado", terminal: null };
     }
     const currentUserId = String(req.session?.userId || "");
+    const currentUnitId = getUnitId(req);
     const userPerms = (req.session?.userPermissions || []) as string[];
     const isAdminOverride =
       userPerms.includes("users:manage") || userPerms.includes("settings:edit");
+    if (
+      currentUnitId &&
+      (terminal as any).unitId &&
+      Number((terminal as any).unitId) !== Number(currentUnitId) &&
+      !isAdminOverride
+    ) {
+      return {
+        ok: false as const,
+        status: 403,
+        error: "Terminal PDV pertence a outra unidade",
+        terminal,
+      };
+    }
     const assignedUserId = String((terminal as any).assignedUserId || "").trim();
     if (assignedUserId && assignedUserId !== currentUserId && !isAdminOverride) {
       return {
@@ -3887,9 +3902,10 @@ export async function registerRoutes(
   app.get("/api/pos-terminals", requireAuth, async (req, res) => {
     try {
       const companyId = getCompanyId(req);
+      const unitId = getUnitId(req);
       if (!companyId) return res.status(401).json({ error: "Não autenticado" });
 
-      const terminals = await storage.getAllPosTerminals(companyId);
+      const terminals = await storage.getAllPosTerminals(companyId, unitId);
       res.json(terminals);
     } catch (error) {
       console.error("Failed to fetch POS terminals:", error);
@@ -3926,6 +3942,7 @@ export async function registerRoutes(
         if (!companyId)
           return res.status(401).json({ error: "Não autenticado" });
 
+        const unitId = getUnitId(req);
         const validated = posTerminalSchema.parse(req.body);
         const normalizedCode = normalizePosTerminalCode(validated.code);
         const finalCode = normalizedCode
@@ -3935,6 +3952,7 @@ export async function registerRoutes(
           ...validated,
           code: finalCode,
           companyId,
+          unitId: unitId || null,
         });
         res.status(201).json(terminal);
       } catch (error) {
@@ -3958,6 +3976,18 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const id = parseInt(req.params.id);
+        const existing = await storage.getPosTerminal(id, companyId);
+        if (!existing) {
+          return res.status(404).json({ error: "Terminal nÃ£o encontrado" });
+        }
+        const unitId = getUnitId(req);
+        if (
+          unitId &&
+          existing.unitId &&
+          Number(existing.unitId) !== Number(unitId)
+        ) {
+          return res.status(403).json({ error: "Terminal pertence a outra unidade" });
+        }
         const validated = posTerminalSchema.partial().parse(req.body);
         const nextData: any = { ...validated };
         if (Object.prototype.hasOwnProperty.call(validated, "code")) {
@@ -3994,6 +4024,18 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const id = parseInt(req.params.id);
+        const existing = await storage.getPosTerminal(id, companyId);
+        if (!existing) {
+          return res.status(404).json({ error: "Terminal nÃ£o encontrado" });
+        }
+        const unitId = getUnitId(req);
+        if (
+          unitId &&
+          existing.unitId &&
+          Number(existing.unitId) !== Number(unitId)
+        ) {
+          return res.status(403).json({ error: "Terminal pertence a outra unidade" });
+        }
         await storage.deletePosTerminal(id, companyId);
         res.status(204).send();
       } catch (error) {

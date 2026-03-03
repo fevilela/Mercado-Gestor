@@ -66,7 +66,7 @@ import {
   type InsertSefazTransmissionLog,
   type FiscalTaxRule,
 } from "@shared/schema";
-import { eq, and, or, desc, sql, ilike, getTableColumns } from "drizzle-orm";
+import { eq, and, or, isNull, desc, sql, ilike, getTableColumns } from "drizzle-orm";
 
 export const storage = {
   async getFiscalDataByProductName(name: string, companyId: number) {
@@ -907,7 +907,20 @@ export const storage = {
     return user;
   },
 
-  async getAllPosTerminals(companyId: number) {
+  async getAllPosTerminals(companyId: number, unitId?: number | null) {
+    if (unitId) {
+      return await db
+        .select()
+        .from(posTerminals)
+        .where(
+          and(
+            eq(posTerminals.companyId, companyId),
+            or(eq(posTerminals.unitId, unitId), isNull(posTerminals.unitId))
+          )
+        )
+        .orderBy(desc(posTerminals.createdAt));
+    }
+
     return await db
       .select()
       .from(posTerminals)
