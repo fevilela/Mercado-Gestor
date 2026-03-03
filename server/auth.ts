@@ -903,6 +903,42 @@ const managerDeleteCompanyUnitSchema = z.object({
   companyId: z.coerce.number().int().positive(),
 });
 
+const managerCompanyTerminalsQuerySchema = z.object({
+  companyId: z.coerce.number().int().positive(),
+});
+
+const managerCreateCompanyTerminalSchema = z.object({
+  companyId: z.number().int().positive(),
+  unitId: z.number().int().positive().optional(),
+  name: z.string().min(1),
+  code: z.string().optional(),
+  paymentProvider: z
+    .enum(["company_default", "mercadopago", "stone"])
+    .optional(),
+  mpTerminalId: z.string().optional(),
+  stoneTerminalId: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+
+const managerUpdateCompanyTerminalSchema = z.object({
+  terminalId: z.number().int().positive(),
+  companyId: z.number().int().positive(),
+  unitId: z.number().int().positive().nullable().optional(),
+  name: z.string().min(1).optional(),
+  code: z.string().optional(),
+  paymentProvider: z
+    .enum(["company_default", "mercadopago", "stone"])
+    .optional(),
+  mpTerminalId: z.string().optional(),
+  stoneTerminalId: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+
+const managerDeleteCompanyTerminalSchema = z.object({
+  terminalId: z.coerce.number().int().positive(),
+  companyId: z.coerce.number().int().positive(),
+});
+
 const completeInviteSchema = z.object({
   email: z.string().email(),
   code: z.string().regex(/^\d{6}$/),
@@ -2142,6 +2178,234 @@ authRouter.delete("/manager/company-unit", async (req, res) => {
       return res.status(400).json({ error: "Dados invalidos", details: error.errors });
     }
     res.status(500).json({ error: "Erro ao excluir unidade" });
+  }
+});
+
+authRouter.get("/manager/company-terminals", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const { companyId } = managerCompanyTerminalsQuerySchema.parse(req.query);
+
+    const [company] = await db
+      .select({ id: companies.id })
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .limit(1);
+    if (!company) {
+      return res.status(404).json({ error: "Empresa nao encontrada" });
+    }
+
+    const terminals = await db
+      .select()
+      .from(posTerminals)
+      .where(eq(posTerminals.companyId, companyId))
+      .orderBy(desc(posTerminals.createdAt));
+
+    res.json(terminals);
+  } catch (error) {
+    console.error("Manager company terminals list error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao listar terminais" });
+  }
+});
+
+authRouter.post("/manager/company-terminals", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerCreateCompanyTerminalSchema.parse(req.body);
+
+    const [company] = await db
+      .select({ id: companies.id })
+      .from(companies)
+      .where(eq(companies.id, data.companyId))
+      .limit(1);
+    if (!company) {
+      return res.status(404).json({ error: "Empresa nao encontrada" });
+    }
+
+    if (data.unitId) {
+      const [unit] = await db
+        .select({ id: businessUnits.id })
+        .from(businessUnits)
+        .where(
+          and(
+            eq(businessUnits.id, data.unitId),
+            eq(businessUnits.companyId, data.companyId),
+          ),
+        )
+        .limit(1);
+      if (!unit) {
+        return res.status(400).json({ error: "Unidade invalida para a empresa" });
+      }
+    }
+
+    const existing = await db
+      .select({ code: posTerminals.code })
+      .from(posTerminals)
+      .where(eq(posTerminals.companyId, data.companyId));
+    const finalCode = normalizeTerminalCode(
+      data.code,
+      `CX${String(existing.length + 1).padStart(2, "0")}`,
+    );
+
+    const created = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+      );
+      const [terminal] = await tx
+        .insert(posTerminals)
+        .values({
+          companyId: data.companyId,
+          unitId: data.unitId || null,
+          name: data.name.trim(),
+          code: finalCode,
+          paymentProvider: data.paymentProvider || "company_default",
+          mpTerminalId: data.mpTerminalId || null,
+          stoneTerminalId: data.stoneTerminalId || null,
+          isAutonomous: false,
+          requiresSangria: false,
+          requiresSuprimento: false,
+          requiresOpening: true,
+          requiresClosing: true,
+          isActive: data.isActive === undefined ? true : Boolean(data.isActive),
+        })
+        .returning();
+      return terminal;
+    });
+
+    res.status(201).json(created);
+  } catch (error) {
+    console.error("Manager create company terminal error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao criar terminal" });
+  }
+});
+
+authRouter.patch("/manager/company-terminals/:id", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const terminalId = Number(req.params.id);
+    if (!Number.isFinite(terminalId) || terminalId <= 0) {
+      return res.status(400).json({ error: "Terminal invalido" });
+    }
+    const data = managerUpdateCompanyTerminalSchema.parse({
+      ...req.body,
+      terminalId,
+    });
+
+    const [existing] = await db
+      .select()
+      .from(posTerminals)
+      .where(
+        and(
+          eq(posTerminals.id, data.terminalId),
+          eq(posTerminals.companyId, data.companyId),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      return res.status(404).json({ error: "Terminal nao encontrado" });
+    }
+
+    if (data.unitId) {
+      const [unit] = await db
+        .select({ id: businessUnits.id })
+        .from(businessUnits)
+        .where(
+          and(
+            eq(businessUnits.id, data.unitId),
+            eq(businessUnits.companyId, data.companyId),
+          ),
+        )
+        .limit(1);
+      if (!unit) {
+        return res.status(400).json({ error: "Unidade invalida para a empresa" });
+      }
+    }
+
+    const payload: any = {};
+    if (data.name !== undefined) payload.name = data.name.trim();
+    if (data.code !== undefined) payload.code = normalizeTerminalCode(data.code, existing.code || "CX01");
+    if (data.unitId !== undefined) payload.unitId = data.unitId || null;
+    if (data.paymentProvider !== undefined) payload.paymentProvider = data.paymentProvider;
+    if (data.mpTerminalId !== undefined) payload.mpTerminalId = data.mpTerminalId || null;
+    if (data.stoneTerminalId !== undefined) payload.stoneTerminalId = data.stoneTerminalId || null;
+    if (data.isActive !== undefined) payload.isActive = Boolean(data.isActive);
+
+    const updated = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+      );
+      const [terminal] = await tx
+        .update(posTerminals)
+        .set(payload)
+        .where(
+          and(
+            eq(posTerminals.id, data.terminalId),
+            eq(posTerminals.companyId, data.companyId),
+          ),
+        )
+        .returning();
+      return terminal;
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error("Manager update company terminal error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao atualizar terminal" });
+  }
+});
+
+authRouter.delete("/manager/company-terminals", async (req, res) => {
+  if (!ensureManagerSession(req, res)) {
+    return;
+  }
+
+  try {
+    const data = managerDeleteCompanyTerminalSchema.parse(req.query);
+
+    const deleted = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: data.companyId })}, true)`,
+      );
+      const [terminal] = await tx
+        .delete(posTerminals)
+        .where(
+          and(
+            eq(posTerminals.id, data.terminalId),
+            eq(posTerminals.companyId, data.companyId),
+          ),
+        )
+        .returning();
+      return terminal;
+    });
+
+    if (!deleted) {
+      return res.status(404).json({ error: "Terminal nao encontrado" });
+    }
+    res.json({ message: "Terminal excluido com sucesso" });
+  } catch (error) {
+    console.error("Manager delete company terminal error:", error);
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: "Dados invalidos", details: error.errors });
+    }
+    res.status(500).json({ error: "Erro ao excluir terminal" });
   }
 });
 

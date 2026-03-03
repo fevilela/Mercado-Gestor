@@ -114,6 +114,17 @@ type CompanyUnit = {
   createdAt: string | null;
 };
 
+type ManagerPosTerminal = {
+  id?: number;
+  unitId: number | null;
+  name: string;
+  code: string;
+  paymentProvider: "company_default" | "mercadopago" | "stone";
+  mpTerminalId: string;
+  stoneTerminalId: string;
+  isActive: boolean;
+};
+
 export default function ManagerOnboarding() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -154,6 +165,19 @@ export default function ManagerOnboarding() {
   const [unitForm, setUnitForm] = useState({
     code: "",
     name: "",
+    isActive: true,
+  });
+  const [managerTerminals, setManagerTerminals] = useState<ManagerPosTerminal[]>([]);
+  const [loadingManagerTerminals, setLoadingManagerTerminals] = useState(false);
+  const [savingManagerTerminal, setSavingManagerTerminal] = useState(false);
+  const [editingManagerTerminalId, setEditingManagerTerminalId] = useState<number | null>(null);
+  const [managerTerminalForm, setManagerTerminalForm] = useState<ManagerPosTerminal>({
+    unitId: null,
+    name: "",
+    code: "",
+    paymentProvider: "company_default",
+    mpTerminalId: "",
+    stoneTerminalId: "",
     isActive: true,
   });
 
@@ -314,6 +338,44 @@ export default function ManagerOnboarding() {
       });
     } finally {
       setLoadingUnits(false);
+    }
+  };
+
+  const loadManagerTerminals = async (companyId: number) => {
+    setLoadingManagerTerminals(true);
+    try {
+      const res = await fetch(
+        `/api/auth/manager/company-terminals?companyId=${encodeURIComponent(String(companyId))}`,
+      );
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body.error || "Falha ao buscar terminais");
+      }
+      const rows = Array.isArray(body) ? body : [];
+      setManagerTerminals(
+        rows.map((t: any) => ({
+          id: Number(t.id),
+          unitId: t.unitId === null || t.unitId === undefined ? null : Number(t.unitId),
+          name: String(t.name || ""),
+          code: String(t.code || ""),
+          paymentProvider:
+            t.paymentProvider === "mercadopago" || t.paymentProvider === "stone"
+              ? t.paymentProvider
+              : "company_default",
+          mpTerminalId: String(t.mpTerminalId || ""),
+          stoneTerminalId: String(t.stoneTerminalId || ""),
+          isActive: t.isActive === undefined ? true : Boolean(t.isActive),
+        })),
+      );
+    } catch (error: any) {
+      toast({
+        title: "Erro ao carregar terminais",
+        description: error.message || "Falha inesperada",
+        variant: "destructive",
+      });
+      setManagerTerminals([]);
+    } finally {
+      setLoadingManagerTerminals(false);
     }
   };
 
@@ -913,6 +975,30 @@ export default function ManagerOnboarding() {
     ]);
     setInitialUnits([]);
     setInitialMachines([]);
+    setManagerTerminals([]);
+    setEditingManagerTerminalId(null);
+    setManagerTerminalForm({
+      unitId: null,
+      name: "",
+      code: "",
+      paymentProvider: "company_default",
+      mpTerminalId: "",
+      stoneTerminalId: "",
+      isActive: true,
+    });
+  };
+
+  const resetManagerTerminalForm = () => {
+    setEditingManagerTerminalId(null);
+    setManagerTerminalForm({
+      unitId: null,
+      name: "",
+      code: "",
+      paymentProvider: "company_default",
+      mpTerminalId: "",
+      stoneTerminalId: "",
+      isActive: true,
+    });
   };
 
   const openCreateForm = () => {
@@ -1035,7 +1121,109 @@ export default function ManagerOnboarding() {
       },
       danfeLogoUrl: row.danfeLogoUrl || "",
     });
+    setUnitsCompanyId(row.companyId);
+    void loadCompanyUnits(row.companyId);
+    void loadManagerTerminals(row.companyId);
+    resetManagerTerminalForm();
     setShowCreateForm(true);
+  };
+
+  const handleSaveManagerTerminal = async () => {
+    if (!editingTarget) return;
+    const companyId = editingTarget.companyId;
+    if (!managerTerminalForm.name.trim()) {
+      toast({
+        title: "Nome obrigatorio",
+        description: "Informe o nome do terminal.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingManagerTerminal(true);
+    try {
+      const payload = {
+        companyId,
+        unitId: managerTerminalForm.unitId || undefined,
+        name: managerTerminalForm.name.trim(),
+        code: managerTerminalForm.code.trim().toUpperCase(),
+        paymentProvider: managerTerminalForm.paymentProvider,
+        mpTerminalId: managerTerminalForm.mpTerminalId.trim(),
+        stoneTerminalId: managerTerminalForm.stoneTerminalId.trim(),
+        isActive: managerTerminalForm.isActive,
+      };
+      const isEditing = Boolean(editingManagerTerminalId);
+      const endpoint = isEditing
+        ? `/api/auth/manager/company-terminals/${editingManagerTerminalId}`
+        : "/api/auth/manager/company-terminals";
+      const method = isEditing ? "PATCH" : "POST";
+      const res = await fetch(endpoint, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          isEditing
+            ? { terminalId: editingManagerTerminalId, ...payload }
+            : payload,
+        ),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body.error || "Falha ao salvar terminal");
+      }
+      toast({ title: isEditing ? "Terminal atualizado" : "Terminal criado" });
+      await loadManagerTerminals(companyId);
+      resetManagerTerminalForm();
+    } catch (error: any) {
+      toast({
+        title: "Erro ao salvar terminal",
+        description: error.message || "Falha inesperada",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingManagerTerminal(false);
+    }
+  };
+
+  const handleEditManagerTerminal = (terminal: ManagerPosTerminal) => {
+    setEditingManagerTerminalId(terminal.id || null);
+    setManagerTerminalForm({
+      unitId: terminal.unitId || null,
+      name: terminal.name,
+      code: terminal.code || "",
+      paymentProvider: terminal.paymentProvider || "company_default",
+      mpTerminalId: terminal.mpTerminalId || "",
+      stoneTerminalId: terminal.stoneTerminalId || "",
+      isActive: terminal.isActive !== false,
+    });
+  };
+
+  const handleDeleteManagerTerminal = async (terminalId?: number) => {
+    if (!editingTarget || !terminalId) return;
+    if (!window.confirm("Deseja excluir este terminal?")) return;
+
+    try {
+      const res = await fetch(
+        `/api/auth/manager/company-terminals?companyId=${encodeURIComponent(
+          String(editingTarget.companyId),
+        )}&terminalId=${encodeURIComponent(String(terminalId))}`,
+        { method: "DELETE" },
+      );
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body.error || "Falha ao excluir terminal");
+      }
+      toast({ title: "Terminal excluido" });
+      await loadManagerTerminals(editingTarget.companyId);
+      if (editingManagerTerminalId === terminalId) {
+        resetManagerTerminalForm();
+      }
+    } catch (error: any) {
+      toast({
+        title: "Erro ao excluir terminal",
+        description: error.message || "Falha inesperada",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleValidateStone = () => {
@@ -3522,6 +3710,212 @@ export default function ManagerOnboarding() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+                {editingTarget && (
+                  <div className="rounded-lg border p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium">Terminais por unidade (empresa existente)</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Cadastre a maquininha por filial para empresas ja criadas.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border p-3 space-y-3">
+                      <h4 className="font-medium">
+                        {editingManagerTerminalId ? "Editar terminal" : "Novo terminal"}
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label>Nome</Label>
+                          <Input
+                            value={managerTerminalForm.name}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                name: e.target.value,
+                              }))
+                            }
+                            placeholder="Ex: Caixa Loja Centro"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Codigo</Label>
+                          <Input
+                            value={managerTerminalForm.code}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                code: e.target.value.toUpperCase(),
+                              }))
+                            }
+                            placeholder="CX01"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Unidade</Label>
+                          <select
+                            className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={managerTerminalForm.unitId ? String(managerTerminalForm.unitId) : ""}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                unitId: e.target.value ? Number(e.target.value) : null,
+                              }))
+                            }
+                          >
+                            <option value="">Sem unidade (global)</option>
+                            {companyUnits.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.code} - {u.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="space-y-2">
+                          <Label>Provedor</Label>
+                          <select
+                            className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={managerTerminalForm.paymentProvider}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                paymentProvider: e.target.value as
+                                  | "company_default"
+                                  | "mercadopago"
+                                  | "stone",
+                              }))
+                            }
+                          >
+                            <option value="company_default">Padrao da empresa</option>
+                            <option value="mercadopago">Mercado Pago</option>
+                            <option value="stone">Stone</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>MP Terminal</Label>
+                          <Input
+                            value={managerTerminalForm.mpTerminalId}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                mpTerminalId: e.target.value,
+                              }))
+                            }
+                            placeholder="STORE123|POS456"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Stone Terminal ID</Label>
+                          <Input
+                            value={managerTerminalForm.stoneTerminalId}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                stoneTerminalId: e.target.value,
+                              }))
+                            }
+                            placeholder="Terminal Stone"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Status</Label>
+                          <select
+                            className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={managerTerminalForm.isActive ? "1" : "0"}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                isActive: e.target.value === "1",
+                              }))
+                            }
+                          >
+                            <option value="1">Ativo</option>
+                            <option value="0">Inativo</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        {editingManagerTerminalId ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={resetManagerTerminalForm}
+                          >
+                            Cancelar edicao
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          onClick={handleSaveManagerTerminal}
+                          disabled={savingManagerTerminal || !managerTerminalForm.name.trim()}
+                        >
+                          {savingManagerTerminal ? "Salvando..." : "Salvar terminal"}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border p-3 space-y-3">
+                      <h4 className="font-medium">Terminais cadastrados</h4>
+                      {loadingManagerTerminals ? (
+                        <p className="text-sm text-muted-foreground">Carregando terminais...</p>
+                      ) : managerTerminals.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Nenhum terminal cadastrado.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {managerTerminals.map((terminal) => {
+                            const unit = terminal.unitId
+                              ? companyUnits.find((u) => u.id === terminal.unitId)
+                              : null;
+                            return (
+                              <div
+                                key={terminal.id}
+                                className="rounded border p-3 flex items-center justify-between gap-3"
+                              >
+                                <div>
+                                  <div className="font-medium">
+                                    {terminal.name} {terminal.code ? `(${terminal.code})` : ""}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Unidade: {unit ? `${unit.code} - ${unit.name}` : "Global"}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Provedor:{" "}
+                                    {terminal.paymentProvider === "mercadopago"
+                                      ? "Mercado Pago"
+                                      : terminal.paymentProvider === "stone"
+                                      ? "Stone"
+                                      : "Padrao da empresa"}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleEditManagerTerminal(terminal)}
+                                  >
+                                    Editar
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => handleDeleteManagerTerminal(terminal.id)}
+                                  >
+                                    Excluir
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </CardContent>
