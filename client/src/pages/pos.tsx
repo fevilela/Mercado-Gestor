@@ -891,7 +891,7 @@ export default function POS() {
             body: JSON.stringify({
               amount: parseFloat(total.toFixed(2)),
               method: tefMethod,
-              posTerminalId: selectedPosTerminalId || undefined,
+              posTerminalId: selectedPosTerminal?.id || undefined,
             }),
           });
           if (res.status !== 409 || attempt === 3) {
