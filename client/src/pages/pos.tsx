@@ -132,7 +132,7 @@ export default function POS() {
   const [sangriaReason, setSangriaReason] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { user, hasPermission } = useAuth();
+  const { user, company, unit, hasPermission } = useAuth();
 
   const { data: cashRegisterData, isLoading: isLoadingCashRegister } = useQuery(
     {
@@ -171,17 +171,18 @@ export default function POS() {
     });
   const selectedPosTerminal =
     posTerminals.find((t) => t.id === selectedPosTerminalId) || null;
+  const terminalStorageKey = `pdv:selected-terminal-id:${company?.id || "no-company"}:${unit?.id || "no-unit"}`;
   const selectedMpTerminalRef = String(
     selectedPosTerminal?.mpTerminalId || ""
   ).trim();
 
   useEffect(() => {
-    const raw = window.localStorage.getItem("pdv:selected-terminal-id");
+    const raw = window.localStorage.getItem(terminalStorageKey);
     const id = Number(raw);
     if (Number.isFinite(id) && id > 0) {
       setSelectedPosTerminalId(id);
     }
-  }, []);
+  }, [terminalStorageKey]);
 
   useEffect(() => {
     if (!posTerminals.length) return;
@@ -197,10 +198,10 @@ export default function POS() {
   useEffect(() => {
     if (!selectedPosTerminalId) return;
     window.localStorage.setItem(
-      "pdv:selected-terminal-id",
+      terminalStorageKey,
       String(selectedPosTerminalId)
     );
-  }, [selectedPosTerminalId]);
+  }, [selectedPosTerminalId, terminalStorageKey]);
 
   const openCashRegisterMutation = useMutation({
     mutationFn: async (data: { openingAmount: string; terminalId?: number }) => {
@@ -286,7 +287,7 @@ export default function POS() {
     }
     openCashRegisterMutation.mutate({
       openingAmount,
-      terminalId: selectedPosTerminalId || undefined,
+      terminalId: selectedPosTerminal?.id || undefined,
     });
   };
 
@@ -846,6 +847,16 @@ export default function POS() {
         title: "Pagamento em andamento",
         description:
           "Ja existe uma autorizacao em andamento para esta venda. Aguarde o retorno da maquininha.",
+      });
+      return;
+    }
+
+    if (tefMethod !== "pix" && posTerminals.length > 0 && !selectedPosTerminal?.id) {
+      toast({
+        title: "Selecione um terminal PDV",
+        description:
+          "Nenhum terminal valido da unidade atual foi selecionado para enviar a cobranca.",
+        variant: "destructive",
       });
       return;
     }
