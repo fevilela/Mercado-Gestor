@@ -29,6 +29,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -143,6 +144,9 @@ export default function ManagerOnboarding() {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [usersRows, setUsersRows] = useState<OnboardingUserRow[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [companyFormTab, setCompanyFormTab] = useState<
+    "dados" | "integracoes" | "impressao" | "unidades"
+  >("dados");
   const [userCreateTarget, setUserCreateTarget] = useState<{
     companyId: number;
     companyName: string;
@@ -890,6 +894,7 @@ export default function ManagerOnboarding() {
   };
 
   const resetForm = () => {
+    setCompanyFormTab("dados");
     setStoneValidationStatus("idle");
     setMpValidationStatus("idle");
     setCompanyForm({
@@ -1004,6 +1009,7 @@ export default function ManagerOnboarding() {
   const openCreateForm = () => {
     setEditingTarget(null);
     setUserCreateTarget(null);
+    setCompanyFormTab("dados");
     resetForm();
     setShowCreateForm(true);
   };
@@ -1021,6 +1027,7 @@ export default function ManagerOnboarding() {
 
   const openEditForm = (row: OnboardingUserRow) => {
     setUserCreateTarget(null);
+    setCompanyFormTab("dados");
     setStoneValidationStatus("idle");
     setMpValidationStatus("idle");
     setEditingTarget({ companyId: row.companyId, userId: row.id });
@@ -1957,191 +1964,6 @@ export default function ManagerOnboarding() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-xl border-[#dbe1ff]">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Unidades por empresa</CardTitle>
-            <CardDescription>
-              Cadastre unidades (filiais/lojas) para separar operacao e estoque.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[2fr_1fr]">
-              <div className="space-y-2">
-                <Label htmlFor="units-company-select">Empresa</Label>
-                <select
-                  id="units-company-select"
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  value={unitsCompanyId ?? ""}
-                  onChange={(e) =>
-                    setUnitsCompanyId(e.target.value ? Number(e.target.value) : null)
-                  }
-                >
-                  {companyRows.map((company) => (
-                    <option key={company.companyId} value={company.companyId}>
-                      {company.companyName} ({formatCNPJ(company.cnpj || "")})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="units-status">Status</Label>
-                <Input
-                  id="units-status"
-                  value={selectedUnitsCompany?.companyIsActive ? "Empresa ativa" : "Empresa inativa"}
-                  readOnly
-                />
-              </div>
-            </div>
-
-            <div className="rounded-md border p-3">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor="unit-code">Codigo</Label>
-                  <Input
-                    id="unit-code"
-                    placeholder="MATRIZ, LOJA01..."
-                    value={unitForm.code}
-                    onChange={(e) =>
-                      setUnitForm((prev) => ({
-                        ...prev,
-                        code: e.target.value.toUpperCase(),
-                      }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="unit-name">Nome</Label>
-                  <Input
-                    id="unit-name"
-                    placeholder="Loja Centro"
-                    value={unitForm.name}
-                    onChange={(e) =>
-                      setUnitForm((prev) => ({ ...prev, name: e.target.value }))
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="unit-active">Ativa</Label>
-                  <select
-                    id="unit-active"
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    value={unitForm.isActive ? "1" : "0"}
-                    onChange={(e) =>
-                      setUnitForm((prev) => ({
-                        ...prev,
-                        isActive: e.target.value === "1",
-                      }))
-                    }
-                  >
-                    <option value="1">Ativa</option>
-                    <option value="0">Inativa</option>
-                  </select>
-                </div>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  onClick={handleSubmitUnit}
-                  disabled={
-                    !unitsCompanyId ||
-                    createUnitMutation.isPending ||
-                    updateUnitMutation.isPending
-                  }
-                >
-                  {createUnitMutation.isPending || updateUnitMutation.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Salvando...
-                    </>
-                  ) : editingUnitId ? (
-                    "Atualizar unidade"
-                  ) : (
-                    "Criar unidade"
-                  )}
-                </Button>
-                {editingUnitId ? (
-                  <Button type="button" variant="outline" onClick={resetUnitForm}>
-                    Cancelar edicao
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="rounded-md border overflow-auto">
-              <table className="w-full min-w-[620px] text-sm">
-                <thead className="bg-muted/40">
-                  <tr>
-                    <th className="px-3 py-2 text-left">Codigo</th>
-                    <th className="px-3 py-2 text-left">Nome</th>
-                    <th className="px-3 py-2 text-left">Status</th>
-                    <th className="px-3 py-2 text-left">Acoes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadingUnits ? (
-                    <tr>
-                      <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
-                        Carregando unidades...
-                      </td>
-                    </tr>
-                  ) : companyUnits.length === 0 ? (
-                    <tr>
-                      <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
-                        Nenhuma unidade cadastrada.
-                      </td>
-                    </tr>
-                  ) : (
-                    companyUnits.map((unit) => (
-                      <tr key={unit.id} className="border-t">
-                        <td className="px-3 py-2 font-medium">{unit.code}</td>
-                        <td className="px-3 py-2">{unit.name}</td>
-                        <td className="px-3 py-2">
-                          {unit.isActive ? "Ativa" : "Inativa"}
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => startEditUnit(unit)}
-                            >
-                              Editar
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-red-600"
-                              disabled={deleteUnitMutation.isPending}
-                              onClick={() => {
-                                if (!unitsCompanyId) return;
-                                if (
-                                  !window.confirm(
-                                    `Deseja excluir a unidade ${unit.name}?`,
-                                  )
-                                ) {
-                                  return;
-                                }
-                                deleteUnitMutation.mutate({
-                                  companyId: unitsCompanyId,
-                                  unitId: unit.id,
-                                });
-                              }}
-                            >
-                              Excluir
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-
         {userCreateTarget && (
           <Card>
             <CardHeader>
@@ -2163,8 +1985,7 @@ export default function ManagerOnboarding() {
                 });
               }}
             >
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <CardContent className="space-y-4">`r`n                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="newUserName">Nome *</Label>
                     <Input
@@ -2283,6 +2104,23 @@ export default function ManagerOnboarding() {
               }}
             >
               <CardContent className="space-y-4">
+                <Tabs
+                  value={companyFormTab}
+                  onValueChange={(value) =>
+                    setCompanyFormTab(
+                      value as "dados" | "integracoes" | "impressao" | "unidades",
+                    )
+                  }
+                  className="space-y-4"
+                >
+                  <TabsList className="flex-wrap h-auto gap-1">
+                    <TabsTrigger value="dados">Dados</TabsTrigger>
+                    <TabsTrigger value="integracoes">Integracoes</TabsTrigger>
+                    <TabsTrigger value="impressao">Impressao</TabsTrigger>
+                    <TabsTrigger value="unidades">Unidades por empresa</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="dados" className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="cnpj">CNPJ *</Label>
@@ -2475,6 +2313,9 @@ export default function ManagerOnboarding() {
                   </p>
                 </div>
 
+                  </TabsContent>
+
+                  <TabsContent value="integracoes" className="space-y-4">
                 <div className="rounded-lg border p-4 space-y-4">
                   <div>
                     <h3 className="font-medium">Integracoes de maquininha</h3>
@@ -2658,7 +2499,9 @@ export default function ManagerOnboarding() {
                     </div>
                   </div>
                 </div>
+                  </TabsContent>
 
+                  <TabsContent value="impressao" className="space-y-4">
                 <div className="rounded-lg border p-4 space-y-4">
                   <div>
                     <h3 className="font-medium">Impressora termica</h3>
@@ -3276,6 +3119,9 @@ export default function ManagerOnboarding() {
                   </div>
                 </div>
 
+                  </TabsContent>
+
+                  <TabsContent value="integracoes" className="space-y-4">
                 {!editingTarget && (
                   <div className="rounded-lg border p-4 space-y-4">
                     <div>
@@ -3918,6 +3764,168 @@ export default function ManagerOnboarding() {
                     </div>
                   </div>
                 )}
+                  </TabsContent>
+
+                  <TabsContent value="unidades" className="space-y-4">
+                {editingTarget ? (
+                  <div className="rounded-lg border p-4 space-y-4">
+                    <div>
+                      <h3 className="font-medium">Unidades por empresa</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Gerencie as filiais da empresa em edicao.
+                      </p>
+                    </div>
+
+                    <div className="rounded-md border p-3">
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="form-unit-code">Codigo</Label>
+                          <Input
+                            id="form-unit-code"
+                            placeholder="MATRIZ, LOJA01..."
+                            value={unitForm.code}
+                            onChange={(e) =>
+                              setUnitForm((prev) => ({
+                                ...prev,
+                                code: e.target.value.toUpperCase(),
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="form-unit-name">Nome</Label>
+                          <Input
+                            id="form-unit-name"
+                            placeholder="Loja Centro"
+                            value={unitForm.name}
+                            onChange={(e) =>
+                              setUnitForm((prev) => ({ ...prev, name: e.target.value }))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="form-unit-active">Ativa</Label>
+                          <select
+                            id="form-unit-active"
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            value={unitForm.isActive ? "1" : "0"}
+                            onChange={(e) =>
+                              setUnitForm((prev) => ({
+                                ...prev,
+                                isActive: e.target.value === "1",
+                              }))
+                            }
+                          >
+                            <option value="1">Ativa</option>
+                            <option value="0">Inativa</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          onClick={handleSubmitUnit}
+                          disabled={
+                            !unitsCompanyId ||
+                            createUnitMutation.isPending ||
+                            updateUnitMutation.isPending
+                          }
+                        >
+                          {createUnitMutation.isPending || updateUnitMutation.isPending ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Salvando...
+                            </>
+                          ) : editingUnitId ? (
+                            "Atualizar unidade"
+                          ) : (
+                            "Criar unidade"
+                          )}
+                        </Button>
+                        {editingUnitId ? (
+                          <Button type="button" variant="outline" onClick={resetUnitForm}>
+                            Cancelar edicao
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border overflow-auto">
+                      <table className="w-full min-w-[620px] text-sm">
+                        <thead className="bg-muted/40">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Codigo</th>
+                            <th className="px-3 py-2 text-left">Nome</th>
+                            <th className="px-3 py-2 text-left">Status</th>
+                            <th className="px-3 py-2 text-left">Acoes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {loadingUnits ? (
+                            <tr>
+                              <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
+                                Carregando unidades...
+                              </td>
+                            </tr>
+                          ) : companyUnits.length === 0 ? (
+                            <tr>
+                              <td className="px-3 py-4 text-muted-foreground" colSpan={4}>
+                                Nenhuma unidade cadastrada.
+                              </td>
+                            </tr>
+                          ) : (
+                            companyUnits.map((unit) => (
+                              <tr key={unit.id} className="border-t">
+                                <td className="px-3 py-2 font-medium">{unit.code}</td>
+                                <td className="px-3 py-2">{unit.name}</td>
+                                <td className="px-3 py-2">
+                                  {unit.isActive ? "Ativa" : "Inativa"}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => startEditUnit(unit)}
+                                    >
+                                      Editar
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-red-600"
+                                      disabled={deleteUnitMutation.isPending}
+                                      onClick={() => {
+                                        if (!unitsCompanyId) return;
+                                        if (!window.confirm(`Deseja excluir a unidade ${unit.name}?`)) {
+                                          return;
+                                        }
+                                        deleteUnitMutation.mutate({
+                                          companyId: unitsCompanyId,
+                                          unitId: unit.id,
+                                        });
+                                      }}
+                                    >
+                                      Excluir
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border p-4 text-sm text-muted-foreground">
+                    As unidades sao gerenciadas apos selecionar uma empresa para edicao.
+                  </div>
+                )}
+                  </TabsContent>
+                </Tabs>
               </CardContent>
 
               <CardFooter className="flex flex-col gap-3">
@@ -3972,3 +3980,4 @@ export default function ManagerOnboarding() {
     </div>
   );
 }
+
