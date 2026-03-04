@@ -785,7 +785,10 @@ const managerCreateCompanySchema = z.object({
           .optional(),
         paymentMachineKey: z.string().optional(),
         mpTerminalId: z.string().optional(),
+        mpAccessToken: z.string().optional(),
         stoneTerminalId: z.string().optional(),
+        stoneClientId: z.string().optional(),
+        stoneClientSecret: z.string().optional(),
         unitKey: z.string().optional(),
       }),
     )
@@ -912,11 +915,15 @@ const managerCreateCompanyTerminalSchema = z.object({
   unitId: z.number().int().positive().optional(),
   name: z.string().min(1),
   code: z.string().optional(),
+  assignedUserId: z.string().optional(),
   paymentProvider: z
     .enum(["company_default", "mercadopago", "stone"])
     .optional(),
   mpTerminalId: z.string().optional(),
+  mpAccessToken: z.string().optional(),
   stoneTerminalId: z.string().optional(),
+  stoneClientId: z.string().optional(),
+  stoneClientSecret: z.string().optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -926,11 +933,15 @@ const managerUpdateCompanyTerminalSchema = z.object({
   unitId: z.number().int().positive().nullable().optional(),
   name: z.string().min(1).optional(),
   code: z.string().optional(),
+  assignedUserId: z.string().nullable().optional(),
   paymentProvider: z
     .enum(["company_default", "mercadopago", "stone"])
     .optional(),
   mpTerminalId: z.string().optional(),
+  mpAccessToken: z.string().optional(),
   stoneTerminalId: z.string().optional(),
+  stoneClientId: z.string().optional(),
+  stoneClientSecret: z.string().optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -1537,7 +1548,10 @@ authRouter.post("/manager/companies", async (req, res) => {
                   ? t.paymentProvider
                   : "company_default",
               mpTerminalId: t.mpTerminalId || null,
+              mpAccessToken: t.mpAccessToken || null,
               stoneTerminalId: t.stoneTerminalId || null,
+              stoneClientId: t.stoneClientId || null,
+              stoneClientSecret: t.stoneClientSecret || null,
               isAutonomous: false,
               requiresSangria: false,
               requiresSuprimento: false,
@@ -2247,6 +2261,23 @@ authRouter.post("/manager/company-terminals", async (req, res) => {
       }
     }
 
+    if (data.assignedUserId) {
+      const [assigned] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(
+            eq(users.id, data.assignedUserId),
+            eq(users.companyId, data.companyId),
+            eq(users.isActive, true),
+          ),
+        )
+        .limit(1);
+      if (!assigned) {
+        return res.status(400).json({ error: "Usuario vinculado invalido" });
+      }
+    }
+
     const existing = await db
       .select({ code: posTerminals.code })
       .from(posTerminals)
@@ -2267,9 +2298,13 @@ authRouter.post("/manager/company-terminals", async (req, res) => {
           unitId: data.unitId || null,
           name: data.name.trim(),
           code: finalCode,
+          assignedUserId: data.assignedUserId || null,
           paymentProvider: data.paymentProvider || "company_default",
           mpTerminalId: data.mpTerminalId || null,
+          mpAccessToken: data.mpAccessToken || null,
           stoneTerminalId: data.stoneTerminalId || null,
+          stoneClientId: data.stoneClientId || null,
+          stoneClientSecret: data.stoneClientSecret || null,
           isAutonomous: false,
           requiresSangria: false,
           requiresSuprimento: false,
@@ -2336,13 +2371,37 @@ authRouter.patch("/manager/company-terminals/:id", async (req, res) => {
       }
     }
 
+    if (data.assignedUserId !== undefined) {
+      const assignedUserId = String(data.assignedUserId || "").trim();
+      if (assignedUserId) {
+        const [assigned] = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(
+            and(
+              eq(users.id, assignedUserId),
+              eq(users.companyId, data.companyId),
+              eq(users.isActive, true),
+            ),
+          )
+          .limit(1);
+        if (!assigned) {
+          return res.status(400).json({ error: "Usuario vinculado invalido" });
+        }
+      }
+    }
+
     const payload: any = {};
     if (data.name !== undefined) payload.name = data.name.trim();
     if (data.code !== undefined) payload.code = normalizeTerminalCode(data.code, existing.code || "CX01");
     if (data.unitId !== undefined) payload.unitId = data.unitId || null;
+    if (data.assignedUserId !== undefined) payload.assignedUserId = data.assignedUserId || null;
     if (data.paymentProvider !== undefined) payload.paymentProvider = data.paymentProvider;
     if (data.mpTerminalId !== undefined) payload.mpTerminalId = data.mpTerminalId || null;
+    if (data.mpAccessToken !== undefined) payload.mpAccessToken = data.mpAccessToken || null;
     if (data.stoneTerminalId !== undefined) payload.stoneTerminalId = data.stoneTerminalId || null;
+    if (data.stoneClientId !== undefined) payload.stoneClientId = data.stoneClientId || null;
+    if (data.stoneClientSecret !== undefined) payload.stoneClientSecret = data.stoneClientSecret || null;
     if (data.isActive !== undefined) payload.isActive = Boolean(data.isActive);
 
     const updated = await db.transaction(async (tx) => {

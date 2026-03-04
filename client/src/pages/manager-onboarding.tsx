@@ -120,9 +120,13 @@ type ManagerPosTerminal = {
   unitId: number | null;
   name: string;
   code: string;
+  assignedUserId: string;
   paymentProvider: "company_default" | "mercadopago" | "stone";
   mpTerminalId: string;
+  mpAccessToken: string;
   stoneTerminalId: string;
+  stoneClientId: string;
+  stoneClientSecret: string;
   isActive: boolean;
 };
 
@@ -133,12 +137,6 @@ export default function ManagerOnboarding() {
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [isManagerAuthenticated, setIsManagerAuthenticated] = useState(false);
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
-  const [stoneValidationStatus, setStoneValidationStatus] = useState<
-    "idle" | "connecting" | "connected"
-  >("idle");
-  const [mpValidationStatus, setMpValidationStatus] = useState<
-    "idle" | "connecting" | "connected"
-  >("idle");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -179,9 +177,13 @@ export default function ManagerOnboarding() {
     unitId: null,
     name: "",
     code: "",
+    assignedUserId: "",
     paymentProvider: "company_default",
     mpTerminalId: "",
+    mpAccessToken: "",
     stoneTerminalId: "",
+    stoneClientId: "",
+    stoneClientSecret: "",
     isActive: true,
   });
 
@@ -290,6 +292,13 @@ export default function ManagerOnboarding() {
     danfeLogoUrl: "",
   });
 
+  const activeCompanyUsers = useMemo(() => {
+    if (!editingTarget) return [] as OnboardingUserRow[];
+    return usersRows.filter(
+      (u) => Number(u.companyId) === Number(editingTarget.companyId) && u.isActive !== false,
+    );
+  }, [usersRows, editingTarget]);
+
   const initialUnitOptions = [
     { key: "DEFAULT_UNIT", code: "MATRIZ", name: "Matriz (padrao)" },
     ...initialUnits
@@ -362,12 +371,16 @@ export default function ManagerOnboarding() {
           unitId: t.unitId === null || t.unitId === undefined ? null : Number(t.unitId),
           name: String(t.name || ""),
           code: String(t.code || ""),
+          assignedUserId: String(t.assignedUserId || ""),
           paymentProvider:
             t.paymentProvider === "mercadopago" || t.paymentProvider === "stone"
               ? t.paymentProvider
               : "company_default",
           mpTerminalId: String(t.mpTerminalId || ""),
+          mpAccessToken: String(t.mpAccessToken || ""),
           stoneTerminalId: String(t.stoneTerminalId || ""),
+          stoneClientId: String(t.stoneClientId || ""),
+          stoneClientSecret: String(t.stoneClientSecret || ""),
           isActive: t.isActive === undefined ? true : Boolean(t.isActive),
         })),
       );
@@ -895,8 +908,6 @@ export default function ManagerOnboarding() {
 
   const resetForm = () => {
     setCompanyFormTab("dados");
-    setStoneValidationStatus("idle");
-    setMpValidationStatus("idle");
     setCompanyForm({
       cnpj: "",
       ie: "",
@@ -986,9 +997,13 @@ export default function ManagerOnboarding() {
       unitId: null,
       name: "",
       code: "",
+      assignedUserId: "",
       paymentProvider: "company_default",
       mpTerminalId: "",
+      mpAccessToken: "",
       stoneTerminalId: "",
+      stoneClientId: "",
+      stoneClientSecret: "",
       isActive: true,
     });
   };
@@ -999,9 +1014,13 @@ export default function ManagerOnboarding() {
       unitId: null,
       name: "",
       code: "",
+      assignedUserId: "",
       paymentProvider: "company_default",
       mpTerminalId: "",
+      mpAccessToken: "",
       stoneTerminalId: "",
+      stoneClientId: "",
+      stoneClientSecret: "",
       isActive: true,
     });
   };
@@ -1028,8 +1047,6 @@ export default function ManagerOnboarding() {
   const openEditForm = (row: OnboardingUserRow) => {
     setUserCreateTarget(null);
     setCompanyFormTab("dados");
-    setStoneValidationStatus("idle");
-    setMpValidationStatus("idle");
     setEditingTarget({ companyId: row.companyId, userId: row.id });
     setCompanyForm({
       cnpj: formatCNPJ(row.cnpj || ""),
@@ -1154,9 +1171,13 @@ export default function ManagerOnboarding() {
         unitId: managerTerminalForm.unitId || undefined,
         name: managerTerminalForm.name.trim(),
         code: managerTerminalForm.code.trim().toUpperCase(),
+        assignedUserId: managerTerminalForm.assignedUserId || undefined,
         paymentProvider: managerTerminalForm.paymentProvider,
         mpTerminalId: managerTerminalForm.mpTerminalId.trim(),
+        mpAccessToken: managerTerminalForm.mpAccessToken.trim(),
         stoneTerminalId: managerTerminalForm.stoneTerminalId.trim(),
+        stoneClientId: managerTerminalForm.stoneClientId.trim(),
+        stoneClientSecret: managerTerminalForm.stoneClientSecret.trim(),
         isActive: managerTerminalForm.isActive,
       };
       const isEditing = Boolean(editingManagerTerminalId);
@@ -1197,9 +1218,13 @@ export default function ManagerOnboarding() {
       unitId: terminal.unitId || null,
       name: terminal.name,
       code: terminal.code || "",
+      assignedUserId: terminal.assignedUserId || "",
       paymentProvider: terminal.paymentProvider || "company_default",
       mpTerminalId: terminal.mpTerminalId || "",
+      mpAccessToken: terminal.mpAccessToken || "",
       stoneTerminalId: terminal.stoneTerminalId || "",
+      stoneClientId: terminal.stoneClientId || "",
+      stoneClientSecret: terminal.stoneClientSecret || "",
       isActive: terminal.isActive !== false,
     });
   };
@@ -1231,62 +1256,6 @@ export default function ManagerOnboarding() {
         variant: "destructive",
       });
     }
-  };
-
-  const handleValidateStone = () => {
-    if (!companyForm.stoneEnabled) {
-      toast({
-        title: "Ative a integracao",
-        description: "Habilite a Stone antes de testar.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (
-      !companyForm.stoneClientId ||
-      !companyForm.stoneClientSecret ||
-      !companyForm.stoneTerminalId
-    ) {
-      toast({
-        title: "Credenciais incompletas",
-        description: "Informe client id, client secret e terminal.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setStoneValidationStatus("connecting");
-    fetch("/api/auth/manager/payments/stone/validate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientId: companyForm.stoneClientId,
-        clientSecret: companyForm.stoneClientSecret,
-        terminalId: companyForm.stoneTerminalId,
-        environment: companyForm.stoneEnvironment || "producao",
-      }),
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({}));
-          throw new Error(error.error || "Falha ao validar Stone");
-        }
-        setStoneValidationStatus("connected");
-        toast({
-          title: "Stone conectada",
-          description: "Credenciais validadas com sucesso.",
-        });
-      })
-      .catch((error) => {
-        setStoneValidationStatus("idle");
-        toast({
-          title: "Nao foi possivel conectar",
-          description:
-            error instanceof Error ? error.message : "Falha ao validar Stone.",
-          variant: "destructive",
-        });
-      });
   };
 
   const handleDanfeLogoFileChange = (file: File | null) => {
@@ -1405,58 +1374,6 @@ export default function ManagerOnboarding() {
     reader.onerror = () =>
       toast({ title: "Falha ao ler imagem", variant: "destructive" });
     reader.readAsDataURL(file);
-  };
-
-  const handleValidateMercadoPago = () => {
-    if (!companyForm.mpEnabled) {
-      toast({
-        title: "Ative a integracao",
-        description: "Habilite o Mercado Pago antes de testar.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!companyForm.mpAccessToken || !companyForm.mpTerminalId) {
-      toast({
-        title: "Credenciais incompletas",
-        description: "Informe access token e terminal/store_id|pos_id.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setMpValidationStatus("connecting");
-    fetch("/api/auth/manager/payments/mercadopago/validate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        accessToken: companyForm.mpAccessToken,
-        terminalId: companyForm.mpTerminalId,
-      }),
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({}));
-          throw new Error(error.error || "Falha ao validar Mercado Pago");
-        }
-        setMpValidationStatus("connected");
-        toast({
-          title: "Mercado Pago validado",
-          description: "Credenciais validadas com sucesso.",
-        });
-      })
-      .catch((error) => {
-        setMpValidationStatus("idle");
-        toast({
-          title: "Nao foi possivel validar",
-          description:
-            error instanceof Error
-              ? error.message
-              : "Falha ao validar Mercado Pago.",
-          variant: "destructive",
-        });
-      });
   };
 
   const companyRows = useMemo(() => {
@@ -2313,192 +2230,6 @@ export default function ManagerOnboarding() {
                   </p>
                 </div>
 
-                  </TabsContent>
-
-                  <TabsContent value="integracoes" className="space-y-4">
-                <div className="rounded-lg border p-4 space-y-4">
-                  <div>
-                    <h3 className="font-medium">Integracoes de maquininha</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Configure Stone e Mercado Pago para a empresa no onboarding manager.
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="stoneEnabled"
-                        type="checkbox"
-                        checked={companyForm.stoneEnabled}
-                        onChange={(e) =>
-                          setCompanyForm((prev) => ({
-                            ...prev,
-                            stoneEnabled: e.target.checked,
-                          }))
-                        }
-                      />
-                      <Label htmlFor="stoneEnabled">Habilitar Stone</Label>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="stoneClientId">Stone Client ID</Label>
-                        <Input
-                          id="stoneClientId"
-                          value={companyForm.stoneClientId}
-                          onChange={(e) =>
-                            setCompanyForm((prev) => ({
-                              ...prev,
-                              stoneClientId: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="stoneClientSecret">Stone Client Secret</Label>
-                        <Input
-                          id="stoneClientSecret"
-                          type="password"
-                          value={companyForm.stoneClientSecret}
-                          onChange={(e) =>
-                            setCompanyForm((prev) => ({
-                              ...prev,
-                              stoneClientSecret: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="stoneTerminalId">Stone Terminal ID</Label>
-                        <Input
-                          id="stoneTerminalId"
-                          value={companyForm.stoneTerminalId}
-                          onChange={(e) =>
-                            setCompanyForm((prev) => ({
-                              ...prev,
-                              stoneTerminalId: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="stoneEnvironment">Ambiente Stone</Label>
-                        <select
-                          id="stoneEnvironment"
-                          className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                          value={companyForm.stoneEnvironment}
-                          onChange={(e) =>
-                            setCompanyForm((prev) => ({
-                              ...prev,
-                              stoneEnvironment: e.target.value,
-                            }))
-                          }
-                        >
-                          <option value="producao">Producao</option>
-                          <option value="homologacao">Homologacao</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleValidateStone}
-                        disabled={stoneValidationStatus === "connecting"}
-                      >
-                        {stoneValidationStatus === "connecting" ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Testando Stone...
-                          </>
-                        ) : (
-                          "Testar conexao Stone"
-                        )}
-                      </Button>
-                      {stoneValidationStatus === "connected" && (
-                        <span className="text-sm text-green-600">Stone validada</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="mpEnabled"
-                        type="checkbox"
-                        checked={companyForm.mpEnabled}
-                        onChange={(e) =>
-                          setCompanyForm((prev) => ({
-                            ...prev,
-                            mpEnabled: e.target.checked,
-                          }))
-                        }
-                      />
-                      <Label htmlFor="mpEnabled">Habilitar Mercado Pago</Label>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="mpAccessToken">MP Access Token</Label>
-                        <Input
-                          id="mpAccessToken"
-                          type="password"
-                          value={companyForm.mpAccessToken}
-                          onChange={(e) =>
-                            setCompanyForm((prev) => ({
-                              ...prev,
-                              mpAccessToken: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="mpTerminalId">MP Terminal (store_id|pos_id ou terminal_id)</Label>
-                        <Input
-                          id="mpTerminalId"
-                          value={companyForm.mpTerminalId}
-                          onChange={(e) =>
-                            setCompanyForm((prev) => ({
-                              ...prev,
-                              mpTerminalId: e.target.value,
-                            }))
-                          }
-                          placeholder="STORE123|POS456"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleValidateMercadoPago}
-                        disabled={mpValidationStatus === "connecting"}
-                      >
-                        {mpValidationStatus === "connecting" ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Testando Mercado Pago...
-                          </>
-                        ) : (
-                          "Testar conexao Mercado Pago"
-                        )}
-                      </Button>
-                      {mpValidationStatus === "connected" && (
-                        <span className="text-sm text-green-600">
-                          Mercado Pago validado
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
                   </TabsContent>
 
                   <TabsContent value="impressao" className="space-y-4">
@@ -3573,7 +3304,7 @@ export default function ManagerOnboarding() {
                       <h4 className="font-medium">
                         {editingManagerTerminalId ? "Editar terminal" : "Novo terminal"}
                       </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="space-y-2">
                           <Label>Nome</Label>
                           <Input
@@ -3620,6 +3351,26 @@ export default function ManagerOnboarding() {
                             ))}
                           </select>
                         </div>
+                        <div className="space-y-2">
+                          <Label>Usuario do caixa</Label>
+                          <select
+                            className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={managerTerminalForm.assignedUserId || ""}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                assignedUserId: e.target.value || "",
+                              }))
+                            }
+                          >
+                            <option value="">Sem vinculo (qualquer usuario)</option>
+                            {activeCompanyUsers.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.name} ({u.email})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="space-y-2">
@@ -3656,6 +3407,20 @@ export default function ManagerOnboarding() {
                           />
                         </div>
                         <div className="space-y-2">
+                          <Label>MP Access Token</Label>
+                          <Input
+                            type="password"
+                            value={managerTerminalForm.mpAccessToken}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                mpAccessToken: e.target.value,
+                              }))
+                            }
+                            placeholder="APP_USR-..."
+                          />
+                        </div>
+                        <div className="space-y-2">
                           <Label>Stone Terminal ID</Label>
                           <Input
                             value={managerTerminalForm.stoneTerminalId}
@@ -3666,6 +3431,35 @@ export default function ManagerOnboarding() {
                               }))
                             }
                             placeholder="Terminal Stone"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label>Stone Client ID</Label>
+                          <Input
+                            value={managerTerminalForm.stoneClientId}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                stoneClientId: e.target.value,
+                              }))
+                            }
+                            placeholder="Client ID Stone"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Stone Client Secret</Label>
+                          <Input
+                            type="password"
+                            value={managerTerminalForm.stoneClientSecret}
+                            onChange={(e) =>
+                              setManagerTerminalForm((prev) => ({
+                                ...prev,
+                                stoneClientSecret: e.target.value,
+                              }))
+                            }
+                            placeholder="Client Secret Stone"
                           />
                         </div>
                         <div className="space-y-2">

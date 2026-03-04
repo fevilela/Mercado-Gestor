@@ -132,7 +132,10 @@ interface PosTerminal {
   assignedUserId?: string | null;
   paymentProvider?: "company_default" | "mercadopago" | "stone" | "";
   mpTerminalId?: string;
+  mpAccessToken?: string;
   stoneTerminalId?: string;
+  stoneClientId?: string;
+  stoneClientSecret?: string;
   isAutonomous: boolean;
   requiresSangria: boolean;
   requiresSuprimento: boolean;
@@ -257,7 +260,10 @@ export default function Settings() {
     assignedUserId: "",
     paymentProvider: "company_default",
     mpTerminalId: "",
+    mpAccessToken: "",
     stoneTerminalId: "",
+    stoneClientId: "",
+    stoneClientSecret: "",
     isAutonomous: false,
     requiresSangria: true,
     requiresSuprimento: true,
@@ -416,7 +422,10 @@ export default function Settings() {
           assignedUserId: "",
           paymentProvider: "company_default",
           mpTerminalId: "",
+          mpAccessToken: "",
           stoneTerminalId: "",
+          stoneClientId: "",
+          stoneClientSecret: "",
           isAutonomous: false,
           requiresSangria: true,
           requiresSuprimento: true,
@@ -2373,6 +2382,52 @@ export default function Settings() {
                         />
                       </div>
                     </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="terminal-mp-token">MP Access Token</Label>
+                        <Input
+                          id="terminal-mp-token"
+                          type="password"
+                          placeholder="APP_USR-..."
+                          value={newTerminal.mpAccessToken || ""}
+                          onChange={(e) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              mpAccessToken: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="terminal-stone-client-id">Stone Client ID</Label>
+                        <Input
+                          id="terminal-stone-client-id"
+                          placeholder="Client ID Stone"
+                          value={newTerminal.stoneClientId || ""}
+                          onChange={(e) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              stoneClientId: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="terminal-stone-client-secret">Stone Client Secret</Label>
+                        <Input
+                          id="terminal-stone-client-secret"
+                          type="password"
+                          placeholder="Client Secret Stone"
+                          value={newTerminal.stoneClientSecret || ""}
+                          onChange={(e) =>
+                            setNewTerminal({
+                              ...newTerminal,
+                              stoneClientSecret: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
                     <Separator />
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
@@ -2574,6 +2629,46 @@ export default function Settings() {
                                     setEditingTerminal({
                                       ...editingTerminal,
                                       stoneTerminalId: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div className="space-y-2">
+                                <Label>MP Access Token</Label>
+                                <Input
+                                  type="password"
+                                  value={editingTerminal.mpAccessToken || ""}
+                                  onChange={(e) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      mpAccessToken: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Stone Client ID</Label>
+                                <Input
+                                  value={editingTerminal.stoneClientId || ""}
+                                  onChange={(e) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      stoneClientId: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Stone Client Secret</Label>
+                                <Input
+                                  type="password"
+                                  value={editingTerminal.stoneClientSecret || ""}
+                                  onChange={(e) =>
+                                    setEditingTerminal({
+                                      ...editingTerminal,
+                                      stoneClientSecret: e.target.value,
                                     })
                                   }
                                 />

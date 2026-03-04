@@ -1601,59 +1601,78 @@ export async function registerRoutes(
         const { amount, method, posTerminalId } = paymentAuthorizeSchema.parse(
           req.body
         );
-        const settings = await storage.getCompanySettings(companyId);
-        let effectiveSettings = settings;
+        if (!posTerminalId) {
+          return res.status(400).json({
+            error: "Selecione um caixa para usar a configuracao da maquininha",
+          });
+        }
+        const terminalAccess = await userCanAccessTerminal(
+          req,
+          companyId,
+          posTerminalId
+        );
+        if (!terminalAccess.ok) {
+          return res.status(terminalAccess.status).json({ error: terminalAccess.error });
+        }
+        const posTerminal = terminalAccess.terminal!;
 
-        if (posTerminalId) {
-          const terminalAccess = await userCanAccessTerminal(
-            req,
-            companyId,
-            posTerminalId
-          );
-          if (!terminalAccess.ok) {
-            return res.status(terminalAccess.status).json({ error: terminalAccess.error });
-          }
-          const posTerminal = terminalAccess.terminal!;
-
-          let linkedMachine: any = null;
-          if (posTerminal.paymentMachineId) {
-            const [machine] = await db
-              .select()
-              .from(paymentMachines)
-              .where(
-                and(
-                  eq(paymentMachines.id, posTerminal.paymentMachineId),
-                  eq(paymentMachines.companyId, companyId),
-                  eq(paymentMachines.isActive, true)
-                )
+        let linkedMachine: any = null;
+        if (posTerminal.paymentMachineId) {
+          const [machine] = await db
+            .select()
+            .from(paymentMachines)
+            .where(
+              and(
+                eq(paymentMachines.id, posTerminal.paymentMachineId),
+                eq(paymentMachines.companyId, companyId),
+                eq(paymentMachines.isActive, true)
               )
-              .limit(1);
-            linkedMachine = machine || null;
-          }
+            )
+            .limit(1);
+          linkedMachine = machine || null;
+        }
 
-          effectiveSettings = {
-            ...(settings || {}),
-            mpTerminalId:
-              linkedMachine?.mpTerminalId ||
-              posTerminal.mpTerminalId ||
-              settings?.mpTerminalId ||
-              "",
-            stoneTerminalId:
-              linkedMachine?.stoneTerminalId ||
-              posTerminal.stoneTerminalId ||
-              settings?.stoneTerminalId ||
-              "",
-          } as any;
+        let effectiveSettings: any = {
+          mpEnabled: false,
+          stoneEnabled: false,
+          mpTerminalId:
+            linkedMachine?.mpTerminalId ||
+            posTerminal.mpTerminalId ||
+            "",
+          mpAccessToken: posTerminal.mpAccessToken || "",
+          stoneTerminalId:
+            linkedMachine?.stoneTerminalId ||
+            posTerminal.stoneTerminalId ||
+            "",
+          stoneClientId: posTerminal.stoneClientId || "",
+          stoneClientSecret: posTerminal.stoneClientSecret || "",
+        };
 
-          const resolvedProvider =
-            linkedMachine?.provider || posTerminal.paymentProvider || "company_default";
+        const resolvedProvider =
+          linkedMachine?.provider || posTerminal.paymentProvider || "company_default";
 
-          if (resolvedProvider === "mercadopago") {
-            (effectiveSettings as any).mpEnabled = true;
-            (effectiveSettings as any).stoneEnabled = false;
-          } else if (resolvedProvider === "stone") {
-            (effectiveSettings as any).stoneEnabled = true;
-            (effectiveSettings as any).mpEnabled = false;
+        if (resolvedProvider === "mercadopago") {
+          effectiveSettings.mpEnabled = true;
+          effectiveSettings.stoneEnabled = false;
+        } else if (resolvedProvider === "stone") {
+          effectiveSettings.stoneEnabled = true;
+          effectiveSettings.mpEnabled = false;
+        } else {
+          // company_default now resolves only by terminal data (no company fallback).
+          const hasTerminalMp = Boolean(
+            String(linkedMachine?.mpTerminalId || posTerminal.mpTerminalId || "").trim()
+          );
+          const hasTerminalStone = Boolean(
+            String(
+              linkedMachine?.stoneTerminalId || posTerminal.stoneTerminalId || ""
+            ).trim()
+          );
+          if (hasTerminalMp && !hasTerminalStone) {
+            effectiveSettings.mpEnabled = true;
+            effectiveSettings.stoneEnabled = false;
+          } else if (hasTerminalStone && !hasTerminalMp) {
+            effectiveSettings.stoneEnabled = true;
+            effectiveSettings.mpEnabled = false;
           }
         }
 
@@ -3923,7 +3942,10 @@ export async function registerRoutes(
       .optional()
       .nullable(),
     mpTerminalId: z.string().optional().nullable(),
+    mpAccessToken: z.string().optional().nullable(),
     stoneTerminalId: z.string().optional().nullable(),
+    stoneClientId: z.string().optional().nullable(),
+    stoneClientSecret: z.string().optional().nullable(),
     isAutonomous: z.boolean().optional(),
     requiresSangria: z.boolean().optional(),
     requiresSuprimento: z.boolean().optional(),
