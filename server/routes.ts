@@ -1603,7 +1603,8 @@ export async function registerRoutes(
         );
         if (!posTerminalId) {
           return res.status(400).json({
-            error: "Selecione um caixa para usar a configuracao da maquininha",
+            error:
+              "Nenhum caixa PDV disponivel para este usuario/unidade. Selecione um caixa valido ou ajuste o vinculo em 'Usuario do caixa'.",
           });
         }
         const terminalAccess = await userCanAccessTerminal(

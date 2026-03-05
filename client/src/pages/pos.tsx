@@ -851,6 +851,16 @@ export default function POS() {
       return;
     }
 
+    if (tefMethod !== "pix" && posTerminals.length === 0) {
+      toast({
+        title: "Nenhum terminal PDV disponivel",
+        description:
+          "Nao ha caixa ativo/vinculado para seu usuario nesta unidade. Verifique o 'Usuario do caixa' e a unidade do terminal.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (tefMethod !== "pix" && posTerminals.length > 0 && !selectedPosTerminal?.id) {
       toast({
         title: "Selecione um terminal PDV",

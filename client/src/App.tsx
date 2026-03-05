@@ -1,4 +1,4 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import "@/lib/printer-bridge-adapter";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -30,6 +30,15 @@ import Notifications from "@/pages/notifications";
 import { CertificateConfig } from "@/pages/certificate-config";
 import SequentialNumberingConfig from "@/pages/sequential-numbering-config";
 import { Loader2 } from "lucide-react";
+
+function isCashierRole(roleName?: string | null) {
+  if (!roleName) return false;
+  const normalized = roleName
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return normalized.includes("caixa");
+}
 
 function ProtectedRoute({
   component: Component,
@@ -76,6 +85,14 @@ function PublicRoute({
 }
 
 function Router() {
+  const { isAuthenticated, user } = useAuth();
+  const [location] = useLocation();
+  const lockToPos = isAuthenticated && isCashierRole(user?.role?.name);
+
+  if (lockToPos && location !== "/pos") {
+    return <Redirect to="/pos" />;
+  }
+
   return (
     <Switch>
       <Route path="/login">
