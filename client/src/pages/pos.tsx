@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Card } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -1651,6 +1652,36 @@ export default function POS() {
         {pdvLoadError && (
           <div className="mx-4 mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
             Nenhuma carga enviada para o PDV. Gere a carga para atualizar produtos e pagamentos.
+          </div>
+        )}
+
+        {posTerminals.length === 0 && posTerminalDiagnostics?.summary && (
+          <div className="mx-4 mt-4">
+            <Alert className="border-red-200 bg-red-50 text-red-900">
+              <AlertTitle>Diagnostico do terminal PDV</AlertTitle>
+              <AlertDescription>
+                <div className="space-y-2 text-sm">
+                  <p>{posTerminalDiagnostics.summary}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline" className="border-red-300 bg-white text-red-900">
+                      Unidade atual: {unit?.name || "Sem unidade"} {unit?.id ? `(#${unit.id})` : ""}
+                    </Badge>
+                    <Badge variant="outline" className="border-red-300 bg-white text-red-900">
+                      Usuario: {user?.name || "Sem usuario"} {user?.id ? `(${user.id.slice(0, 8)})` : ""}
+                    </Badge>
+                    <Badge variant="outline" className="border-red-300 bg-white text-red-900">
+                      Visiveis: {posTerminalDiagnostics.counts?.visible ?? 0}
+                    </Badge>
+                    <Badge variant="outline" className="border-red-300 bg-white text-red-900">
+                      Na unidade: {posTerminalDiagnostics.counts?.inCurrentUnit ?? 0}
+                    </Badge>
+                    <Badge variant="outline" className="border-red-300 bg-white text-red-900">
+                      Ativos: {posTerminalDiagnostics.counts?.active ?? 0}
+                    </Badge>
+                  </div>
+                </div>
+              </AlertDescription>
+            </Alert>
           </div>
         )}
 
