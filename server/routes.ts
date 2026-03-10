@@ -3923,10 +3923,22 @@ export async function registerRoutes(
     try {
       const companyId = getCompanyId(req);
       const unitId = getUnitId(req);
+      const userId = getUserId(req);
       if (!companyId) return res.status(401).json({ error: "Não autenticado" });
 
       const terminals = await storage.getAllPosTerminals(companyId, unitId);
-      res.json(terminals);
+      const userPerms = (req.session?.userPermissions || []) as string[];
+      const isAdminOverride =
+        userPerms.includes("users:manage") || userPerms.includes("settings:edit");
+      const visibleTerminals = isAdminOverride
+        ? terminals
+        : terminals.filter((terminal: any) => {
+            const assignedUserId = String(terminal?.assignedUserId || "").trim();
+            if (!assignedUserId) return true;
+            return assignedUserId === String(userId || "");
+          });
+
+      res.json(visibleTerminals);
     } catch (error) {
       console.error("Failed to fetch POS terminals:", error);
       res.status(500).json({ error: "Falha ao buscar terminais PDV" });

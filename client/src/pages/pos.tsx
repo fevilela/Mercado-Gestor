@@ -161,14 +161,9 @@ export default function POS() {
   });
   const isAdminTerminalOverride =
     hasPermission("users:manage") || hasPermission("settings:edit");
-  const posTerminals = ((posTerminalsData || []) as PosTerminalConfig[])
-    .filter((t) => t?.isActive !== false)
-    .filter((t) => {
-      const assigned = String(t?.assignedUserId || "").trim();
-      if (!assigned) return true;
-      if (isAdminTerminalOverride) return true;
-      return assigned === String(user?.id || "");
-    });
+  const posTerminals = ((posTerminalsData || []) as PosTerminalConfig[]).filter(
+    (t) => t?.isActive !== false
+  );
   const selectedPosTerminal =
     posTerminals.find((t) => t.id === selectedPosTerminalId) || null;
   const terminalStorageKey = `pdv:selected-terminal-id:${company?.id || "no-company"}:${unit?.id || "no-unit"}`;
@@ -855,7 +850,7 @@ export default function POS() {
       toast({
         title: "Nenhum terminal PDV disponivel",
         description:
-          "Nao ha caixa ativo/vinculado para seu usuario nesta unidade. Verifique o 'Usuario do caixa' e a unidade do terminal.",
+          "Nao ha terminal PDV vinculado ao seu usuario nesta unidade. Verifique o 'Usuario do caixa' e a unidade do terminal.",
         variant: "destructive",
       });
       return;
