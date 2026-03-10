@@ -1252,6 +1252,62 @@ export async function registerRoutes(
     }
     return { ok: true as const, status: 200, error: null, terminal };
   };
+  const analyzePosTerminalAvailability = async (req: any, companyId: number) => {
+    const currentUserId = String(getUserId(req) || "").trim();
+    const currentUnitId = getUnitId(req);
+    const userPerms = (req.session?.userPermissions || []) as string[];
+    const isAdminOverride =
+      userPerms.includes("users:manage") || userPerms.includes("settings:edit");
+
+    const allTerminals = await storage.getAllPosTerminals(companyId);
+    const activeTerminals = allTerminals.filter((terminal: any) => terminal?.isActive !== false);
+    const unitScopedTerminals =
+      currentUnitId == null
+        ? activeTerminals
+        : activeTerminals.filter((terminal: any) => {
+            const unitId = terminal?.unitId;
+            return unitId == null || Number(unitId) === Number(currentUnitId);
+          });
+    const visibleTerminals = isAdminOverride
+      ? unitScopedTerminals
+      : unitScopedTerminals.filter((terminal: any) => {
+          const assignedUserId = String(terminal?.assignedUserId || "").trim();
+          if (!assignedUserId) return true;
+          return assignedUserId === currentUserId;
+        });
+
+    let summary = "OK";
+    if (!allTerminals.length) {
+      summary = "Nenhum terminal PDV cadastrado para esta empresa.";
+    } else if (!activeTerminals.length) {
+      summary = "Existem terminais cadastrados, mas todos estao inativos.";
+    } else if (currentUnitId != null && !unitScopedTerminals.length) {
+      summary =
+        "Existem terminais ativos, mas nenhum esta cadastrado para a unidade atual.";
+    } else if (!visibleTerminals.length) {
+      const hasAssignedToOtherUser = unitScopedTerminals.some((terminal: any) => {
+        const assignedUserId = String(terminal?.assignedUserId || "").trim();
+        return assignedUserId.length > 0 && assignedUserId !== currentUserId;
+      });
+      summary = hasAssignedToOtherUser
+        ? "Existem terminais ativos nesta unidade, mas eles estao vinculados a outro usuario."
+        : "Existem terminais na unidade atual, mas nenhum ficou disponivel para a sessao atual.";
+    }
+
+    return {
+      currentUserId: currentUserId || null,
+      currentUnitId: currentUnitId || null,
+      isAdminOverride,
+      summary,
+      counts: {
+        total: allTerminals.length,
+        active: activeTerminals.length,
+        inCurrentUnit: unitScopedTerminals.length,
+        visible: visibleTerminals.length,
+      },
+      visibleTerminals,
+    };
+  };
   const stoneValidationSchema = z.object({
     clientId: z.string().min(1),
     clientSecret: z.string().min(1),
@@ -3922,26 +3978,31 @@ export async function registerRoutes(
   app.get("/api/pos-terminals", requireAuth, async (req, res) => {
     try {
       const companyId = getCompanyId(req);
-      const unitId = getUnitId(req);
-      const userId = getUserId(req);
       if (!companyId) return res.status(401).json({ error: "Não autenticado" });
-
-      const terminals = await storage.getAllPosTerminals(companyId, unitId);
-      const userPerms = (req.session?.userPermissions || []) as string[];
-      const isAdminOverride =
-        userPerms.includes("users:manage") || userPerms.includes("settings:edit");
-      const visibleTerminals = isAdminOverride
-        ? terminals
-        : terminals.filter((terminal: any) => {
-            const assignedUserId = String(terminal?.assignedUserId || "").trim();
-            if (!assignedUserId) return true;
-            return assignedUserId === String(userId || "");
-          });
-
-      res.json(visibleTerminals);
+      const diagnostics = await analyzePosTerminalAvailability(req, companyId);
+      res.json(diagnostics.visibleTerminals);
     } catch (error) {
       console.error("Failed to fetch POS terminals:", error);
       res.status(500).json({ error: "Falha ao buscar terminais PDV" });
+    }
+  });
+
+  app.get("/api/pos-terminals/diagnostics", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) return res.status(401).json({ error: "NÃ£o autenticado" });
+      const diagnostics = await analyzePosTerminalAvailability(req, companyId);
+
+      res.json({
+        summary: diagnostics.summary,
+        currentUserId: diagnostics.currentUserId,
+        currentUnitId: diagnostics.currentUnitId,
+        isAdminOverride: diagnostics.isAdminOverride,
+        counts: diagnostics.counts,
+      });
+    } catch (error) {
+      console.error("Failed to fetch POS terminal diagnostics:", error);
+      res.status(500).json({ error: "Falha ao diagnosticar terminais PDV" });
     }
   });
 

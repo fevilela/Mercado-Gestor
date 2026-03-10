@@ -80,6 +80,17 @@ type PosTerminalConfig = {
   mpTerminalId?: string | null;
   stoneTerminalId?: string | null;
 };
+type PosTerminalDiagnostics = {
+  summary?: string | null;
+  currentUserId?: string | null;
+  currentUnitId?: number | null;
+  counts?: {
+    total: number;
+    active: number;
+    inCurrentUnit: number;
+    visible: number;
+  } | null;
+};
 
 type HybridPrinterBridge = {
   printPdfUrl?: (url: string, meta?: { fileName?: string }) => Promise<boolean> | boolean;
@@ -156,6 +167,14 @@ export default function POS() {
     queryFn: async () => {
       const res = await fetch("/api/pos-terminals");
       if (!res.ok) throw new Error("Failed to fetch POS terminals");
+      return res.json();
+    },
+  });
+  const { data: posTerminalDiagnostics } = useQuery<PosTerminalDiagnostics>({
+    queryKey: ["/api/pos-terminals/diagnostics"],
+    queryFn: async () => {
+      const res = await fetch("/api/pos-terminals/diagnostics");
+      if (!res.ok) throw new Error("Failed to fetch POS terminal diagnostics");
       return res.json();
     },
   });
@@ -850,6 +869,7 @@ export default function POS() {
       toast({
         title: "Nenhum terminal PDV disponivel",
         description:
+          posTerminalDiagnostics?.summary ||
           "Nao ha terminal PDV vinculado ao seu usuario nesta unidade. Verifique o 'Usuario do caixa' e a unidade do terminal.",
         variant: "destructive",
       });
