@@ -328,6 +328,14 @@ export default function ProductForm({
   const [operationalConfig, setOperationalConfig] = useState<ProductOperationalConfig>(
     defaultOperationalConfig
   );
+  const [priceSyncSource, setPriceSyncSource] = useState<"margin" | "price">(
+    "margin"
+  );
+
+  const purchasePriceField = form.register("purchasePrice");
+  const marginField = form.register("margin");
+  const priceField = form.register("price");
+  const promoPriceField = form.register("promoPrice");
 
   const watchPurchasePrice = form.watch("purchasePrice");
   const watchMargin = form.watch("margin");
@@ -451,6 +459,7 @@ export default function ProductForm({
   }, [watchProductName, editProduct, lookupFiscalDataByName]);
 
   useEffect(() => {
+    if (priceSyncSource !== "margin") return;
     if (watchPurchasePrice && watchMargin) {
       const purchase = parseFloat(watchPurchasePrice);
       const margin = parseFloat(watchMargin);
@@ -463,9 +472,10 @@ export default function ProductForm({
         }
       }
     }
-  }, [watchPurchasePrice, watchMargin, form]);
+  }, [watchPurchasePrice, watchMargin, form, priceSyncSource]);
 
   useEffect(() => {
+    if (priceSyncSource !== "price") return;
     if (watchPurchasePrice && watchPrice) {
       const purchase = parseFloat(watchPurchasePrice);
       const sale = parseFloat(watchPrice);
@@ -479,7 +489,7 @@ export default function ProductForm({
         }
       }
     }
-  }, [watchPurchasePrice, watchPrice, watchMargin, form]);
+  }, [watchPurchasePrice, watchPrice, watchMargin, form, priceSyncSource]);
 
   useEffect(() => {
     if (!open) return;
@@ -555,6 +565,7 @@ export default function ProductForm({
       setKitItemsList(editProduct.kitItems || []);
     } else {
       form.reset();
+      setPriceSyncSource("margin");
       setOperationalConfig(defaultOperationalConfig);
       setVariations([]);
       setMediaItems([]);
@@ -1219,7 +1230,10 @@ export default function ProductForm({
                         </Label>
                         <Input
                           id="purchasePrice"
-                          {...form.register("purchasePrice")}
+                          {...purchasePriceField}
+                          onChange={(event) => {
+                            purchasePriceField.onChange(event);
+                          }}
                           type="number"
                           step="0.01"
                           placeholder="0.00"
@@ -1229,7 +1243,11 @@ export default function ProductForm({
                         <Label htmlFor="margin">Margem (%)</Label>
                         <Input
                           id="margin"
-                          {...form.register("margin")}
+                          {...marginField}
+                          onChange={(event) => {
+                            setPriceSyncSource("margin");
+                            marginField.onChange(event);
+                          }}
                           type="number"
                           step="0.01"
                           placeholder="30"
@@ -1239,7 +1257,11 @@ export default function ProductForm({
                         <Label htmlFor="price">Preço de Venda (R$) *</Label>
                         <Input
                           id="price"
-                          {...form.register("price")}
+                          {...priceField}
+                          onChange={(event) => {
+                            setPriceSyncSource("price");
+                            priceField.onChange(event);
+                          }}
                           type="number"
                           step="0.01"
                           placeholder="0.00"
@@ -1268,7 +1290,7 @@ export default function ProductForm({
                         </div>
                         <Input
                           id="promoPrice"
-                          {...form.register("promoPrice")}
+                          {...promoPriceField}
                           type="number"
                           step="0.01"
                           placeholder="0.00"
