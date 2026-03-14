@@ -265,6 +265,7 @@ export const products = pgTable("products", {
   origin: text("origin").default("nacional"),
   description: text("description"),
   mainImageUrl: text("main_image_url"),
+  operationalConfig: jsonb("operational_config"),
   purchasePrice: decimal("purchase_price", { precision: 10, scale: 2 }),
   margin: decimal("margin", { precision: 5, scale: 2 }),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
@@ -272,9 +273,9 @@ export const products = pgTable("products", {
   expirationDate: text("expiration_date"),
   promoStart: timestamp("promo_start"),
   promoEnd: timestamp("promo_end"),
-  stock: integer("stock").notNull().default(0),
-  minStock: integer("min_stock").default(10),
-  maxStock: integer("max_stock").default(100),
+  stock: decimal("stock", { precision: 12, scale: 3 }).notNull().default("0"),
+  minStock: decimal("min_stock", { precision: 12, scale: 3 }).default("10"),
+  maxStock: decimal("max_stock", { precision: 12, scale: 3 }).default("100"),
   isKit: boolean("is_kit").default(false),
   isActive: boolean("is_active").default(true),
   supplierId: integer("supplier_id"),
@@ -308,6 +309,19 @@ export const insertProductSchema = createInsertSchema(products).omit({
 });
 export type InsertProduct = z.infer<typeof insertProductSchema>;
 export type Product = typeof products.$inferSelect;
+export type ProductSaleMode = "unit" | "weight" | "unit_or_weight";
+export type ProductStockUnit = "UN" | "KG";
+export type ProductProcessingStage = "raw" | "cooked";
+export type ProductOperationalConfig = {
+  enabled?: boolean;
+  stockUnit?: ProductStockUnit;
+  saleMode?: ProductSaleMode;
+  averageUnitWeightKg?: number | null;
+  carcassYieldPercent?: number | null;
+  cookingYieldPercent?: number | null;
+  purchaseStage?: ProductProcessingStage | null;
+  saleStage?: ProductProcessingStage | null;
+};
 
 export const productVariations = pgTable("product_variations", {
   id: serial("id").primaryKey(),
@@ -495,7 +509,10 @@ export const saleItems = pgTable("sale_items", {
   saleId: integer("sale_id").notNull(),
   productId: integer("product_id").notNull(),
   productName: text("product_name").notNull(),
-  quantity: integer("quantity").notNull(),
+  quantity: decimal("quantity", { precision: 12, scale: 3 }).notNull(),
+  saleUnit: text("sale_unit").notNull().default("UN"),
+  stockQuantity: decimal("stock_quantity", { precision: 12, scale: 3 }),
+  stockUnit: text("stock_unit"),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
   // ===== Tributação do Item =====
@@ -536,7 +553,7 @@ export const inventoryMovements = pgTable("inventory_movements", {
   productId: integer("product_id").notNull(),
   variationId: integer("variation_id"),
   type: text("type").notNull(),
-  quantity: integer("quantity").notNull(),
+  quantity: decimal("quantity", { precision: 12, scale: 3 }).notNull(),
   reason: text("reason"),
   referenceId: integer("reference_id"),
   referenceType: text("reference_type"),
@@ -593,6 +610,7 @@ export const companySettings = pgTable("company_settings", {
   barcodeScannerEnabled: boolean("barcode_scanner_enabled").default(true),
   barcodeScannerAutoAdd: boolean("barcode_scanner_auto_add").default(true),
   barcodeScannerBeep: boolean("barcode_scanner_beep").default(true),
+  butcherEnabled: boolean("butcher_enabled").default(false),
   cashRegisterRequired: boolean("cash_register_required").default(true),
   nfeEnabled: boolean("nfe_enabled").default(false),
   nfceEnabled: boolean("nfce_enabled").default(true),

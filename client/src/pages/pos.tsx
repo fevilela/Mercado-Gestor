@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -40,6 +41,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
@@ -110,9 +118,27 @@ declare global {
   }
 }
 
+type ProductOperationalConfig = {
+  enabled?: boolean;
+  stockUnit?: "UN" | "KG";
+  saleMode?: "unit" | "weight" | "unit_or_weight";
+  averageUnitWeightKg?: number | null;
+  carcassYieldPercent?: number | null;
+  cookingYieldPercent?: number | null;
+  purchaseStage?: "raw" | "cooked" | null;
+  saleStage?: "raw" | "cooked" | null;
+};
+
+type CartItem = {
+  key: string;
+  product: any;
+  qty: number;
+  saleUnit: "UN" | "KG";
+};
+
 export default function POS() {
   const [, setLocation] = useLocation();
-  const [cart, setCart] = useState<{ product: any; qty: number }[]>([]);
+  const [cart, setCart] = useState<CartItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isFinishing, setIsFinishing] = useState(false);
   const [fiscalStatus, setFiscalStatus] = useState<FiscalStatus>("idle");
@@ -127,15 +153,17 @@ export default function POS() {
   const [showPixQrDialog, setShowPixQrDialog] = useState(false);
   const [showTerminalActionDialog, setShowTerminalActionDialog] = useState(false);
   const [showExitPdvDialog, setShowExitPdvDialog] = useState(false);
+  const [showWeightDialog, setShowWeightDialog] = useState(false);
   const [exitPdvPassword, setExitPdvPassword] = useState("");
+  const [weightInput, setWeightInput] = useState("");
+  const [weightMode, setWeightMode] = useState<"UN" | "KG">("KG");
+  const [weightProduct, setWeightProduct] = useState<any | null>(null);
   const [terminalLockActive, setTerminalLockActive] = useState(false);
   const [terminalLockReference, setTerminalLockReference] = useState<
     string | null
   >(null);
   const [isReleasingTerminal, setIsReleasingTerminal] = useState(false);
-  const [cancelledItems, setCancelledItems] = useState<
-    { product: any; qty: number }[]
-  >([]);
+  const [cancelledItems, setCancelledItems] = useState<CartItem[]>([]);
   const [cancelledTotal, setCancelledTotal] = useState(0);
   const [showOpenCashDialog, setShowOpenCashDialog] = useState(false);
   const [showSangriaDialog, setShowSangriaDialog] = useState(false);
@@ -524,6 +552,29 @@ export default function POS() {
     const value = Number(product?.price ?? 0);
     return Number.isFinite(value) ? value : 0;
   };
+  const normalizeOperationalConfig = (
+    value: unknown
+  ): ProductOperationalConfig => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    return value as ProductOperationalConfig;
+  };
+  const getProductOperationalConfig = (product: any) =>
+    normalizeOperationalConfig(product?.operationalConfig);
+  const supportsWeightSale = (product: any) => {
+    if (!settings?.butcherEnabled) return false;
+    const config = getProductOperationalConfig(product);
+    if (!config.enabled) return false;
+    return config.saleMode === "weight" || config.saleMode === "unit_or_weight";
+  };
+  const getDefaultSaleUnit = (product: any): "UN" | "KG" => {
+    const config = getProductOperationalConfig(product);
+    if (config.enabled && config.saleMode === "weight") return "KG";
+    return "UN";
+  };
+  const getCartItemKey = (productId: number, saleUnit: "UN" | "KG") =>
+    `${productId}:${saleUnit}`;
   const paymentMethods = (pdvLoad?.paymentMethods || []) as PdvPaymentMethod[];
   const normalizeText = (value: string) =>
     String(value || "")
@@ -628,17 +679,56 @@ export default function POS() {
     },
   });
 
-  const addToCart = useCallback((product: any) => {
+  const addToCart = useCallback((product: any, quantity: number = 1, saleUnit?: "UN" | "KG") => {
+    const resolvedSaleUnit = saleUnit || getDefaultSaleUnit(product);
+    const key = getCartItemKey(product.id, resolvedSaleUnit);
     setCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id);
+      const existing = prev.find((item) => item.key === key);
       if (existing) {
         return prev.map((item) =>
-          item.product.id === product.id ? { ...item, qty: item.qty + 1 } : item
+          item.key === key ? { ...item, qty: Number((item.qty + quantity).toFixed(3)) } : item
         );
       }
-      return [...prev, { product, qty: 1 }];
+      return [
+        ...prev,
+        { key, product, qty: Number(quantity.toFixed(3)), saleUnit: resolvedSaleUnit },
+      ];
     });
   }, []);
+
+  const beginAddProduct = useCallback((product: any) => {
+    if (!supportsWeightSale(product)) {
+      addToCart(product, 1, getDefaultSaleUnit(product));
+      return;
+    }
+
+    const defaultUnit = getDefaultSaleUnit(product);
+    setWeightProduct(product);
+    setWeightMode(defaultUnit);
+    setWeightInput("");
+    setShowWeightDialog(true);
+  }, [addToCart, settings]);
+
+  const confirmWeightedItem = useCallback(() => {
+    if (!weightProduct) return;
+    const parsed = Number(String(weightInput || "").replace(",", "."));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      toast({
+        title: "Quantidade inválida",
+        description:
+          weightMode === "KG"
+            ? "Informe o peso em kg."
+            : "Informe a quantidade em unidades.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    addToCart(weightProduct, parsed, weightMode);
+    setShowWeightDialog(false);
+    setWeightProduct(null);
+    setWeightInput("");
+  }, [addToCart, toast, weightInput, weightMode, weightProduct]);
 
   const handleBarcodeScanned = useCallback(
     (barcode: string) => {
@@ -649,7 +739,7 @@ export default function POS() {
       if (product) {
         if (isScannerBeep) playBeep();
         if (isScannerAutoAdd) {
-          addToCart(product);
+          beginAddProduct(product);
           toast({
             title: "Produto Adicionado",
             description: `${product.name} - R$ ${parseFloat(
@@ -675,7 +765,7 @@ export default function POS() {
       isScannerAutoAdd,
       isScannerBeep,
       playBeep,
-      addToCart,
+      beginAddProduct,
       toast,
     ]
   );
@@ -727,14 +817,14 @@ export default function POS() {
     return () => window.removeEventListener("keydown", handleKeyPress, true);
   }, [isScannerEnabled, handleBarcodeScanned]);
 
-  const removeFromCart = (id: number) => {
-    setCart((prev) => prev.filter((item) => item.product.id !== id));
+  const removeFromCart = (key: string) => {
+    setCart((prev) => prev.filter((item) => item.key !== key));
   };
 
-  const updateQty = (id: number, delta: number) => {
+  const updateQty = (key: string, delta: number) => {
     setCart((prev) =>
       prev.map((item) => {
-        if (item.product.id === id) {
+        if (item.key === key) {
           const newQty = Math.max(1, item.qty + delta);
           return { ...item, qty: newQty };
         }
@@ -1181,7 +1271,10 @@ export default function POS() {
       sale: {
         customerName: "Consumidor Final",
         total: total.toFixed(2),
-        itemsCount: cart.reduce((acc, item) => acc + item.qty, 0),
+        itemsCount: cart.reduce(
+          (acc, item) => acc + (item.saleUnit === "KG" ? 1 : Math.max(1, Math.round(item.qty))),
+          0
+        ),
         paymentMethod: getPaymentMethodLabel(selectedPayment),
         status: "Concluido",
         nfceStatus: "Pendente",
@@ -1189,9 +1282,10 @@ export default function POS() {
       items: cart.map((item) => ({
         productId: item.product.id,
         productName: item.product.name,
-        quantity: item.qty,
-        unitPrice: item.product.price,
-        subtotal: (parseFloat(item.product.price) * item.qty).toFixed(2),
+        quantity: item.qty.toFixed(3),
+        saleUnit: item.saleUnit,
+        unitPrice: getCurrentPrice(item.product).toFixed(2),
+        subtotal: (getCurrentPrice(item.product) * item.qty).toFixed(2),
       })),
       payment: {
         status: effectivePayment.status,
@@ -1488,7 +1582,7 @@ export default function POS() {
                 <Card
                   key={product.id}
                   className="cursor-pointer hover:border-primary hover:shadow-md transition-all active:scale-95 flex flex-col overflow-hidden rounded-xl border-[#dbe1ee] bg-white"
-                  onClick={() => addToCart(product)}
+                  onClick={() => beginAddProduct(product)}
                   data-testid={`product-card-${product.id}`}
                 >
                   <div className="aspect-square bg-white p-2 flex items-center justify-center overflow-hidden">
@@ -1542,7 +1636,7 @@ export default function POS() {
                         className="mt-1.5 h-7 w-full rounded-lg text-[11px] border-[#dbe1ee]"
                         onClick={(e) => {
                           e.stopPropagation();
-                          addToCart(product);
+                          beginAddProduct(product);
                         }}
                       >
                         + Adicionar
@@ -1698,13 +1792,15 @@ export default function POS() {
                     </div>
                   ) : (
                     cart.map((item) => (
-                      <div key={item.product.id} className="rounded-xl border border-[#dbe1ee] bg-[#fbfcff] p-2" data-testid={`cart-item-${item.product.id}`}>
+                      <div key={item.key} className="rounded-xl border border-[#dbe1ee] bg-[#fbfcff] p-2" data-testid={`cart-item-${item.product.id}`}>
                         <div className="flex items-center gap-2">
                           <div className="h-10 w-10 rounded-lg border border-[#dbe1ee] bg-white flex items-center justify-center overflow-hidden">
                             {item.product.mainImageUrl ? (
                               <img src={item.product.mainImageUrl} alt={item.product.name} className="h-full w-full object-contain" />
                             ) : (
-                              <span className="text-[10px] font-semibold text-[#6b7388]">x{item.qty}</span>
+                              <span className="text-[10px] font-semibold text-[#6b7388]">
+                                {item.saleUnit === "KG" ? `${item.qty.toFixed(3)} kg` : `x${item.qty}`}
+                              </span>
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
@@ -1742,19 +1838,29 @@ export default function POS() {
                                   Por: R$ {getCurrentPrice(item.product).toFixed(2)}
                                 </>
                               ) : (
-                                <>Unit: R$ {getCurrentPrice(item.product).toFixed(2)}</>
+                                <>
+                                  {item.saleUnit === "KG" ? "Kg" : "Unit"}: R$ {getCurrentPrice(item.product).toFixed(2)}
+                                </>
                               )}
                             </p>
                           </div>
                           <div className="flex items-center gap-1">
-                            <Button variant="outline" size="icon" className="h-7 w-7 rounded-md" onClick={(e) => { e.stopPropagation(); updateQty(item.product.id, -1); }} data-testid={`button-decrease-qty-${item.product.id}`}>
-                              <Minus className="h-3.5 w-3.5" />
-                            </Button>
-                            <div className="w-7 text-center text-[12px] font-semibold text-[#1a2235]">{item.qty}</div>
-                            <Button variant="outline" size="icon" className="h-7 w-7 rounded-md" onClick={(e) => { e.stopPropagation(); updateQty(item.product.id, 1); }} data-testid={`button-increase-qty-${item.product.id}`}>
-                              <Plus className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); removeFromCart(item.product.id); }} data-testid={`button-remove-${item.product.id}`}>
+                            {item.saleUnit === "UN" ? (
+                              <>
+                                <Button variant="outline" size="icon" className="h-7 w-7 rounded-md" onClick={(e) => { e.stopPropagation(); updateQty(item.key, -1); }} data-testid={`button-decrease-qty-${item.product.id}`}>
+                                  <Minus className="h-3.5 w-3.5" />
+                                </Button>
+                                <div className="w-7 text-center text-[12px] font-semibold text-[#1a2235]">{item.qty}</div>
+                                <Button variant="outline" size="icon" className="h-7 w-7 rounded-md" onClick={(e) => { e.stopPropagation(); updateQty(item.key, 1); }} data-testid={`button-increase-qty-${item.product.id}`}>
+                                  <Plus className="h-3.5 w-3.5" />
+                                </Button>
+                              </>
+                            ) : (
+                              <div className="min-w-[70px] text-center text-[12px] font-semibold text-[#1a2235]">
+                                {item.qty.toFixed(3)} kg
+                              </div>
+                            )}
+                            <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md text-destructive hover:bg-destructive/10" onClick={(e) => { e.stopPropagation(); removeFromCart(item.key); }} data-testid={`button-remove-${item.product.id}`}>
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
@@ -1840,7 +1946,7 @@ export default function POS() {
                     ) : (
                       <div className="space-y-1.5">
                         {cart.map((item) => (
-                          <div key={item.product.id} className="rounded-lg border border-[#dde2ee] bg-white/70 px-2 py-1.5">
+                          <div key={item.key} className="rounded-lg border border-[#dde2ee] bg-white/70 px-2 py-1.5">
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
                                 <p className="truncate text-[12px] font-medium text-[#1a2235]">{item.product.name}</p>
@@ -1853,14 +1959,16 @@ export default function POS() {
                                 >
                                   {isPromoProduct(item.product) ? (
                                     <>
-                                      {item.qty}x{" "}
+                                      {item.saleUnit === "KG" ? `${item.qty.toFixed(3)} kg` : `${item.qty}x`}{" "}
                                       <span className="line-through text-muted-foreground">
                                         De: R$ {getRegularPrice(item.product).toFixed(2)}
                                       </span>{" "}
                                       Por: R$ {getCurrentPrice(item.product).toFixed(2)}
                                     </>
                                   ) : (
-                                    <>{item.qty}x R$ {getCurrentPrice(item.product).toFixed(2)}</>
+                                    <>
+                                      {item.saleUnit === "KG" ? `${item.qty.toFixed(3)} kg` : `${item.qty}x`} R$ {getCurrentPrice(item.product).toFixed(2)}
+                                    </>
                                   )}
                                 </p>
                               </div>
@@ -2100,6 +2208,81 @@ export default function POS() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={showWeightDialog}
+        onOpenChange={(open) => {
+          setShowWeightDialog(open);
+          if (!open) {
+            setWeightProduct(null);
+            setWeightInput("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{weightProduct?.name || "Venda por peso"}</DialogTitle>
+            <DialogDescription>
+              Digite a quantidade para o PDV calcular o total automaticamente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {getProductOperationalConfig(weightProduct).saleMode === "unit_or_weight" && (
+              <div className="space-y-2">
+                <Label>Modo de venda</Label>
+                <Select value={weightMode} onValueChange={(value) => setWeightMode(value as "UN" | "KG")}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="KG">Quilo (KG)</SelectItem>
+                    <SelectItem value="UN">Unidade (UN)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>{weightMode === "KG" ? "Peso em kg" : "Quantidade em unidades"}</Label>
+              <Input
+                type="number"
+                step={weightMode === "KG" ? "0.001" : "1"}
+                min="0"
+                value={weightInput}
+                onChange={(e) => setWeightInput(e.target.value)}
+                placeholder={weightMode === "KG" ? "Ex: 1.250" : "Ex: 3"}
+              />
+            </div>
+            <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+              <div className="flex justify-between">
+                <span>Preço</span>
+                <span>R$ {weightProduct ? getCurrentPrice(weightProduct).toFixed(2) : "0.00"}</span>
+              </div>
+              <div className="mt-2 flex justify-between font-semibold">
+                <span>Total</span>
+                <span>
+                  R$ {(
+                    (weightProduct ? getCurrentPrice(weightProduct) : 0) *
+                    Number(String(weightInput || "0").replace(",", "."))
+                  ).toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowWeightDialog(false);
+                setWeightProduct(null);
+                setWeightInput("");
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={confirmWeightedItem}>Adicionar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Cancel Confirmation Dialog */}
       <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
         <DialogContent className="sm:max-w-md">
@@ -2118,7 +2301,11 @@ export default function POS() {
               <div className="flex justify-between text-sm">
                 <span>Itens no carrinho:</span>
                 <span className="font-medium">
-                  {cart.reduce((acc, item) => acc + item.qty, 0)}
+                  {cart.reduce(
+                    (acc, item) =>
+                      acc + (item.saleUnit === "KG" ? 1 : Math.max(1, Math.round(item.qty))),
+                    0
+                  )}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
@@ -2176,10 +2363,10 @@ export default function POS() {
               {cancelledItems.map((item, index) => (
                 <div key={index} className="flex justify-between text-sm">
                   <span className="line-through text-muted-foreground">
-                    {item.qty}x {item.product.name}
+                    {item.saleUnit === "KG" ? `${item.qty.toFixed(3)} kg` : `${item.qty}x`} {item.product.name}
                   </span>
                   <span className="line-through text-muted-foreground">
-                    R$ {(parseFloat(item.product.price) * item.qty).toFixed(2)}
+                    R$ {(getCurrentPrice(item.product) * item.qty).toFixed(2)}
                   </span>
                 </div>
               ))}

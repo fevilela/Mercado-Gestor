@@ -111,6 +111,7 @@ interface CompanySettings {
   barcodeScannerEnabled?: boolean;
   barcodeScannerAutoAdd?: boolean;
   barcodeScannerBeep?: boolean;
+  butcherEnabled?: boolean;
   cashRegisterRequired?: boolean;
   nfeEnabled?: boolean;
   nfceEnabled?: boolean;
@@ -235,6 +236,7 @@ export default function Settings() {
     barcodeScannerEnabled: true,
     barcodeScannerAutoAdd: true,
     barcodeScannerBeep: true,
+    butcherEnabled: false,
   });
   const [printerStatus, setPrinterStatus] = useState<
     "idle" | "testing" | "connected"
@@ -955,6 +957,42 @@ export default function Settings() {
           </TabsList>
 
           <TabsContent value="company">
+            <Card>
+              <CardHeader>
+                <CardTitle>Recursos Operacionais</CardTitle>
+                <CardDescription>
+                  Ative funcionalidades específicas por tipo de operação.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between rounded-lg border p-4">
+                  <div className="space-y-1">
+                    <Label className="text-base">Modo Açougue</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Habilita compra em kg, venda em unidade/kg, carcaça e quebra por preparo.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.butcherEnabled || false}
+                    onCheckedChange={(checked) =>
+                      updateSetting("butcherEnabled", checked)
+                    }
+                    data-testid="switch-butcher-enabled-company"
+                  />
+                </div>
+                <Button onClick={handleSaveSettings} disabled={saving}>
+                  {saving ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    "Salvar Alterações"
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>Informações do Estabelecimento</CardTitle>

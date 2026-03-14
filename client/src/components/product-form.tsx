@@ -62,9 +62,9 @@ const productFormSchema = z.object({
   promoStart: z.string().optional(),
   promoEnd: z.string().optional(),
   expirationDate: z.string().optional(),
-  stock: z.number().default(0),
-  minStock: z.number().optional().nullable(),
-  maxStock: z.number().optional().nullable(),
+  stock: z.string().default("0"),
+  minStock: z.string().optional().nullable(),
+  maxStock: z.string().optional().nullable(),
   isKit: z.boolean().default(false),
   isActive: z.boolean().default(true),
   supplierId: z.number().optional().nullable(),
@@ -95,6 +95,17 @@ interface ProductFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editProduct?: any;
+}
+
+interface ProductOperationalConfig {
+  enabled: boolean;
+  stockUnit: "UN" | "KG";
+  saleMode: "unit" | "weight" | "unit_or_weight";
+  averageUnitWeightKg: string;
+  carcassYieldPercent: string;
+  cookingYieldPercent: string;
+  purchaseStage: "raw" | "cooked";
+  saleStage: "raw" | "cooked";
 }
 
 type ReferenceOption = {
@@ -129,6 +140,53 @@ const variationAttributes = [
   { key: "color", label: "Cor" },
   { key: "size", label: "Tamanho" },
 ];
+
+const defaultOperationalConfig: ProductOperationalConfig = {
+  enabled: false,
+  stockUnit: "KG",
+  saleMode: "unit_or_weight",
+  averageUnitWeightKg: "",
+  carcassYieldPercent: "100",
+  cookingYieldPercent: "100",
+  purchaseStage: "raw",
+  saleStage: "raw",
+};
+
+const formatDecimalInput = (value: unknown, fallback: string) => {
+  if (value === null || value === undefined || value === "") return fallback;
+  return String(value);
+};
+
+const normalizeDecimalString = (
+  value: string | number | null | undefined,
+  fallback: string | null = null
+) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return fallback;
+
+  const compact = raw.replace(/\s/g, "");
+  let normalized = compact;
+
+  if (compact.includes(",") && compact.includes(".")) {
+    if (compact.lastIndexOf(",") > compact.lastIndexOf(".")) {
+      normalized = compact.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = compact.replace(/,/g, "");
+    }
+  } else if (compact.includes(",")) {
+    normalized = compact.replace(/\./g, "").replace(",", ".");
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? String(parsed) : fallback;
+};
+
+const toNormalizedNumber = (value: string | number | null | undefined) => {
+  const normalized = normalizeDecimalString(value, null);
+  if (normalized === null) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 
 export default function ProductForm({
   open,
@@ -222,6 +280,14 @@ export default function ProductForm({
       return res.json();
     },
   });
+  const { data: settings } = useQuery({
+    queryKey: ["/api/settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings");
+      if (!res.ok) return {};
+      return res.json();
+    },
+  });
 
   const form = useForm<ProductFormData>({
     resolver: zodResolver(productFormSchema),
@@ -252,13 +318,16 @@ export default function ProductForm({
       promoStart: "",
       promoEnd: "",
       expirationDate: "",
-      stock: 0,
-      minStock: 10,
-      maxStock: 100,
+      stock: "0",
+      minStock: "10",
+      maxStock: "100",
       isKit: false,
       isActive: true,
     },
   });
+  const [operationalConfig, setOperationalConfig] = useState<ProductOperationalConfig>(
+    defaultOperationalConfig
+  );
 
   const watchPurchasePrice = form.watch("purchasePrice");
   const watchMargin = form.watch("margin");
@@ -442,18 +511,51 @@ export default function ProductForm({
         promoStart: toDateInputValue(editProduct.promoStart),
         promoEnd: toDateInputValue(editProduct.promoEnd),
         expirationDate: editProduct.expirationDate || "",
-        stock: editProduct.stock || 0,
-        minStock: editProduct.minStock || 10,
-        maxStock: editProduct.maxStock || 100,
+        stock: formatDecimalInput(editProduct.stock, "0"),
+        minStock: formatDecimalInput(editProduct.minStock, "10"),
+        maxStock: formatDecimalInput(editProduct.maxStock, "100"),
         isKit: editProduct.isKit || false,
         isActive: editProduct.isActive !== false,
         supplierId: editProduct.supplierId,
+      });
+      setOperationalConfig({
+        ...defaultOperationalConfig,
+        ...(editProduct.operationalConfig || {}),
+        enabled: Boolean(editProduct.operationalConfig?.enabled),
+        stockUnit:
+          editProduct.operationalConfig?.stockUnit === "UN" ? "UN" : "KG",
+        saleMode:
+          editProduct.operationalConfig?.saleMode === "weight" ||
+          editProduct.operationalConfig?.saleMode === "unit"
+            ? editProduct.operationalConfig.saleMode
+            : "unit_or_weight",
+        averageUnitWeightKg: formatDecimalInput(
+          editProduct.operationalConfig?.averageUnitWeightKg,
+          ""
+        ),
+        carcassYieldPercent: formatDecimalInput(
+          editProduct.operationalConfig?.carcassYieldPercent,
+          "100"
+        ),
+        cookingYieldPercent: formatDecimalInput(
+          editProduct.operationalConfig?.cookingYieldPercent,
+          "100"
+        ),
+        purchaseStage:
+          editProduct.operationalConfig?.purchaseStage === "cooked"
+            ? "cooked"
+            : "raw",
+        saleStage:
+          editProduct.operationalConfig?.saleStage === "cooked"
+            ? "cooked"
+            : "raw",
       });
       setVariations(editProduct.variations || []);
       setMediaItems(editProduct.media || []);
       setKitItemsList(editProduct.kitItems || []);
     } else {
       form.reset();
+      setOperationalConfig(defaultOperationalConfig);
       setVariations([]);
       setMediaItems([]);
       setKitItemsList([]);
@@ -494,6 +596,16 @@ export default function ProductForm({
   const onSubmit = (data: ProductFormData) => {
     const normalizedEan = String(data.ean || "").trim();
     const primaryMedia = mediaItems.find((m) => m.isPrimary);
+    const normalizedPurchasePrice = normalizeDecimalString(
+      data.purchasePrice,
+      null
+    );
+    const normalizedMargin = normalizeDecimalString(data.margin, null);
+    const normalizedPrice = normalizeDecimalString(data.price, "0");
+    const normalizedPromoPrice = normalizeDecimalString(data.promoPrice, null);
+    const normalizedStock = normalizeDecimalString(data.stock, "0");
+    const normalizedMinStock = normalizeDecimalString(data.minStock, "0");
+    const normalizedMaxStock = normalizeDecimalString(data.maxStock, "0");
     const productData = {
       product: {
         ...data,
@@ -504,13 +616,36 @@ export default function ProductForm({
         nutritionalInfo: data.nutritionalInfo || null,
         labelInfo: data.labelInfo || null,
         mainImageUrl: primaryMedia?.url || data.mainImageUrl || null,
-        purchasePrice: data.purchasePrice || null,
-        margin: data.margin || null,
-        promoPrice: data.promoPrice || null,
+        purchasePrice: normalizedPurchasePrice,
+        margin: normalizedMargin,
+        price: normalizedPrice,
+        promoPrice: normalizedPromoPrice,
         promoStart: data.promoStart || null,
         promoEnd: data.promoEnd || null,
         expirationDate: data.expirationDate || null,
+        stock: normalizedStock,
+        minStock: normalizedMinStock,
+        maxStock: normalizedMaxStock,
         supplierId: data.supplierId || null,
+        operationalConfig:
+          settings?.butcherEnabled && operationalConfig.enabled
+            ? {
+                enabled: true,
+                stockUnit: operationalConfig.stockUnit,
+                saleMode: operationalConfig.saleMode,
+                averageUnitWeightKg: toNormalizedNumber(
+                  operationalConfig.averageUnitWeightKg
+                ),
+                carcassYieldPercent: toNormalizedNumber(
+                  operationalConfig.carcassYieldPercent
+                ),
+                cookingYieldPercent: toNormalizedNumber(
+                  operationalConfig.cookingYieldPercent
+                ),
+                purchaseStage: operationalConfig.purchaseStage,
+                saleStage: operationalConfig.saleStage,
+              }
+            : null,
       },
       variations: variations.map((v) => ({
         name: v.name,
@@ -1180,12 +1315,13 @@ export default function ProductForm({
                         <Input
                           id="stock"
                           type="number"
-                          {...form.register("stock", { valueAsNumber: true })}
+                          step="0.001"
+                          {...form.register("stock")}
                           disabled={!!editProduct}
                         />
                         {editProduct && (
                           <p className="text-xs text-muted-foreground">
-                            Estoque atual: {editProduct.stock} un
+                            Estoque atual: {editProduct.stock} {editProduct.unit || "UN"}
                           </p>
                         )}
                       </div>
@@ -1194,9 +1330,8 @@ export default function ProductForm({
                         <Input
                           id="minStock"
                           type="number"
-                          {...form.register("minStock", {
-                            valueAsNumber: true,
-                          })}
+                          step="0.001"
+                          {...form.register("minStock")}
                         />
                       </div>
                       <div className="space-y-2">
@@ -1204,12 +1339,187 @@ export default function ProductForm({
                         <Input
                           id="maxStock"
                           type="number"
-                          {...form.register("maxStock", {
-                            valueAsNumber: true,
-                          })}
+                          step="0.001"
+                          {...form.register("maxStock")}
                         />
                       </div>
                     </div>
+                    {settings?.butcherEnabled && (
+                      <Card className="border-dashed">
+                        <CardHeader className="py-3">
+                          <CardTitle className="text-base">
+                            Configuração de Açougue
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <Label>Ativar regra operacional</Label>
+                              <p className="text-xs text-muted-foreground">
+                                Compra em kg, venda em unidade/kg e cálculo de rendimento
+                              </p>
+                            </div>
+                            <Switch
+                              checked={operationalConfig.enabled}
+                              onCheckedChange={(checked) =>
+                                setOperationalConfig((current) => ({
+                                  ...current,
+                                  enabled: checked,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          {operationalConfig.enabled && (
+                            <>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <Label>Unidade do estoque</Label>
+                                  <Select
+                                    value={operationalConfig.stockUnit}
+                                    onValueChange={(value) =>
+                                      setOperationalConfig((current) => ({
+                                        ...current,
+                                        stockUnit: value as "UN" | "KG",
+                                      }))
+                                    }
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="KG">Quilo (KG)</SelectItem>
+                                      <SelectItem value="UN">Unidade (UN)</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Modo de venda</Label>
+                                  <Select
+                                    value={operationalConfig.saleMode}
+                                    onValueChange={(value) =>
+                                      setOperationalConfig((current) => ({
+                                        ...current,
+                                        saleMode: value as "unit" | "weight" | "unit_or_weight",
+                                      }))
+                                    }
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="unit">Somente unidade</SelectItem>
+                                      <SelectItem value="weight">Somente kg</SelectItem>
+                                      <SelectItem value="unit_or_weight">
+                                        Unidade ou kg
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <Label>Peso médio por unidade (kg)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.001"
+                                    value={operationalConfig.averageUnitWeightKg}
+                                    onChange={(e) =>
+                                      setOperationalConfig((current) => ({
+                                        ...current,
+                                        averageUnitWeightKg: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="Ex: 1.250"
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Rendimento de carcaça (%)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={operationalConfig.carcassYieldPercent}
+                                    onChange={(e) =>
+                                      setOperationalConfig((current) => ({
+                                        ...current,
+                                        carcassYieldPercent: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="Ex: 72"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <Label>Rendimento pós-preparo (%)</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={operationalConfig.cookingYieldPercent}
+                                    onChange={(e) =>
+                                      setOperationalConfig((current) => ({
+                                        ...current,
+                                        cookingYieldPercent: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="Ex: 65"
+                                  />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div className="space-y-2">
+                                    <Label>Compra</Label>
+                                    <Select
+                                      value={operationalConfig.purchaseStage}
+                                      onValueChange={(value) =>
+                                        setOperationalConfig((current) => ({
+                                          ...current,
+                                          purchaseStage: value as "raw" | "cooked",
+                                        }))
+                                      }
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="raw">Cru</SelectItem>
+                                        <SelectItem value="cooked">Assado</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label>Venda</Label>
+                                    <Select
+                                      value={operationalConfig.saleStage}
+                                      onValueChange={(value) =>
+                                        setOperationalConfig((current) => ({
+                                          ...current,
+                                          saleStage: value as "raw" | "cooked",
+                                        }))
+                                      }
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="raw">Cru</SelectItem>
+                                        <SelectItem value="cooked">Assado</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <p className="text-xs text-muted-foreground">
+                                O desconto do estoque será calculado pelo peso vendido,
+                                peso médio por unidade e rendimentos configurados.
+                              </p>
+                            </>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
                     {editProduct && (
                       <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
                         <strong>Nota:</strong> Para alterar o estoque, use a

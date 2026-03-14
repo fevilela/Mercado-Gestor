@@ -64,6 +64,11 @@ import {
 } from "./stone-connect";
 import { getFiscalReadiness } from "./fiscal-readiness";
 import { certificateService } from "./certificate-service";
+import {
+  computeStockConsumption,
+  resolveSaleUnitForProduct,
+  toNumber,
+} from "./product-operational";
 import "./types";
 
 function parseNFeXML(xmlContent: string): Array<{
@@ -560,6 +565,33 @@ export async function registerRoutes(
     kitItems: z.array(kitItemSchema).optional(),
   });
 
+  const normalizeDecimalValue = (
+    value: unknown,
+    fallback?: string | null
+  ): string | null | undefined => {
+    if (value === undefined) return undefined;
+    if (value === null || value === "") return fallback;
+
+    const raw = String(value).trim();
+    if (!raw) return fallback;
+
+    const compact = raw.replace(/\s/g, "");
+    let normalized = compact;
+
+    if (compact.includes(",") && compact.includes(".")) {
+      if (compact.lastIndexOf(",") > compact.lastIndexOf(".")) {
+        normalized = compact.replace(/\./g, "").replace(",", ".");
+      } else {
+        normalized = compact.replace(/,/g, "");
+      }
+    } else if (compact.includes(",")) {
+      normalized = compact.replace(/\./g, "").replace(",", ".");
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? String(parsed) : fallback;
+  };
+
   const normalizePromoDateFields = (body: any) => {
     if (!body || typeof body !== "object" || !body.product) return body;
     const product = { ...body.product };
@@ -580,6 +612,28 @@ export async function registerRoutes(
     }
     if ("promoEnd" in product) {
       product.promoEnd = toDateOrNull(product.promoEnd);
+    }
+
+    if ("purchasePrice" in product) {
+      product.purchasePrice = normalizeDecimalValue(product.purchasePrice, null);
+    }
+    if ("margin" in product) {
+      product.margin = normalizeDecimalValue(product.margin, null);
+    }
+    if ("price" in product) {
+      product.price = normalizeDecimalValue(product.price);
+    }
+    if ("promoPrice" in product) {
+      product.promoPrice = normalizeDecimalValue(product.promoPrice, null);
+    }
+    if ("stock" in product) {
+      product.stock = normalizeDecimalValue(product.stock, "0");
+    }
+    if ("minStock" in product) {
+      product.minStock = normalizeDecimalValue(product.minStock, "0");
+    }
+    if ("maxStock" in product) {
+      product.maxStock = normalizeDecimalValue(product.maxStock, "0");
     }
 
     return { ...body, product };
@@ -1188,9 +1242,18 @@ export async function registerRoutes(
     providerReference: z.string().optional().nullable(),
   });
 
+  const saleItemRequestSchema = z.object({
+    productId: z.number().int().positive(),
+    productName: z.string().min(1),
+    quantity: z.union([z.number().positive(), z.string().min(1)]),
+    saleUnit: z.enum(["UN", "KG"]).optional(),
+    unitPrice: z.union([z.number().positive(), z.string().min(1)]),
+    subtotal: z.union([z.number().nonnegative(), z.string().min(1)]),
+  });
+
   const createSaleRequestSchema = z.object({
     sale: insertSaleSchema,
-    items: z.array(insertSaleItemSchema.omit({ saleId: true })).min(1),
+    items: z.array(saleItemRequestSchema).min(1),
     payment: paymentInfoSchema,
   });
 
@@ -1823,15 +1886,51 @@ export async function registerRoutes(
           status: isFiscalConfigured ? "Concluído" : "Aguardando Emissão",
         };
 
+        const normalizedItems = [];
+
         for (const item of items) {
+          const product = await storage.getProduct(item.productId, companyId);
+          if (!product) {
+            return res.status(404).json({
+              error: `Produto ${item.productName} não encontrado`,
+            });
+          }
+
+          const saleUnit = resolveSaleUnitForProduct(product, item.saleUnit);
+          const computed = computeStockConsumption(
+            product,
+            item.quantity,
+            saleUnit
+          );
+          const currentStock = toNumber(product.stock, 0);
+
+          if (currentStock < computed.stockQuantity) {
+            return res.status(400).json({
+              error: `Estoque insuficiente para ${item.productName}`,
+            });
+          }
+
+          normalizedItems.push({
+            productId: item.productId,
+            productName: item.productName,
+            quantity: computed.saleQuantity.toFixed(3),
+            saleUnit: computed.saleUnit,
+            stockQuantity: computed.stockQuantity.toFixed(3),
+            stockUnit: computed.stockUnit,
+            unitPrice: toNumber(item.unitPrice, 0).toFixed(2),
+            subtotal: toNumber(item.subtotal, 0).toFixed(2),
+          });
+        }
+
+        for (const item of normalizedItems) {
           await storage.updateProductStock(
             item.productId,
             companyId,
-            -item.quantity
+            -toNumber(item.stockQuantity, 0)
           );
         }
 
-        const newSale = await storage.createSale(saleData, items as any);
+        const newSale = await storage.createSale(saleData, normalizedItems as any);
         res.status(201).json({
           sale: newSale,
           fiscalConfigured: isFiscalConfigured,
@@ -2484,7 +2583,7 @@ export async function registerRoutes(
 
   const adjustStockSchema = z.object({
     productId: z.number(),
-    quantity: z.number(),
+    quantity: z.coerce.number(),
     type: z.enum(["entrada", "saida", "ajuste", "perda", "devolucao"]),
     reason: z.string().optional(),
     notes: z.string().optional(),
@@ -2513,7 +2612,7 @@ export async function registerRoutes(
             ? -Math.abs(quantity)
             : Math.abs(quantity);
 
-        const newStock = product.stock + quantityDelta;
+        const newStock = toNumber(product.stock, 0) + quantityDelta;
         if (newStock < 0) {
           return res
             .status(400)
@@ -2524,7 +2623,7 @@ export async function registerRoutes(
           productId,
           companyId,
           type,
-          quantity: quantityDelta,
+          quantity: quantityDelta.toFixed(3),
           reason: reason || null,
           notes: notes || null,
           referenceId: null,
@@ -2543,7 +2642,7 @@ export async function registerRoutes(
           movement: {
             productId,
             type,
-            quantity: quantityDelta,
+            quantity: quantityDelta.toFixed(3),
             reason,
             notes,
           },
@@ -2780,7 +2879,7 @@ export async function registerRoutes(
             productId: prodData.existingProductId,
             companyId,
             type: "entrada",
-            quantity: quantityToStock,
+            quantity: Number(quantityToStock).toFixed(3),
             reason: "Importação XML NFe",
             notes: null,
             referenceId: null,
@@ -2827,7 +2926,7 @@ export async function registerRoutes(
                     ? prodData.marginPercent
                     : 0
                 ).toFixed(2),
-                stock: quantityToStock,
+                stock: Number(quantityToStock).toFixed(3),
                 isActive: true,
                 companyId,
               })
@@ -2839,7 +2938,7 @@ export async function registerRoutes(
               productId: newProduct.id,
               companyId,
               type: "entrada",
-              quantity: quantityToStock,
+              quantity: Number(quantityToStock).toFixed(3),
               reason: "Importação XML NFe - Estoque inicial",
               notes: null,
               referenceId: null,
@@ -2891,7 +2990,7 @@ export async function registerRoutes(
           const existingProducts = await storage.getAllProducts(companyId);
           const existing = existingProducts.find((p) => p.ean === prodData.ean);
           if (existing) {
-            const newStock = existing.stock + prodData.quantity;
+            const newStock = toNumber(existing.stock, 0) + prodData.quantity;
             await storage.updateProductStock(
               existing.id,
               companyId,
@@ -2901,7 +3000,7 @@ export async function registerRoutes(
               productId: existing.id,
               companyId,
               type: "entrada",
-              quantity: prodData.quantity,
+              quantity: Number(prodData.quantity).toFixed(3),
               reason: "Importação XML NFe",
               notes: null,
               referenceId: null,
@@ -2911,7 +3010,7 @@ export async function registerRoutes(
             skippedProducts.push({
               name: prodData.name,
               reason: "Estoque atualizado (produto já existente)",
-              newStock,
+              newStock: Number(newStock.toFixed(3)),
             });
             continue;
           }
@@ -2927,7 +3026,7 @@ export async function registerRoutes(
             category: "Importado",
             price: prodData.price,
             purchasePrice: prodData.purchasePrice,
-            stock: prodData.quantity,
+            stock: Number(prodData.quantity).toFixed(3),
             isActive: true,
             companyId,
           })
@@ -2938,7 +3037,7 @@ export async function registerRoutes(
             productId: newProduct.id,
             companyId,
             type: "entrada",
-            quantity: prodData.quantity,
+            quantity: Number(prodData.quantity).toFixed(3),
             reason: "Importação XML NFe - Estoque inicial",
             notes: null,
             referenceId: null,
