@@ -343,6 +343,42 @@ export default function ProductForm({
   const watchPromoPrice = form.watch("promoPrice");
   const watchIsKit = form.watch("isKit");
   const watchProductName = form.watch("name");
+  const parseDecimalInputValue = (value: string | number | null | undefined) => {
+    const normalized = normalizeDecimalString(value, null);
+    if (normalized === null) return null;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const syncSalePriceFromMargin = (
+    purchaseValue: string | number | null | undefined,
+    marginValue: string | number | null | undefined
+  ) => {
+    const purchase = parseDecimalInputValue(purchaseValue);
+    const margin = parseDecimalInputValue(marginValue);
+    if (purchase === null || margin === null || purchase <= 0 || margin <= 0) {
+      return;
+    }
+
+    const nextPrice = (purchase * (1 + margin / 100)).toFixed(2);
+    if ((form.getValues("price") || "") !== nextPrice) {
+      form.setValue("price", nextPrice, { shouldValidate: false });
+    }
+  };
+  const syncMarginFromSalePrice = (
+    purchaseValue: string | number | null | undefined,
+    saleValue: string | number | null | undefined
+  ) => {
+    const purchase = parseDecimalInputValue(purchaseValue);
+    const sale = parseDecimalInputValue(saleValue);
+    if (purchase === null || sale === null || purchase <= 0 || sale <= purchase) {
+      return;
+    }
+
+    const nextMargin = (((sale - purchase) / purchase) * 100).toFixed(2);
+    if ((form.getValues("margin") || "") !== nextMargin) {
+      form.setValue("margin", nextMargin, { shouldValidate: false });
+    }
+  };
   const promoDiscountPercent = (() => {
     const price = parseFloat(watchPrice || "");
     const promo = parseFloat(watchPromoPrice || "");
@@ -459,39 +495,6 @@ export default function ProductForm({
   }, [watchProductName, editProduct, lookupFiscalDataByName]);
 
   useEffect(() => {
-    if (priceSyncSource !== "margin") return;
-    if (watchPurchasePrice && watchMargin) {
-      const purchase = parseFloat(watchPurchasePrice);
-      const margin = parseFloat(watchMargin);
-      if (purchase > 0 && margin > 0) {
-        const salePrice = purchase * (1 + margin / 100);
-        const nextPrice = salePrice.toFixed(2);
-        const currentPrice = form.getValues("price") || "";
-        if (nextPrice !== currentPrice) {
-          form.setValue("price", nextPrice, { shouldValidate: false });
-        }
-      }
-    }
-  }, [watchPurchasePrice, watchMargin, form, priceSyncSource]);
-
-  useEffect(() => {
-    if (priceSyncSource !== "price") return;
-    if (watchPurchasePrice && watchPrice) {
-      const purchase = parseFloat(watchPurchasePrice);
-      const sale = parseFloat(watchPrice);
-      if (purchase > 0 && sale > 0 && sale > purchase) {
-        const calculatedMargin = ((sale - purchase) / purchase) * 100;
-        const currentMargin = parseFloat(watchMargin || "0");
-        if (Math.abs(calculatedMargin - currentMargin) > 0.01) {
-          form.setValue("margin", calculatedMargin.toFixed(2), {
-            shouldValidate: false,
-          });
-        }
-      }
-    }
-  }, [watchPurchasePrice, watchPrice, watchMargin, form, priceSyncSource]);
-
-  useEffect(() => {
     if (!open) return;
     if (editProduct) {
       form.reset({
@@ -565,7 +568,6 @@ export default function ProductForm({
       setKitItemsList(editProduct.kitItems || []);
     } else {
       form.reset();
-      setPriceSyncSource("margin");
       setOperationalConfig(defaultOperationalConfig);
       setVariations([]);
       setMediaItems([]);
@@ -1233,6 +1235,18 @@ export default function ProductForm({
                           {...purchasePriceField}
                           onChange={(event) => {
                             purchasePriceField.onChange(event);
+                            const nextPurchase = event.target.value;
+                            if (priceSyncSource === "margin") {
+                              syncSalePriceFromMargin(
+                                nextPurchase,
+                                form.getValues("margin")
+                              );
+                            } else {
+                              syncMarginFromSalePrice(
+                                nextPurchase,
+                                form.getValues("price")
+                              );
+                            }
                           }}
                           type="number"
                           step="0.01"
@@ -1247,6 +1261,10 @@ export default function ProductForm({
                           onChange={(event) => {
                             setPriceSyncSource("margin");
                             marginField.onChange(event);
+                            syncSalePriceFromMargin(
+                              form.getValues("purchasePrice"),
+                              event.target.value
+                            );
                           }}
                           type="number"
                           step="0.01"
@@ -1261,6 +1279,10 @@ export default function ProductForm({
                           onChange={(event) => {
                             setPriceSyncSource("price");
                             priceField.onChange(event);
+                            syncMarginFromSalePrice(
+                              form.getValues("purchasePrice"),
+                              event.target.value
+                            );
                           }}
                           type="number"
                           step="0.01"
@@ -1892,7 +1914,6 @@ export default function ProductForm({
     </Dialog>
   );
 }
-
 
 
 
