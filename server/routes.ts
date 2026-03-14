@@ -639,6 +639,30 @@ export async function registerRoutes(
     return { ...body, product };
   };
 
+  const normalizePdvProduct = (product: any) => {
+    const basePrice = normalizeDecimalValue(product?.price, "0") ?? "0";
+    const promoPrice = normalizeDecimalValue(product?.promoPrice, null);
+    const hasPromoPrice =
+      promoPrice !== null &&
+      promoPrice !== undefined &&
+      Number.isFinite(Number(promoPrice)) &&
+      Number(promoPrice) > 0;
+
+    return {
+      ...product,
+      purchasePrice:
+        normalizeDecimalValue(product?.purchasePrice, basePrice) ?? basePrice,
+      price: hasPromoPrice ? promoPrice : basePrice,
+      regularPrice:
+        normalizeDecimalValue(product?.regularPrice, basePrice) ?? basePrice,
+      promoPrice,
+      stock: normalizeDecimalValue(product?.stock, "0") ?? "0",
+      minStock: normalizeDecimalValue(product?.minStock, "0") ?? "0",
+      maxStock: normalizeDecimalValue(product?.maxStock, "0") ?? "0",
+      margin: normalizeDecimalValue(product?.margin, null),
+    };
+  };
+
   app.post(
     "/api/products",
     requireAuth,
@@ -2394,19 +2418,9 @@ export async function registerRoutes(
 
         const productsList = await storage.getAllProducts(companyId);
         const methods = await storage.getPaymentMethods(companyId);
-        const applyPromoPrice = (product: any) => {
-          const promoPrice = Number(product.promoPrice || 0);
-          if (!Number.isFinite(promoPrice) || promoPrice <= 0) return product;
-          return {
-            ...product,
-            regularPrice: product.regularPrice ?? product.price,
-            price: product.promoPrice,
-          };
-        };
-
-        const pdvProducts = productsList.map((product: any) =>
-          applyPromoPrice(product)
-        );
+        const pdvProducts = productsList
+          .filter((product: any) => product?.isActive !== false)
+          .map((product: any) => normalizePdvProduct(product));
         const payload = {
           generatedAt: new Date().toISOString(),
           products: pdvProducts,
@@ -2445,29 +2459,22 @@ export async function registerRoutes(
           return res.status(404).json({ error: "Nenhuma carga enviada" });
         }
         const currentProducts = await storage.getAllProducts(companyId);
-        const regularPriceById = new Map<number, string>(
-          currentProducts.map((p: any) => [Number(p.id), String(p.price || "0")])
+        const currentProductById = new Map<number, any>(
+          currentProducts
+            .filter((product: any) => product?.isActive !== false)
+            .map((product: any) => [
+              Number(product.id),
+              normalizePdvProduct(product),
+            ])
         );
         const payload = (load.payload || {}) as any;
         const products = Array.isArray(payload.products) ? payload.products : [];
         const normalizedProducts = products.map((product: any) => {
-          const promoPrice = Number(product?.promoPrice || 0);
           const productId = Number(product?.id || 0);
-          const regularPriceFromCatalog =
-            regularPriceById.get(productId) ||
-            String(product?.regularPrice || product?.price || "0");
-          if (!Number.isFinite(promoPrice) || promoPrice <= 0) {
-            return {
-              ...product,
-              regularPrice: regularPriceFromCatalog,
-              price: regularPriceFromCatalog,
-            };
-          }
-          return {
-            ...product,
-            regularPrice: regularPriceFromCatalog,
-            price: product.promoPrice,
-          };
+          const catalogProduct = currentProductById.get(productId);
+          return normalizePdvProduct(
+            catalogProduct ? { ...product, ...catalogProduct } : product
+          );
         });
 
         res.json({

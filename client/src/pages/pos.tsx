@@ -753,8 +753,7 @@ export default function POS() {
         }
       } else {
         toast({
-          title: "Produto Nao Encontrado",
-          description: `Codigo ${barcode} nao cadastrado no sistema.`,
+          title: "Produto não encontrado",
           variant: "destructive",
         });
       }
