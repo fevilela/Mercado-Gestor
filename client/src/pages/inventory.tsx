@@ -528,6 +528,7 @@ export default function Inventory() {
         throw new Error(data.error || "Falha ao enviar carga do PDV");
       }
       const successMessage = `Carga PDV enviada: ${data.products ?? 0} produtos e ${data.paymentMethods ?? 0} pagamentos`;
+      queryClient.invalidateQueries({ queryKey: ["/api/pdv/load"] });
       setPdvLoadFeedback({
         type: "success",
         message: successMessage,

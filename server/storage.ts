@@ -623,7 +623,7 @@ export const storage = {
       .select()
       .from(pdvLoads)
       .where(eq(pdvLoads.companyId, companyId))
-      .orderBy(desc(pdvLoads.createdAt))
+      .orderBy(desc(pdvLoads.createdAt), desc(pdvLoads.id))
       .limit(1);
     return load || null;
   },

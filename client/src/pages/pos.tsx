@@ -516,7 +516,7 @@ export default function POS() {
   } = useQuery({
     queryKey: ["/api/pdv/load"],
     queryFn: async () => {
-      const res = await fetch("/api/pdv/load");
+      const res = await fetch("/api/pdv/load", { cache: "no-store" });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
         throw new Error(error.error || "Nenhuma carga enviada");
