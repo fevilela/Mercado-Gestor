@@ -16,20 +16,20 @@ import { useToast } from "@/hooks/use-toast";
 
 type PaymentMethodType = "pix" | "credito" | "debito" | "dinheiro" | "outros";
 type TefMethod = "pix" | "credito" | "debito";
+type ProcessingMode = "manual" | "tef" | "pos";
 
 type PaymentMethod = {
   id: number;
   name: string;
   type: PaymentMethodType;
   nfceCode?: string | null;
+  processingMode?: ProcessingMode | null;
   tefMethod?: TefMethod | null;
   isActive?: boolean | null;
   sortOrder?: number | null;
 };
 
-const inferTefByType = (
-  type: PaymentMethodType
-): TefMethod | undefined => {
+const inferTefByType = (type: PaymentMethodType): TefMethod | undefined => {
   if (type === "pix" || type === "credito" || type === "debito") {
     return type;
   }
@@ -44,12 +44,19 @@ const typeLabels: Record<PaymentMethodType, string> = {
   outros: "Outros",
 };
 
+const processingModeLabels: Record<ProcessingMode, string> = {
+  manual: "Manual",
+  tef: "TEF",
+  pos: "POS manual",
+};
+
 export default function PaymentMethodsPage() {
   const { toast } = useToast();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({
     name: "",
     type: "pix" as PaymentMethodType,
+    processingMode: "tef" as ProcessingMode,
     tefMethod: "pix" as TefMethod | "",
     nfceCode: "",
     sortOrder: 0,
@@ -71,9 +78,11 @@ export default function PaymentMethodsPage() {
       const payload = {
         name: form.name.trim(),
         type: form.type,
-        tefMethod: tefEnabled
-          ? ((form.tefMethod as TefMethod) || inferredTefMethod)
-          : undefined,
+        processingMode: form.processingMode,
+        tefMethod:
+          form.processingMode === "tef"
+            ? ((form.tefMethod as TefMethod) || inferredTefMethod)
+            : undefined,
         nfceCode: form.nfceCode.trim() || undefined,
         sortOrder: Number(form.sortOrder) || 0,
         isActive: form.isActive,
@@ -98,6 +107,7 @@ export default function PaymentMethodsPage() {
       setForm({
         name: "",
         type: "pix",
+        processingMode: "tef",
         tefMethod: "pix",
         nfceCode: "",
         sortOrder: 0,
@@ -141,11 +151,18 @@ export default function PaymentMethodsPage() {
 
   const startEdit = (method: PaymentMethod) => {
     const inferredTefMethod = inferTefByType(method.type);
+    const processingMode =
+      (method.processingMode as ProcessingMode) ||
+      (method.tefMethod ? "tef" : "manual");
     setEditingId(method.id);
     setForm({
       name: method.name || "",
       type: method.type,
-      tefMethod: (method.tefMethod as TefMethod) || inferredTefMethod || "",
+      processingMode,
+      tefMethod:
+        processingMode === "tef"
+          ? (method.tefMethod as TefMethod) || inferredTefMethod || ""
+          : "",
       nfceCode: method.nfceCode || "",
       sortOrder: method.sortOrder || 0,
       isActive: method.isActive !== false,
@@ -157,6 +174,7 @@ export default function PaymentMethodsPage() {
     setForm({
       name: "",
       type: "pix",
+      processingMode: "tef",
       tefMethod: "pix",
       nfceCode: "",
       sortOrder: 0,
@@ -164,7 +182,8 @@ export default function PaymentMethodsPage() {
     });
   };
 
-  const tefEnabled = ["pix", "credito", "debito"].includes(form.type);
+  const tefCapableType = ["pix", "credito", "debito"].includes(form.type);
+  const tefEnabled = form.processingMode === "tef" && tefCapableType;
 
   return (
     <Layout>
@@ -181,7 +200,7 @@ export default function PaymentMethodsPage() {
             <CardTitle>{editingId ? "Editar" : "Nova"} forma</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Nome</label>
                 <Input
@@ -198,10 +217,18 @@ export default function PaymentMethodsPage() {
                     setForm((prev) => {
                       const nextType = value as PaymentMethodType;
                       const inferredTefMethod = inferTefByType(nextType);
+                      const nextProcessingMode =
+                        prev.processingMode === "tef" && !inferredTefMethod
+                          ? "manual"
+                          : prev.processingMode;
                       return {
                         ...prev,
                         type: nextType,
-                        tefMethod: inferredTefMethod || "",
+                        processingMode: nextProcessingMode,
+                        tefMethod:
+                          nextProcessingMode === "tef"
+                            ? inferredTefMethod || ""
+                            : "",
                       };
                     })
                   }
@@ -227,6 +254,40 @@ export default function PaymentMethodsPage() {
                 />
               </div>
               <div className="space-y-2">
+                <label className="text-sm font-medium">Operacao no PDV</label>
+                <Select
+                  value={form.processingMode}
+                  onValueChange={(value) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      processingMode: value as ProcessingMode,
+                      tefMethod:
+                        value === "tef"
+                          ? inferTefByType(prev.type) || prev.tefMethod
+                          : "",
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual">Manual</SelectItem>
+                    <SelectItem value="tef" disabled={!tefCapableType}>
+                      TEF
+                    </SelectItem>
+                    <SelectItem value="pos">POS manual</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {form.processingMode === "tef"
+                    ? "Envia o valor para a maquininha automaticamente."
+                    : form.processingMode === "pos"
+                      ? "Operador digita o valor na maquininha e finaliza no PDV."
+                      : "Pagamento controlado manualmente no PDV."}
+                </p>
+              </div>
+              <div className="space-y-2">
                 <label className="text-sm font-medium">Metodo TEF</label>
                 <Select
                   value={form.tefMethod}
@@ -244,6 +305,11 @@ export default function PaymentMethodsPage() {
                     <SelectItem value="debito">Debito</SelectItem>
                   </SelectContent>
                 </Select>
+                {!tefCapableType && form.processingMode === "tef" && (
+                  <p className="text-xs text-destructive">
+                    TEF so pode ser usado com PIX, credito ou debito.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Ordem</label>
@@ -291,37 +357,41 @@ export default function PaymentMethodsPage() {
               </p>
             ) : (
               <div className="space-y-2">
-                {methods.map((method) => (
-                  <div
-                    key={method.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded border p-3"
-                  >
-                    <div>
-                      <div className="font-medium">{method.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {typeLabels[method.type]} • NFC-e:{" "}
-                        {method.nfceCode || "-"} • TEF:{" "}
-                        {method.tefMethod || "Nao"}
+                {methods.map((method) => {
+                  const processingMode =
+                    (method.processingMode as ProcessingMode) ||
+                    (method.tefMethod ? "tef" : "manual");
+                  return (
+                    <div
+                      key={method.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded border p-3"
+                    >
+                      <div>
+                        <div className="font-medium">{method.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {typeLabels[method.type]} | NFC-e: {method.nfceCode || "-"} | Operacao:{" "}
+                          {processingModeLabels[processingMode]} | TEF: {method.tefMethod || "Nao"}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => startEdit(method)}
+                        >
+                          Editar
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => deleteMutation.mutate(method.id)}
+                        >
+                          Excluir
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => startEdit(method)}
-                      >
-                        Editar
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => deleteMutation.mutate(method.id)}
-                      >
-                        Excluir
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>

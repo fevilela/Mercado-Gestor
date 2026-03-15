@@ -2130,6 +2130,7 @@ export async function registerRoutes(
     name: z.string().min(1),
     type: z.enum(["pix", "credito", "debito", "dinheiro", "outros"]),
     nfceCode: z.string().optional(),
+    processingMode: z.enum(["manual", "tef", "pos"]).optional(),
     tefMethod: z.enum(["pix", "credito", "debito"]).optional(),
     isActive: z.boolean().optional(),
     sortOrder: z.number().int().optional(),
@@ -2177,12 +2178,14 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Nao autenticado" });
         }
         const data = paymentMethodSchema.parse(req.body);
+        const processingMode = data.processingMode || (data.tefMethod ? "tef" : "manual");
         const created = await storage.createPaymentMethod({
           companyId,
           name: data.name.trim(),
           type: data.type,
           nfceCode: data.nfceCode || null,
-          tefMethod: data.tefMethod || null,
+          processingMode,
+          tefMethod: processingMode === "tef" ? data.tefMethod || null : null,
           isActive: data.isActive ?? true,
           sortOrder: data.sortOrder ?? 0,
         });
@@ -2208,11 +2211,18 @@ export async function registerRoutes(
         }
         const id = parseInt(req.params.id);
         const data = paymentMethodSchema.partial().parse(req.body);
+        const processingMode =
+          data.processingMode ??
+          (data.tefMethod !== undefined ? (data.tefMethod ? "tef" : "manual") : undefined);
         const updated = await storage.updatePaymentMethod(id, companyId, {
           name: data.name?.trim(),
           type: data.type,
           nfceCode: data.nfceCode ?? undefined,
-          tefMethod: data.tefMethod ?? undefined,
+          processingMode,
+          tefMethod:
+            processingMode === "manual" || processingMode === "pos"
+              ? null
+              : data.tefMethod ?? undefined,
           isActive: data.isActive,
           sortOrder: data.sortOrder,
         });

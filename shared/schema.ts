@@ -639,6 +639,7 @@ export const paymentMethods = pgTable("payment_methods", {
   name: text("name").notNull(),
   type: text("type").notNull(),
   nfceCode: text("nfce_code"),
+  processingMode: text("processing_mode").default("manual"),
   tefMethod: text("tef_method"),
   isActive: boolean("is_active").default(true),
   sortOrder: integer("sort_order").default(0),

@@ -56,6 +56,7 @@ type PdvPaymentMethod = {
   id: number;
   name: string;
   type: "pix" | "credito" | "debito" | "dinheiro" | "outros";
+  processingMode?: "manual" | "tef" | "pos" | null;
   tefMethod?: "pix" | "credito" | "debito" | null;
   isActive?: boolean | null;
   sortOrder?: number | null;
@@ -82,6 +83,7 @@ type PosTerminalConfig = {
   name: string;
   code?: string | null;
   isActive?: boolean | null;
+  isAutonomous?: boolean | null;
   assignedUserId?: string | null;
   requiresSangria?: boolean | null;
   requiresSuprimento?: boolean | null;
@@ -250,6 +252,7 @@ export default function POS() {
   );
   const selectedPosTerminal =
     posTerminals.find((t) => t.id === selectedPosTerminalId) || null;
+  const isAutonomousTerminal = Boolean(selectedPosTerminal?.isAutonomous);
   const terminalStorageKey = `pdv:selected-terminal-id:${company?.id || "no-company"}:${unit?.id || "no-unit"}`;
   const selectedMpTerminalRef = String(
     selectedPosTerminal?.mpTerminalId || ""
@@ -562,10 +565,10 @@ export default function POS() {
   });
 
   const fallbackPaymentMethods: PdvPaymentMethod[] = [
-    { id: -1, name: "PIX", type: "pix", tefMethod: "pix" },
-    { id: -2, name: "Cartao de Credito", type: "credito", tefMethod: "credito" },
-    { id: -3, name: "Cartao de Debito", type: "debito", tefMethod: "debito" },
-    { id: -4, name: "Dinheiro", type: "dinheiro" },
+    { id: -1, name: "PIX", type: "pix", processingMode: "tef", tefMethod: "pix" },
+    { id: -2, name: "Cartao de Credito", type: "credito", processingMode: "tef", tefMethod: "credito" },
+    { id: -3, name: "Cartao de Debito", type: "debito", processingMode: "tef", tefMethod: "debito" },
+    { id: -4, name: "Dinheiro", type: "dinheiro", processingMode: "manual" },
   ];
   const products = ((pdvLoad?.products || []) as any[]).map((product: any) => {
     const promoPrice = Number(product?.promoPrice || 0);
@@ -618,10 +621,23 @@ export default function POS() {
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .trim();
+  const resolveProcessingMode = (
+    method: PdvPaymentMethod
+  ): "manual" | "tef" | "pos" => {
+    if (
+      method.processingMode === "manual" ||
+      method.processingMode === "tef" ||
+      method.processingMode === "pos"
+    ) {
+      return method.processingMode;
+    }
+    return method.tefMethod ? "tef" : "manual";
+  };
   const inferTefMethod = (
     method: PdvPaymentMethod
   ): "pix" | "credito" | "debito" | null => {
     if (method.tefMethod) return method.tefMethod;
+    if (resolveProcessingMode(method) !== "tef") return null;
     const typeToken = normalizeText(method.type || "");
     const nameToken = normalizeText(method.name || "");
     const token = `${typeToken} ${nameToken}`;
@@ -634,6 +650,7 @@ export default function POS() {
   const resolveTefMethod = (
     method: PdvPaymentMethod
   ): "pix" | "credito" | "debito" | null => {
+    if (resolveProcessingMode(method) !== "tef") return null;
     const inferred = inferTefMethod(method);
     if (inferred) return inferred;
 
@@ -650,20 +667,10 @@ export default function POS() {
     return null;
   };
   const normalizePaymentMethod = (method: PdvPaymentMethod): PdvPaymentMethod => {
-    let tefMethod = inferTefMethod(method);
-    if (!tefMethod) {
-      const normalizedType = normalizeText(method.type || "");
-      if (normalizedType.includes("credito") || normalizedType.includes("credit")) {
-        tefMethod = "credito";
-      } else if (
-        normalizedType.includes("debito") ||
-        normalizedType.includes("debit")
-      ) {
-        tefMethod = "debito";
-      } else if (normalizedType.includes("pix")) {
-        tefMethod = "pix";
-      }
+    if (resolveProcessingMode(method) !== "tef") {
+      return { ...method, tefMethod: null };
     }
+    let tefMethod = inferTefMethod(method);
     if (tefMethod) {
       return { ...method, tefMethod };
     }
@@ -942,7 +949,7 @@ export default function POS() {
   };
 
   const handleSelectPayment = async (method: PdvPaymentMethod) => {
-    if (terminalLockActive) {
+    if (isAutonomousTerminal && terminalLockActive) {
       toast({
         title: "PDV bloqueado",
         description:
@@ -967,22 +974,25 @@ export default function POS() {
     setShowTerminalActionDialog(false);
     paymentFlowCancelledRef.current = false;
 
+    const processingMode = resolveProcessingMode(method);
     const tefMethod = resolveTefMethod(method);
 
-    if (!tefMethod) {
+    if (processingMode !== "tef") {
       setPaymentStatus("approved");
       setPaymentResult({
         status: "approved",
-        provider: "manual",
+        provider: processingMode === "pos" ? "pos-manual" : "manual",
       });
       toast({
-        title: "Pagamento confirmado",
-        description: `Forma: ${method.name}`,
+        title:
+          processingMode === "pos"
+            ? "Pagamento em POS manual"
+            : "Pagamento confirmado",
+        description:
+          processingMode === "pos"
+            ? "Digite o valor na maquininha e finalize a venda manualmente no PDV."
+            : `Forma: ${method.name}`,
         className: "bg-emerald-500 text-white border-none",
-      });
-      void handleFinishSale({
-        status: "approved",
-        provider: "manual",
       });
       return;
     }
@@ -1049,6 +1059,24 @@ export default function POS() {
         );
         setShowPixQrDialog(true);
         setShowTerminalActionDialog(false);
+        if (pixResult.status === "approved") {
+          setShowPixQrDialog(false);
+          toast({
+            title: "Pagamento aprovado",
+            description: "Pagamento PIX confirmado.",
+            className: "bg-emerald-500 text-white border-none",
+          });
+          void handleFinishSale(pixResult);
+          return;
+        }
+        if (pixResult.status === "declined") {
+          toast({
+            title: "Pagamento negado",
+            description: "Tente outra forma de pagamento.",
+            variant: "destructive",
+          });
+          return;
+        }
       } else {
         let res: Response | null = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
@@ -1274,7 +1302,7 @@ export default function POS() {
       return;
     }
 
-    if (terminalLockActive) {
+    if (isAutonomousTerminal && terminalLockActive) {
       toast({
         title: "PDV bloqueado",
         description:
@@ -1287,7 +1315,7 @@ export default function POS() {
     if (!selectedPayment) {
       toast({
         title: "Selecione a forma de pagamento",
-        description: "Escolha PIX, Cartao de Credito ou Cartao de Debito para continuar.",
+        description: "Escolha uma forma de pagamento para continuar.",
         variant: "destructive",
       });
       return;
@@ -1425,7 +1453,7 @@ export default function POS() {
     const shouldTryClearQueue =
       paymentResult?.provider === "mercadopago" &&
       paymentResult?.status !== "approved";
-    if (shouldTryRemoteCancel || shouldTryClearQueue) {
+    if (isAutonomousTerminal && (shouldTryRemoteCancel || shouldTryClearQueue)) {
       setTerminalLockReference(paymentResult?.providerReference || null);
       setTerminalLockActive(true);
       remoteCancelled = await tryReleaseMercadoPagoTerminal(
@@ -1450,14 +1478,16 @@ export default function POS() {
       title: "Venda Cancelada",
       description: remoteCancelled
         ? "Venda cancelada e cobranca removida da maquininha."
-        : "Venda cancelada no PDV. Como a maquininha segue pendente, o PDV foi bloqueado ate liberar o terminal.",
+        : isAutonomousTerminal
+          ? "Venda cancelada no PDV. Como a maquininha segue pendente, o PDV foi bloqueado ate liberar o terminal."
+          : "Venda cancelada no PDV.",
       variant: "default",
       className: "bg-red-500 text-white border-none",
     });
   };
 
   const handleRetryTerminalRelease = async () => {
-    if (!terminalLockActive || isReleasingTerminal) return;
+    if (!isAutonomousTerminal || !terminalLockActive || isReleasingTerminal) return;
     setIsReleasingTerminal(true);
     try {
       const released = await tryReleaseMercadoPagoTerminal(terminalLockReference);
@@ -1489,11 +1519,21 @@ export default function POS() {
   };
 
   const handleRequestExitPdv = () => {
+    if (!selectedPosTerminal?.isAutonomous) {
+      setLocation("/");
+      return;
+    }
     setExitPdvPassword("");
     setShowExitPdvDialog(true);
   };
 
   const handleConfirmExitPdv = async () => {
+    if (!selectedPosTerminal?.isAutonomous) {
+      setShowExitPdvDialog(false);
+      setExitPdvPassword("");
+      setLocation("/");
+      return;
+    }
     const password = String(exitPdvPassword || "").trim();
     if (!password) {
       toast({
@@ -1948,7 +1988,11 @@ export default function POS() {
                   <div>Forma de pagamento: <span className="font-medium text-foreground">{getPaymentMethodLabel(selectedPayment)}</span></div>
                   {paymentStatus === "processing" && <div>Processando pagamento...</div>}
                   {paymentStatus === "approved" && (
-                    <div className="text-emerald-600">Pagamento aprovado{paymentResult?.nsu ? ` | NSU ${paymentResult.nsu}` : ""}{paymentResult?.brand ? ` | ${paymentResult.brand}` : ""}</div>
+                    <div className="text-emerald-600">
+                      {paymentResult?.provider === "pos-manual"
+                        ? "Pagamento informado na maquininha. Finalize a venda no PDV."
+                        : `Pagamento aprovado${paymentResult?.nsu ? ` | NSU ${paymentResult.nsu}` : ""}${paymentResult?.brand ? ` | ${paymentResult.brand}` : ""}`}
+                    </div>
                   )}
                   {paymentStatus === "declined" && <div className="text-red-600">Pagamento negado</div>}
                   {paymentStatus === "error" && <div className="text-red-600">Erro no pagamento</div>}
@@ -2082,7 +2126,11 @@ export default function POS() {
                     <div>Forma de pagamento: <span className="font-medium text-foreground">{getPaymentMethodLabel(selectedPayment)}</span></div>
                     {paymentStatus === "processing" && <div>Processando pagamento...</div>}
                     {paymentStatus === "approved" && (
-                      <div className="text-emerald-600">Pagamento aprovado{paymentResult?.nsu ? ` | NSU ${paymentResult.nsu}` : ""}{paymentResult?.brand ? ` | ${paymentResult.brand}` : ""}</div>
+                      <div className="text-emerald-600">
+                        {paymentResult?.provider === "pos-manual"
+                          ? "Pagamento informado na maquininha. Finalize a venda no PDV."
+                          : `Pagamento aprovado${paymentResult?.nsu ? ` | NSU ${paymentResult.nsu}` : ""}${paymentResult?.brand ? ` | ${paymentResult.brand}` : ""}`}
+                      </div>
                     )}
                     {paymentStatus === "declined" && <div className="text-red-600">Pagamento negado</div>}
                     {paymentStatus === "error" && <div className="text-red-600">Erro no pagamento</div>}
@@ -2532,7 +2580,7 @@ export default function POS() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={terminalLockActive}>
+      <Dialog open={isAutonomousTerminal && terminalLockActive}>
         <DialogContent
           className="sm:max-w-lg"
           onEscapeKeyDown={(event) => event.preventDefault()}
