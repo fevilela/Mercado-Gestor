@@ -142,6 +142,36 @@ const normalizeBarcodeValue = (value: unknown) =>
     .replace(/[^\dA-Za-z]/g, "")
     .toUpperCase();
 
+const getBarcodeCandidates = (value: unknown) => {
+  const normalized = normalizeBarcodeValue(value);
+  if (!normalized) return [];
+
+  const candidates = new Set<string>([normalized]);
+  const digitsOnly = normalized.replace(/\D/g, "");
+
+  if (digitsOnly) {
+    candidates.add(digitsOnly);
+    candidates.add(digitsOnly.replace(/^0+/, ""));
+
+    if (digitsOnly.length === 12) {
+      candidates.add(`0${digitsOnly}`);
+    }
+
+    if (digitsOnly.length === 13 && digitsOnly.startsWith("0")) {
+      candidates.add(digitsOnly.slice(1));
+    }
+  }
+
+  return Array.from(candidates).filter(Boolean);
+};
+
+const barcodeMatches = (productBarcode: unknown, scannedBarcode: unknown) => {
+  const productCandidates = new Set(getBarcodeCandidates(productBarcode));
+  return getBarcodeCandidates(scannedBarcode).some((code) =>
+    productCandidates.has(code)
+  );
+};
+
 export default function POS() {
   const [, setLocation] = useLocation();
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -744,7 +774,7 @@ export default function POS() {
       if (!normalizedBarcode) return;
 
       const product = products.find(
-        (p: any) => normalizeBarcodeValue(p.ean) === normalizedBarcode
+        (p: any) => barcodeMatches(p.ean, normalizedBarcode)
       );
 
       if (product) {
