@@ -136,6 +136,12 @@ type CartItem = {
   saleUnit: "UN" | "KG";
 };
 
+const normalizeBarcodeValue = (value: unknown) =>
+  String(value ?? "")
+    .trim()
+    .replace(/[^\dA-Za-z]/g, "")
+    .toUpperCase();
+
 export default function POS() {
   const [, setLocation] = useLocation();
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -734,7 +740,12 @@ export default function POS() {
     (barcode: string) => {
       if (!isScannerEnabled || !barcode) return;
 
-      const product = products.find((p: any) => p.ean === barcode);
+      const normalizedBarcode = normalizeBarcodeValue(barcode);
+      if (!normalizedBarcode) return;
+
+      const product = products.find(
+        (p: any) => normalizeBarcodeValue(p.ean) === normalizedBarcode
+      );
 
       if (product) {
         if (isScannerBeep) playBeep();
@@ -748,7 +759,7 @@ export default function POS() {
             className: "bg-emerald-500 text-white border-none",
           });
         } else {
-          setSearchQuery(barcode);
+          setSearchQuery(normalizedBarcode);
           setShowCatalog(true);
         }
       } else {
