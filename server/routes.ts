@@ -6095,6 +6095,49 @@ export async function registerRoutes(
     }
   );
 
+  app.patch(
+    "/api/sequential-numbering/:id",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÃ£o autenticado" });
+
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) {
+          return res.status(400).json({ error: "ID invÃ¡lido" });
+        }
+
+        const existing = (await storage.listSequentialNumbering(companyId)).find(
+          (item) => item.id === id
+        );
+
+        if (!existing) {
+          return res.status(404).json({ error: "NumeraÃ§Ã£o nÃ£o encontrada" });
+        }
+
+        const payload: { isActive?: boolean } = {};
+        if (typeof req.body?.isActive === "boolean") {
+          payload.isActive = req.body.isActive;
+        }
+
+        if (Object.keys(payload).length === 0) {
+          return res.status(400).json({ error: "Nenhuma alteraÃ§Ã£o informada" });
+        }
+
+        const updated = await storage.updateSequentialNumbering(id, payload);
+        res.json(updated);
+      } catch (error) {
+        console.error("Failed to update sequential numbering:", error);
+        res.status(500).json({
+          error: error instanceof Error ? error.message : "Failed to update",
+        });
+      }
+    }
+  );
+
   app.post(
     "/api/sequential-numbering/:id/next-number",
     requireAuth,

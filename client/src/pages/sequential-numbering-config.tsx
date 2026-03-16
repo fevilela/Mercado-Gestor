@@ -102,6 +102,38 @@ export default function SequentialNumberingConfig() {
     },
   });
 
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({
+      id,
+      isActive,
+    }: {
+      id: number;
+      isActive: boolean;
+    }) => {
+      const res = await fetch(`/api/sequential-numbering/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to update numbering");
+      }
+      return res.json();
+    },
+    onSuccess: (_, variables) => {
+      toast.success(
+        variables.isActive
+          ? "NumeraÃ§Ã£o reativada com sucesso!"
+          : "NumeraÃ§Ã£o inativada com sucesso!"
+      );
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     createMutation.mutate(formData);
@@ -359,6 +391,7 @@ export default function SequentialNumberingConfig() {
                     <TableHead>Protocolo</TableHead>
                     <TableHead>Ambiente</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>AÃ§Ãµes</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -418,13 +451,30 @@ export default function SequentialNumberingConfig() {
                             {n.isActive ? "✓ Ativa" : "✗ Inativa"}
                           </span>
                         </TableCell>
+                        <TableCell>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={n.isActive ? "outline" : "default"}
+                            disabled={toggleActiveMutation.isPending}
+                            onClick={() =>
+                              toggleActiveMutation.mutate({
+                                id: n.id,
+                                isActive: !n.isActive,
+                              })
+                            }
+                            data-testid={`button-toggle-numbering-${n.id}`}
+                          >
+                            {n.isActive ? "Inativar" : "Reativar"}
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     );
                   })}
                   {numberings.length === 0 && (
                     <TableRow>
                       <TableCell
-                        colSpan={7}
+                        colSpan={8}
                         className="text-center py-4 text-gray-500"
                       >
                         Nenhuma numeração configurada
