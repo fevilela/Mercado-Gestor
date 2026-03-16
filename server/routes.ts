@@ -1263,7 +1263,11 @@ export async function registerRoutes(
     brand: z.unknown().optional().nullable(),
     provider: z.unknown().optional().nullable(),
     authorizationCode: z.string().optional().nullable(),
-    providerReference: z.string().optional().nullable(),
+    providerReference: z
+      .union([z.string(), z.number()])
+      .transform((value) => String(value))
+      .optional()
+      .nullable(),
   });
 
   const saleItemRequestSchema = z.object({
