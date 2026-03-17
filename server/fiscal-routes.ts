@@ -1392,6 +1392,14 @@ router.post(
                 1,
               );
             } catch (error) {
+              const message =
+                error instanceof Error ? String(error.message || "") : "";
+              const shouldRetryLegacyType =
+                message.includes("nao configurada") ||
+                message.includes("não configurada");
+              if (!shouldRetryLegacyType) {
+                throw error;
+              }
               numbering = await storage.getNextDocumentNumber(
                 companyId,
                 "NFCe",

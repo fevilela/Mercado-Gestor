@@ -1,6 +1,17 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -123,6 +134,30 @@ export default function SequentialNumberingConfig() {
           ? "NumeraÃ§Ã£o reativada com sucesso!"
           : "NumeraÃ§Ã£o inativada com sucesso!"
       );
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/sequential-numbering/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to delete numbering");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success("Numeração excluída com sucesso!");
+      if (editingId) {
+        setEditingId(null);
+        setFormData(emptyForm);
+      }
       refetch();
     },
     onError: (error: Error) => {
@@ -574,6 +609,35 @@ export default function SequentialNumberingConfig() {
                             >
                               {n.isActive ? "Inativar" : "Reativar"}
                             </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="destructive"
+                                  disabled={n.isActive || deleteMutation.isPending}
+                                >
+                                  Excluir
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Excluir numeração</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Esta ação remove a faixa cadastrada. Só é permitido excluir
+                                    numerações inativas.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => deleteMutation.mutate(n.id)}
+                                  >
+                                    Excluir
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                           </div>
                         </TableCell>
                       </TableRow>

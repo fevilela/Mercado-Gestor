@@ -1405,6 +1405,11 @@ export const storage = {
           eq(sequentialNumbering.series, series)
         )
       )
+      .orderBy(
+        desc(sequentialNumbering.isActive),
+        desc(sequentialNumbering.updatedAt),
+        desc(sequentialNumbering.id)
+      )
       .limit(1);
     return numbering;
   },
@@ -1425,6 +1430,19 @@ export const storage = {
       .update(sequentialNumbering)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(sequentialNumbering.id, id))
+      .returning();
+    return numbering;
+  },
+
+  async deleteSequentialNumbering(id: number, companyId: number) {
+    const [numbering] = await db
+      .delete(sequentialNumbering)
+      .where(
+        and(
+          eq(sequentialNumbering.id, id),
+          eq(sequentialNumbering.companyId, companyId)
+        )
+      )
       .returning();
     return numbering;
   },

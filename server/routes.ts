@@ -6206,6 +6206,46 @@ export async function registerRoutes(
     }
   );
 
+  app.delete(
+    "/api/sequential-numbering/:id",
+    requireAuth,
+    requirePermission("fiscal:manage"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "NÃƒÂ£o autenticado" });
+
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) {
+          return res.status(400).json({ error: "ID invÃƒÂ¡lido" });
+        }
+
+        const existing = (await storage.listSequentialNumbering(companyId)).find(
+          (item) => item.id === id
+        );
+
+        if (!existing) {
+          return res.status(404).json({ error: "NumeraÃƒÂ§ÃƒÂ£o nÃƒÂ£o encontrada" });
+        }
+
+        if (existing.isActive) {
+          return res.status(400).json({
+            error: "Inative a numeraÃƒÂ§ÃƒÂ£o antes de excluir",
+          });
+        }
+
+        const deleted = await storage.deleteSequentialNumbering(id, companyId);
+        return res.json({ success: true, numbering: deleted });
+      } catch (error) {
+        console.error("Failed to delete sequential numbering:", error);
+        return res.status(500).json({
+          error: error instanceof Error ? error.message : "Failed to delete",
+        });
+      }
+    }
+  );
+
   app.post(
     "/api/sequential-numbering/:id/next-number",
     requireAuth,
