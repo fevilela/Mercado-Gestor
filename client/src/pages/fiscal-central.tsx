@@ -622,6 +622,35 @@ export default function FiscalCentralPage() {
     },
   });
 
+  const resetNfceMutation = useMutation({
+    mutationFn: async (sale: SaleRecord) => {
+      const res = await fetch("/api/fiscal/nfce/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ saleId: sale.id }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "Falha ao resetar NFC-e");
+      }
+      return payload;
+    },
+    onSuccess: () => {
+      toast({
+        title: "Sucesso",
+        description: "NFC-e resetada. Reenvie para gerar nova numeração.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description: error instanceof Error ? error.message : "Falha ao resetar NFC-e",
+        variant: "destructive",
+      });
+    },
+  });
+
   const cancelNfeExtemporaneousMutation = useMutation({
     mutationFn: async (doc: NFeHistoryRecord) => {
       const res = await fetch("/api/fiscal/sefaz/cancel-extemporaneous", {
@@ -1709,6 +1738,9 @@ export default function FiscalCentralPage() {
                       <TableBody>
                         {nfcePagination.paginatedItems.map((sale) => {
                           const rowCanSend = canSendNfce(sale.nfceStatus);
+                          const rowCanReset =
+                            !String(sale.nfceStatus || "").toLowerCase().includes("autoriz") &&
+                            !String(sale.nfceStatus || "").toLowerCase().includes("cancel");
                           const rowCanCancel = canCancelNfce(
                             sale.nfceStatus,
                             sale.nfceKey,
@@ -1767,6 +1799,12 @@ export default function FiscalCentralPage() {
                                       disabled={!rowCanSend || sendNfceMutation.isPending}
                                     >
                                       Enviar para SEFAZ
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => resetNfceMutation.mutate(sale)}
+                                      disabled={!rowCanReset || resetNfceMutation.isPending}
+                                    >
+                                      Resetar NFC-e
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() => openNfcePdf(sale.id)}

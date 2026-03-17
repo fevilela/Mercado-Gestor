@@ -1840,6 +1840,72 @@ router.get(
 );
 
 router.post(
+  "/nfce/reset",
+  requireAuth,
+  requirePermission("fiscal:emit_nfce"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const saleId = Number(req.body.saleId);
+      if (!saleId) {
+        return res.status(400).json({ error: "Venda nao informada" });
+      }
+
+      const sale = await storage.getSale(saleId, companyId);
+      if (!sale) {
+        return res.status(404).json({ error: "Venda nao encontrada" });
+      }
+
+      const normalizedStatus = String(sale.nfceStatus || "").toLowerCase();
+      if (normalizedStatus.includes("autoriz")) {
+        return res.status(400).json({
+          error: "NFC-e autorizada nao pode ser resetada. Cancele a nota.",
+        });
+      }
+      if (normalizedStatus.includes("cancel")) {
+        return res.status(400).json({
+          error: "NFC-e cancelada nao pode ser resetada.",
+        });
+      }
+
+      const updated = await storage.resetSaleNfce(saleId, companyId);
+
+      await logSefazTransmission({
+        companyId,
+        action: "nfce-reset",
+        environment: await resolveSefazEnvironment(companyId),
+        requestPayload: {
+          saleId,
+          previousStatus: sale.nfceStatus || null,
+          previousKey: sale.nfceKey || null,
+          previousProtocol: sale.nfceProtocol || null,
+        },
+        responsePayload: {
+          success: true,
+          saleId,
+          nfceStatus: updated?.nfceStatus || "Pendente",
+        },
+        success: true,
+      });
+
+      return res.json({
+        success: true,
+        sale: updated,
+        message: "NFC-e resetada. O proximo envio gerara nova chave/numeração.",
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : "Erro ao resetar NFC-e",
+      });
+    }
+  },
+);
+
+router.post(
   "/nfce/cancel",
   requireAuth,
   requirePermission("fiscal:cancel_nfce"),

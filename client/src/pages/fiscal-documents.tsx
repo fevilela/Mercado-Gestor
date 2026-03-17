@@ -939,6 +939,28 @@ export default function FiscalDocuments() {
     },
   });
 
+  const resetNfceMutation = useMutation<any, Error, { saleId: number }>({
+    mutationFn: async ({ saleId }) => {
+      const res = await fetch("/api/fiscal/nfce/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ saleId }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Falha ao resetar NFC-e");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+      toast.success("NFC-e resetada. Reenvie para gerar nova numeração.");
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
   const inutilizeNfceMutation = useMutation<any, Error, typeof inutilizeForm>({
     mutationFn: async (payload) => {
       const res = await fetch("/api/fiscal/nfce/inutilize", {
@@ -3520,6 +3542,9 @@ export default function FiscalDocuments() {
                           const canSend =
                             normalizedStatus === "Pendente" ||
                             normalizedStatus === "Rejeitada";
+                          const canReset =
+                            normalizedStatus !== "Autorizada" &&
+                            normalizedStatus !== "Cancelada";
                           const canCancel = normalizedStatus === "Autorizada";
                           return (
                             <TableRow key={sale.id}>
@@ -3559,6 +3584,17 @@ export default function FiscalDocuments() {
                                     {normalizedStatus === "Rejeitada"
                                       ? "Reenviar"
                                       : "Enviar"}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={!canReset || resetNfceMutation.isPending}
+                                    onClick={() =>
+                                      resetNfceMutation.mutate({ saleId: sale.id })
+                                    }
+                                    data-testid={`button-reset-nfce-${sale.id}`}
+                                  >
+                                    Resetar
                                   </Button>
                                   <Button
                                     size="sm"

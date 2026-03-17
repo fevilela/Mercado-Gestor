@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -47,15 +47,20 @@ interface SequentialNumbering {
 }
 
 export default function SequentialNumberingConfig() {
-  const [formData, setFormData] = useState({
+  const emptyForm = {
     documentType: "NF-e",
     series: 1,
     rangeStart: 1,
+    currentNumber: 1,
     rangeEnd: 999999,
     authorization: "",
     authorizedAt: "",
     expiresAt: "",
     environment: "homologacao",
+  };
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [formData, setFormData] = useState({
+    ...emptyForm,
   });
 
   const { data: numberings = [], refetch } = useQuery({
@@ -86,16 +91,7 @@ export default function SequentialNumberingConfig() {
     onSuccess: () => {
       toast.success("Numeração criada com sucesso!");
       refetch();
-      setFormData({
-        documentType: "NF-e",
-        series: 1,
-        rangeStart: 1,
-        rangeEnd: 999999,
-        authorization: "",
-        authorizedAt: "",
-        expiresAt: "",
-        environment: "homologacao",
-      });
+      setFormData(emptyForm);
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -134,9 +130,72 @@ export default function SequentialNumberingConfig() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: async (data: typeof formData & { id: number }) => {
+      const res = await fetch(`/api/sequential-numbering/${data.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          documentType: data.documentType,
+          series: data.series,
+          rangeStart: data.rangeStart,
+          currentNumber: data.currentNumber,
+          rangeEnd: data.rangeEnd,
+          authorization: data.authorization,
+          authorizedAt: data.authorizedAt || null,
+          expiresAt: data.expiresAt || null,
+          environment: data.environment,
+        }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to update");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success("NumeraÃ§Ã£o atualizada com sucesso!");
+      setEditingId(null);
+      setFormData(emptyForm);
+      refetch();
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (editingId) {
+      updateMutation.mutate({ ...formData, id: editingId });
+      return;
+    }
     createMutation.mutate(formData);
+  };
+
+  const handleEdit = (numbering: SequentialNumbering) => {
+    setEditingId(numbering.id);
+    setFormData({
+      documentType: numbering.documentType,
+      series: numbering.series,
+      rangeStart: numbering.rangeStart,
+      currentNumber: numbering.currentNumber,
+      rangeEnd: numbering.rangeEnd,
+      authorization: numbering.authorization || "",
+      authorizedAt: numbering.authorizedAt
+        ? String(numbering.authorizedAt).slice(0, 16)
+        : "",
+      expiresAt: numbering.expiresAt
+        ? String(numbering.expiresAt).slice(0, 16)
+        : "",
+      environment: numbering.environment,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    setFormData(emptyForm);
   };
 
   const getStatusColor = (numbering: SequentialNumbering) => {
@@ -166,9 +225,13 @@ export default function SequentialNumberingConfig() {
           {/* Form */}
           <Card>
             <CardHeader>
-              <CardTitle>Nova Numeração</CardTitle>
+              <CardTitle>
+                {editingId ? "Editar Numeração" : "Nova Numeração"}
+              </CardTitle>
               <CardDescription>
-                Configure um novo range de numeração
+                {editingId
+                  ? "Corrija a faixa errada e salve."
+                  : "Configure um novo range de numeração"}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -222,7 +285,7 @@ export default function SequentialNumberingConfig() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <div>
                     <Label htmlFor="rangeStart">Número Inicial</Label>
                     <Input
@@ -237,6 +300,22 @@ export default function SequentialNumberingConfig() {
                         })
                       }
                       data-testid="input-range-start"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="currentNumber">Número Atual</Label>
+                    <Input
+                      id="currentNumber"
+                      type="number"
+                      min="1"
+                      value={formData.currentNumber}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          currentNumber: parseInt(e.target.value),
+                        })
+                      }
+                      data-testid="input-current-number"
                     />
                   </div>
                   <div>
@@ -324,14 +403,32 @@ export default function SequentialNumberingConfig() {
                   </Select>
                 </div>
 
-                <Button
-                  type="submit"
-                  disabled={createMutation.isPending}
-                  className="w-full"
-                  data-testid="button-create-numbering"
-                >
-                  {createMutation.isPending ? "Criando..." : "Criar Numeração"}
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    type="submit"
+                    disabled={createMutation.isPending || updateMutation.isPending}
+                    className="flex-1"
+                    data-testid="button-create-numbering"
+                  >
+                    {editingId
+                      ? updateMutation.isPending
+                        ? "Salvando..."
+                        : "Salvar alterações"
+                      : createMutation.isPending
+                        ? "Criando..."
+                        : "Criar Numeração"}
+                  </Button>
+                  {editingId && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={resetForm}
+                      data-testid="button-cancel-edit-numbering"
+                    >
+                      Cancelar
+                    </Button>
+                  )}
+                </div>
               </form>
             </CardContent>
           </Card>
@@ -391,7 +488,7 @@ export default function SequentialNumberingConfig() {
                     <TableHead>Protocolo</TableHead>
                     <TableHead>Ambiente</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>AÃ§Ãµes</TableHead>
+                    <TableHead>Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -452,21 +549,32 @@ export default function SequentialNumberingConfig() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={n.isActive ? "outline" : "default"}
-                            disabled={toggleActiveMutation.isPending}
-                            onClick={() =>
-                              toggleActiveMutation.mutate({
-                                id: n.id,
-                                isActive: !n.isActive,
-                              })
-                            }
-                            data-testid={`button-toggle-numbering-${n.id}`}
-                          >
-                            {n.isActive ? "Inativar" : "Reativar"}
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => handleEdit(n)}
+                              data-testid={`button-edit-numbering-${n.id}`}
+                            >
+                              Editar
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={n.isActive ? "outline" : "default"}
+                              disabled={toggleActiveMutation.isPending}
+                              onClick={() =>
+                                toggleActiveMutation.mutate({
+                                  id: n.id,
+                                  isActive: !n.isActive,
+                                })
+                              }
+                              data-testid={`button-toggle-numbering-${n.id}`}
+                            >
+                              {n.isActive ? "Inativar" : "Reativar"}
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

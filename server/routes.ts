@@ -6122,13 +6122,77 @@ export async function registerRoutes(
           return res.status(404).json({ error: "NumeraÃ§Ã£o nÃ£o encontrada" });
         }
 
-        const payload: { isActive?: boolean } = {};
+        const payload: {
+          isActive?: boolean;
+          documentType?: string;
+          series?: number;
+          rangeStart?: number;
+          rangeEnd?: number;
+          currentNumber?: number;
+          authorization?: string | null;
+          authorizedAt?: Date | null;
+          expiresAt?: Date | null;
+          environment?: string;
+        } = {};
         if (typeof req.body?.isActive === "boolean") {
           payload.isActive = req.body.isActive;
+        }
+        if (typeof req.body?.documentType === "string") {
+          payload.documentType = req.body.documentType;
+        }
+        if (Number.isFinite(Number(req.body?.series))) {
+          payload.series = Number(req.body.series);
+        }
+        if (Number.isFinite(Number(req.body?.rangeStart))) {
+          payload.rangeStart = Number(req.body.rangeStart);
+        }
+        if (Number.isFinite(Number(req.body?.rangeEnd))) {
+          payload.rangeEnd = Number(req.body.rangeEnd);
+        }
+        if (Number.isFinite(Number(req.body?.currentNumber))) {
+          payload.currentNumber = Number(req.body.currentNumber);
+        }
+        if (req.body?.authorization !== undefined) {
+          payload.authorization = req.body.authorization
+            ? String(req.body.authorization)
+            : null;
+        }
+        if (req.body?.authorizedAt !== undefined) {
+          payload.authorizedAt = req.body.authorizedAt
+            ? new Date(req.body.authorizedAt)
+            : null;
+        }
+        if (req.body?.expiresAt !== undefined) {
+          payload.expiresAt = req.body.expiresAt
+            ? new Date(req.body.expiresAt)
+            : null;
+        }
+        if (typeof req.body?.environment === "string") {
+          payload.environment = req.body.environment;
         }
 
         if (Object.keys(payload).length === 0) {
           return res.status(400).json({ error: "Nenhuma alteraÃ§Ã£o informada" });
+        }
+
+        const nextRangeStart = payload.rangeStart ?? existing.rangeStart;
+        const nextRangeEnd = payload.rangeEnd ?? existing.rangeEnd;
+        const nextCurrentNumber = payload.currentNumber ?? existing.currentNumber;
+
+        if (nextRangeStart > nextRangeEnd) {
+          return res
+            .status(400)
+            .json({ error: "Intervalo de numeraÃ§Ã£o invÃ¡lido" });
+        }
+
+        if (
+          nextCurrentNumber < nextRangeStart ||
+          nextCurrentNumber > nextRangeEnd + 1
+        ) {
+          return res.status(400).json({
+            error:
+              "NÃºmero atual deve ficar dentro do intervalo configurado",
+          });
         }
 
         const updated = await storage.updateSequentialNumbering(id, payload);

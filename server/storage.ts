@@ -468,13 +468,27 @@ export const storage = {
     id: number,
     companyId: number,
     nfceStatus: string,
-    nfceProtocol?: string,
-    nfceKey?: string,
+    nfceProtocol?: string | null,
+    nfceKey?: string | null,
     nfceError?: string | null
   ) {
     const [sale] = await db
       .update(sales)
       .set({ nfceStatus, nfceProtocol, nfceKey, nfceError })
+      .where(and(eq(sales.id, id), eq(sales.companyId, companyId)))
+      .returning();
+    return sale;
+  },
+
+  async resetSaleNfce(id: number, companyId: number) {
+    const [sale] = await db
+      .update(sales)
+      .set({
+        nfceStatus: "Pendente",
+        nfceProtocol: null,
+        nfceKey: null,
+        nfceError: null,
+      })
       .where(and(eq(sales.id, id), eq(sales.companyId, companyId)))
       .returning();
     return sale;
