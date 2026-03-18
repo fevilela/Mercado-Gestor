@@ -627,14 +627,35 @@ export default function POS() {
   const resolveProcessingMode = (
     method: PdvPaymentMethod
   ): "manual" | "tef" | "pos" => {
-    if (
-      method.processingMode === "manual" ||
-      method.processingMode === "tef" ||
-      method.processingMode === "pos"
-    ) {
+    if (method.processingMode === "pos" || method.processingMode === "tef") {
       return method.processingMode;
     }
-    return method.tefMethod ? "tef" : "manual";
+
+    const normalizeToken = (value: unknown) =>
+      String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+    const typeToken = normalizeToken(method.type);
+    const nameToken = normalizeToken(method.name);
+    const token = `${typeToken} ${nameToken}`;
+    const looksElectronic =
+      Boolean(method.tefMethod) ||
+      token.includes("pix") ||
+      token.includes("qr") ||
+      token.includes("credito") ||
+      token.includes("credit") ||
+      token.includes("debito") ||
+      token.includes("debit") ||
+      token.includes("cartao") ||
+      token.includes("card");
+
+    if (method.processingMode === "manual") {
+      return looksElectronic ? "tef" : "manual";
+    }
+
+    return looksElectronic ? "tef" : "manual";
   };
   const inferTefMethod = (
     method: PdvPaymentMethod
