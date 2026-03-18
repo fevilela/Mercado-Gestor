@@ -2042,9 +2042,9 @@ export default function POS() {
         ) : (
           <div className="flex-1 bg-[#eff2f8] p-2">
             <div className="mx-auto grid h-full max-w-[1120px] grid-cols-2 overflow-hidden rounded-2xl border border-[#d8dce7] bg-[#f7f8fc]">
-              <div className="flex flex-col border-r border-[#d8dce7] p-3">
+              <div className="flex min-h-0 flex-col overflow-hidden border-r border-[#d8dce7] p-3">
                 <h2 className="text-[15px] font-semibold text-[#1a2235]">Resumo da Venda</h2>
-                <div className="mt-2 min-h-0 flex-1 rounded-xl border border-[#d8dce7] bg-white/50">
+                <div className="mt-2 min-h-0 flex-1 overflow-hidden rounded-xl border border-[#d8dce7] bg-white/50">
                   <ScrollArea className="h-full p-2">
                     {cart.length === 0 ? (
                       <div className="h-full min-h-[120px] flex items-center justify-center text-[12px] text-[#6b7388]">
