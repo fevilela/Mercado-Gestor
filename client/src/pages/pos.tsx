@@ -144,6 +144,9 @@ const normalizeBarcodeValue = (value: unknown) =>
     .replace(/[^\dA-Za-z]/g, "")
     .toUpperCase();
 
+const fetchWithSession = (input: RequestInfo | URL, init?: RequestInit) =>
+  fetch(input, { ...init, credentials: "include" });
+
 const getBarcodeCandidates = (value: unknown) => {
   const normalized = normalizeBarcodeValue(value);
   if (!normalized) return [];
@@ -216,7 +219,7 @@ export default function POS() {
     {
       queryKey: ["/api/cash-register/current"],
       queryFn: async () => {
-        const res = await fetch("/api/cash-register/current");
+        const res = await fetchWithSession("/api/cash-register/current");
         if (!res.ok) throw new Error("Failed to fetch cash register");
         return res.json();
       },
@@ -232,7 +235,7 @@ export default function POS() {
   const { data: posTerminalsData } = useQuery({
     queryKey: ["/api/pos-terminals"],
     queryFn: async () => {
-      const res = await fetch("/api/pos-terminals");
+      const res = await fetchWithSession("/api/pos-terminals");
       if (!res.ok) throw new Error("Failed to fetch POS terminals");
       return res.json();
     },
@@ -240,7 +243,7 @@ export default function POS() {
   const { data: posTerminalDiagnostics } = useQuery<PosTerminalDiagnostics>({
     queryKey: ["/api/pos-terminals/diagnostics"],
     queryFn: async () => {
-      const res = await fetch("/api/pos-terminals/diagnostics");
+      const res = await fetchWithSession("/api/pos-terminals/diagnostics");
       if (!res.ok) throw new Error("Failed to fetch POS terminal diagnostics");
       return res.json();
     },
@@ -287,7 +290,7 @@ export default function POS() {
 
   const openCashRegisterMutation = useMutation({
     mutationFn: async (data: { openingAmount: string; terminalId?: number }) => {
-      const res = await fetch("/api/cash-register/open", {
+      const res = await fetchWithSession("/api/cash-register/open", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -325,7 +328,7 @@ export default function POS() {
       amount: string;
       reason?: string;
     }) => {
-      const res = await fetch("/api/cash-register/movement", {
+      const res = await fetchWithSession("/api/cash-register/movement", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -409,7 +412,7 @@ export default function POS() {
   const { data: settings } = useQuery({
     queryKey: ["/api/settings"],
     queryFn: async () => {
-      const res = await fetch("/api/settings");
+      const res = await fetchWithSession("/api/settings");
       if (!res.ok) throw new Error("Failed to fetch settings");
       return res.json();
     },
@@ -432,7 +435,7 @@ export default function POS() {
   const isScannerBeep = settings?.barcodeScannerBeep !== false;
 
   const getPdfBlob = async (url: string, errorMessage: string) => {
-    const res = await fetch(url, { credentials: "include" });
+    const res = await fetchWithSession(url);
     if (!res.ok) {
       const payload = await res.json().catch(() => ({}));
       throw new Error(payload?.error || errorMessage);
@@ -555,7 +558,7 @@ export default function POS() {
   } = useQuery({
     queryKey: ["/api/pdv/load"],
     queryFn: async () => {
-      const res = await fetch("/api/pdv/load", { cache: "no-store" });
+      const res = await fetchWithSession("/api/pdv/load", { cache: "no-store" });
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
         throw new Error(error.error || "Nenhuma carga enviada");
@@ -690,7 +693,7 @@ export default function POS() {
       fiscalConfigured: boolean;
       fiscalReadiness?: FiscalReadiness;
     }> => {
-      const res = await fetch("/api/sales", {
+      const res = await fetchWithSession("/api/sales", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(saleData),
@@ -709,7 +712,7 @@ export default function POS() {
 
   const verifyExitPasswordMutation = useMutation({
     mutationFn: async (password: string) => {
-      const res = await fetch("/api/auth/verify-password", {
+      const res = await fetchWithSession("/api/auth/verify-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
@@ -900,7 +903,7 @@ export default function POS() {
     let released = false;
 
     if (reference) {
-      const cancelRes = await fetch("/api/payments/mercadopago/cancel", {
+      const cancelRes = await fetchWithSession("/api/payments/mercadopago/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ providerReference: reference }),
@@ -913,7 +916,7 @@ export default function POS() {
     }
 
     if (!released) {
-      const clearRes = await fetch("/api/payments/mercadopago/clear-queue", {
+      const clearRes = await fetchWithSession("/api/payments/mercadopago/clear-queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -929,7 +932,7 @@ export default function POS() {
     }
 
     if (reference) {
-      const statusRes = await fetch(
+      const statusRes = await fetchWithSession(
         `/api/payments/mercadopago/status/${encodeURIComponent(reference)}`
       , {
         cache: "no-store",
@@ -1038,7 +1041,7 @@ export default function POS() {
     try {
       let result: PaymentResult | null = null;
       if (tefMethod === "pix") {
-        const pixRes = await fetch("/api/payments/pix/qr", {
+        const pixRes = await fetchWithSession("/api/payments/pix/qr", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ amount: parseFloat(total.toFixed(2)) }),
@@ -1080,7 +1083,7 @@ export default function POS() {
       } else {
         let res: Response | null = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
-          res = await fetch("/api/payments/authorize", {
+          res = await fetchWithSession("/api/payments/authorize", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1092,7 +1095,7 @@ export default function POS() {
           if (res.status !== 409 || attempt === 3) {
             break;
           }
-          await fetch("/api/payments/mercadopago/clear-queue", {
+          await fetchWithSession("/api/payments/mercadopago/clear-queue", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1204,7 +1207,7 @@ export default function POS() {
             return;
           }
           await sleep(PAYMENT_POLL_INTERVAL_MS);
-          const statusRes = await fetch(statusEndpoint, {
+          const statusRes = await fetchWithSession(statusEndpoint, {
             cache: "no-store",
           });
           if (!statusRes.ok) {
@@ -1243,7 +1246,7 @@ export default function POS() {
 
         let autoCancelled = false;
         if (provider === "mercadopago") {
-          const cancelRes = await fetch("/api/payments/mercadopago/cancel", {
+          const cancelRes = await fetchWithSession("/api/payments/mercadopago/cancel", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1256,7 +1259,7 @@ export default function POS() {
           }
 
           if (!autoCancelled) {
-            const clearRes = await fetch("/api/payments/mercadopago/clear-queue", {
+            const clearRes = await fetchWithSession("/api/payments/mercadopago/clear-queue", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -1390,7 +1393,7 @@ export default function POS() {
       }
 
       try {
-        const response = await fetch("/api/fiscal/nfce/send", {
+        const response = await fetchWithSession("/api/fiscal/nfce/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ saleIds: [result.sale?.id].filter(Boolean) }),
