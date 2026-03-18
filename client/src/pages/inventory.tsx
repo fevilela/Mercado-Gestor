@@ -522,7 +522,10 @@ export default function Inventory() {
     setPdvLoadFeedback(null);
     setIsSendingPdvLoad(true);
     try {
-      const response = await fetch("/api/pdv/load", { method: "POST" });
+      const response = await fetch("/api/pdv/load", {
+        method: "POST",
+        credentials: "include",
+      });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data.error || "Falha ao enviar carga do PDV");
