@@ -212,6 +212,7 @@ export default function ProductForm({
   const [kitQuantity, setKitQuantity] = useState(1);
   const [isLookingUpEan, setIsLookingUpEan] = useState(false);
   const [eanLookupError, setEanLookupError] = useState<string | null>(null);
+  const submitLockRef = useState({ current: false })[0];
 
   const { data: suppliers = [] } = useQuery({
     queryKey: ["/api/suppliers"],
@@ -593,6 +594,7 @@ export default function ProductForm({
       return res.json();
     },
     onSuccess: () => {
+      submitLockRef.current = false;
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       toast.success(
         editProduct
@@ -602,11 +604,16 @@ export default function ProductForm({
       onOpenChange(false);
     },
     onError: (error: Error) => {
+      submitLockRef.current = false;
       toast.error(error.message);
     },
   });
 
   const onSubmit = (data: ProductFormData) => {
+    if (submitLockRef.current || createMutation.isPending) {
+      return;
+    }
+
     const normalizedEan = String(data.ean || "").trim();
     const primaryMedia = mediaItems.find((m) => m.isPrimary);
     const normalizedPurchasePrice = normalizeDecimalString(
@@ -678,6 +685,7 @@ export default function ProductForm({
           }))
         : [],
     };
+    submitLockRef.current = true;
     createMutation.mutate(productData);
   };
 
@@ -1914,6 +1922,5 @@ export default function ProductForm({
     </Dialog>
   );
 }
-
 
 

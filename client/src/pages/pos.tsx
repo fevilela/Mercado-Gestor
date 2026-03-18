@@ -2034,7 +2034,7 @@ export default function POS() {
                         {cart.map((item) => (
                           <div key={item.key} className="rounded-lg border border-[#dde2ee] bg-white/70 px-2 py-1.5">
                             <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
+                              <div className="min-w-0 flex-1">
                                 <p className="truncate text-[12px] font-medium text-[#1a2235]">{item.product.name}</p>
                                 <p
                                   className={`text-[11px] ${
@@ -2058,24 +2058,39 @@ export default function POS() {
                                   )}
                                 </p>
                               </div>
-                              <span
-                                className={`text-[12px] font-semibold ${
-                                  isPromoProduct(item.product)
-                                    ? "text-emerald-600"
-                                    : "text-[#1a2235]"
-                                }`}
-                              >
-                                {isPromoProduct(item.product) ? (
-                                  <span className="flex flex-col items-end leading-tight">
-                                    <span className="text-[10px] text-muted-foreground line-through">
-                                      De: R$ {(getRegularPrice(item.product) * item.qty).toFixed(2)}
+                              <div className="flex items-start gap-1.5">
+                                <span
+                                  className={`text-[12px] font-semibold ${
+                                    isPromoProduct(item.product)
+                                      ? "text-emerald-600"
+                                      : "text-[#1a2235]"
+                                  }`}
+                                >
+                                  {isPromoProduct(item.product) ? (
+                                    <span className="flex flex-col items-end leading-tight">
+                                      <span className="text-[10px] text-muted-foreground line-through">
+                                        De: R$ {(getRegularPrice(item.product) * item.qty).toFixed(2)}
+                                      </span>
+                                      <span>Por: R$ {(getCurrentPrice(item.product) * item.qty).toFixed(2)}</span>
                                     </span>
-                                    <span>Por: R$ {(getCurrentPrice(item.product) * item.qty).toFixed(2)}</span>
-                                  </span>
-                                ) : (
-                                  <span>R$ {(getCurrentPrice(item.product) * item.qty).toFixed(2)}</span>
-                                )}
-                              </span>
+                                  ) : (
+                                    <span>R$ {(getCurrentPrice(item.product) * item.qty).toFixed(2)}</span>
+                                  )}
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 rounded-md text-destructive hover:bg-destructive/10"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeFromCart(item.key);
+                                  }}
+                                  data-testid={`button-summary-remove-${item.product.id}`}
+                                  title="Excluir item"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -2108,13 +2123,13 @@ export default function POS() {
                       <Button
                         key={method.id}
                         variant="outline"
-                        className={`h-10 w-full justify-between rounded-xl px-3 text-[12px] font-medium ${isSelected ? "border-[#2f77ff] bg-white text-[#1a2235]" : "border-[#d7dce8] bg-white/60 text-[#1a2235]"}`}
+                        className={`h-8 w-full justify-between rounded-lg px-2.5 text-[11px] font-medium ${isSelected ? "border-[#2f77ff] bg-white text-[#1a2235]" : "border-[#d7dce8] bg-white/60 text-[#1a2235]"}`}
                         onClick={() => handleSelectPayment(method)}
                         disabled={cart.length === 0 || paymentStatus === "processing"}
                         data-testid={`button-payment-${method.id}`}
                       >
-                        <span className="flex items-center gap-2"><Icon className="h-3.5 w-3.5" />{method.name}</span>
-                        <ChevronRight className={`h-3.5 w-3.5 ${isSelected ? "text-[#2d6de7]" : "text-[#7c8499]"}`} />
+                        <span className="flex items-center gap-2"><Icon className="h-3 w-3" />{method.name}</span>
+                        <ChevronRight className={`h-3 w-3 ${isSelected ? "text-[#2d6de7]" : "text-[#7c8499]"}`} />
                       </Button>
                     );
                   })}

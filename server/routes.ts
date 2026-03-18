@@ -642,17 +642,13 @@ export async function registerRoutes(
   const normalizePdvProduct = (product: any) => {
     const basePrice = normalizeDecimalValue(product?.price, "0") ?? "0";
     const promoPrice = normalizeDecimalValue(product?.promoPrice, null);
-    const hasPromoPrice =
-      promoPrice !== null &&
-      promoPrice !== undefined &&
-      Number.isFinite(Number(promoPrice)) &&
-      Number(promoPrice) > 0;
 
     return {
       ...product,
       purchasePrice:
         normalizeDecimalValue(product?.purchasePrice, basePrice) ?? basePrice,
-      price: hasPromoPrice ? promoPrice : basePrice,
+      // Preserve the configured sale price in the PDV load.
+      price: basePrice,
       regularPrice:
         normalizeDecimalValue(product?.regularPrice, basePrice) ?? basePrice,
       promoPrice,
