@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -212,7 +212,8 @@ export default function ProductForm({
   const [kitQuantity, setKitQuantity] = useState(1);
   const [isLookingUpEan, setIsLookingUpEan] = useState(false);
   const [eanLookupError, setEanLookupError] = useState<string | null>(null);
-  const submitLockRef = useState({ current: false })[0];
+  const submitLockRef = useRef(false);
+  const createIdempotencyKeyRef = useRef<string | null>(null);
 
   const { data: suppliers = [] } = useQuery({
     queryKey: ["/api/suppliers"],
@@ -582,9 +583,19 @@ export default function ProductForm({
         ? `/api/products/${editProduct.id}`
         : "/api/products";
       const method = editProduct ? "PATCH" : "POST";
+      if (!editProduct && !createIdempotencyKeyRef.current) {
+        createIdempotencyKeyRef.current =
+          globalThis.crypto?.randomUUID?.() ||
+          `produto-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      }
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(createIdempotencyKeyRef.current
+            ? { "x-idempotency-key": createIdempotencyKeyRef.current }
+            : {}),
+        },
         body: JSON.stringify(data),
       });
       if (!res.ok) {
@@ -595,6 +606,7 @@ export default function ProductForm({
     },
     onSuccess: () => {
       submitLockRef.current = false;
+      createIdempotencyKeyRef.current = null;
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       toast.success(
         editProduct
@@ -605,6 +617,7 @@ export default function ProductForm({
     },
     onError: (error: Error) => {
       submitLockRef.current = false;
+      createIdempotencyKeyRef.current = null;
       toast.error(error.message);
     },
   });
@@ -1922,5 +1935,4 @@ export default function ProductForm({
     </Dialog>
   );
 }
-
 
