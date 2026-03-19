@@ -81,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   } = useQuery({
     queryKey: ["/api/auth/me"],
     queryFn: async () => {
-      const res = await fetch("/api/auth/me");
+      const res = await fetch("/api/auth/me", { credentials: "include" });
       if (!res.ok) {
         if (res.status === 401) {
           return null;
@@ -113,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ email, password }),
       });
       if (!res.ok) {
@@ -128,7 +129,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/auth/logout", { method: "POST" });
+      const res = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
       if (!res.ok) throw new Error("Erro ao sair");
       return res.json();
     },
@@ -148,7 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshContexts = async () => {
-    const res = await fetch("/api/auth/contexts");
+    const res = await fetch("/api/auth/contexts", { credentials: "include" });
     if (!res.ok) {
       if (res.status === 401) {
         setContexts([]);
@@ -164,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await fetch("/api/auth/context/select", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ companyId, unitId }),
     });
     if (!res.ok) {
