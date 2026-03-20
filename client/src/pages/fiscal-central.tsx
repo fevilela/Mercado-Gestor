@@ -102,10 +102,6 @@ interface SaleDetailItem {
   ncm?: string | null;
 }
 
-interface SaleDetailsResponse extends SaleRecord {
-  items?: SaleDetailItem[];
-}
-
 interface AccessoryHistoryRecord {
   id: number;
   action: string;
@@ -1205,6 +1201,27 @@ export default function FiscalCentralPage() {
       endNumber: "",
       reason: "",
     });
+  };
+
+  const openNfceDetailsDialog = async (sale: SaleRecord) => {
+    setNfceDetailsDialog({ open: true, sale });
+    setLoadingNfceSaleDetails(true);
+    setNfceDetailsItems([]);
+    try {
+      const res = await fetch(`/api/sales/${sale.id}`);
+      if (!res.ok) throw new Error("Falha ao carregar itens da venda");
+      const payload = await res.json();
+      setNfceDetailsItems(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error ? error.message : "Falha ao carregar itens da venda.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingNfceSaleDetails(false);
+    }
   };
 
   const openNfePdf = async (nfeLogId: number) => {
