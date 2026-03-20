@@ -199,8 +199,6 @@ export default function FiscalCentralPage() {
     open: boolean;
     sale: SaleRecord | null;
   }>({ open: false, sale: null });
-  const [nfceDetailsItems, setNfceDetailsItems] = useState<SaleDetailItem[]>([]);
-  const [loadingNfceSaleDetails, setLoadingNfceSaleDetails] = useState(false);
   const [accessoryPeriod, setAccessoryPeriod] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -249,6 +247,20 @@ export default function FiscalCentralPage() {
       return res.json();
     },
   });
+
+  const { data: nfceSaleDetails, isLoading: loadingNfceSaleDetails } =
+    useQuery<SaleDetailsResponse>({
+      queryKey: ["/api/sales", nfceDetailsDialog.sale?.id, "nfce-details"],
+      queryFn: async () => {
+        if (!nfceDetailsDialog.sale?.id) {
+          throw new Error("Venda não selecionada");
+        }
+        const res = await fetch(`/api/sales/${nfceDetailsDialog.sale.id}`);
+        if (!res.ok) throw new Error("Falha ao carregar itens da venda");
+        return res.json();
+      },
+      enabled: nfceDetailsDialog.open && Boolean(nfceDetailsDialog.sale?.id),
+    });
 
   const sefazUf = String(settings?.sefazUf || settings?.state || "MG").toUpperCase();
 
@@ -1831,7 +1843,9 @@ export default function FiscalCentralPage() {
                                   <DropdownMenuContent align="end">
                                     <DropdownMenuLabel>Acoes</DropdownMenuLabel>
                                     <DropdownMenuItem
-                                      onClick={() => openNfceDetailsDialog(sale)}
+                                      onClick={() =>
+                                        setNfceDetailsDialog({ open: true, sale })
+                                      }
                                     >
                                       Ver itens/NCM
                                     </DropdownMenuItem>
@@ -2380,12 +2394,9 @@ export default function FiscalCentralPage() {
 
       <Dialog
         open={nfceDetailsDialog.open}
-        onOpenChange={(open) => {
-          setNfceDetailsDialog((prev) => ({ ...prev, open }));
-          if (!open) {
-            setNfceDetailsItems([]);
-          }
-        }}
+        onOpenChange={(open) =>
+          setNfceDetailsDialog((prev) => ({ ...prev, open }))
+        }
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -2426,8 +2437,8 @@ export default function FiscalCentralPage() {
                           Carregando itens...
                         </TableCell>
                       </TableRow>
-                    ) : nfceDetailsItems.length > 0 ? (
-                      nfceDetailsItems.map((item) => (
+                    ) : (nfceSaleDetails?.items?.length ?? 0) > 0 ? (
+                      nfceSaleDetails?.items?.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell>{item.productName}</TableCell>
                           <TableCell>{item.quantity}</TableCell>

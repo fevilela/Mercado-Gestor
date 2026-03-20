@@ -111,6 +111,121 @@ interface Sale {
   createdAt: string;
 }
 
+interface SaleDetailItem {
+  id: number;
+  productName: string;
+  quantity: string;
+  unitPrice: string;
+  subtotal: string;
+  ncm?: string | null;
+}
+
+interface SaleDetailsResponse extends Sale {
+  items?: SaleDetailItem[];
+}
+
+function SaleDetailsDialog({ sale, company }: { sale: Sale; company: any }) {
+  const { data: saleDetails, isLoading: isLoadingSaleDetails } =
+    useQuery<SaleDetailsResponse>({
+      queryKey: ["/api/sales", sale.id, "details"],
+      queryFn: async () => {
+        const res = await fetch(`/api/sales/${sale.id}`);
+        if (!res.ok) {
+          throw new Error("Falha ao carregar itens da venda.");
+        }
+        return res.json();
+      },
+    });
+
+  const items = saleDetails?.items ?? [];
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" title="Ver produtos e NCM da venda">
+          <FileText className="h-4 w-4" />
+          <span className="ml-2">Ver itens/NCM</span>
+        <Button variant="ghost" size="icon" title="Ver informações da NFC-e">
+          <FileText className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Nota Fiscal de Consumidor Eletrônica</DialogTitle>
+          <DialogDescription>Detalhes do Documento Fiscal</DialogDescription>
+        </DialogHeader>
+        <div className="bg-muted p-4 rounded-md font-mono text-xs space-y-2 border border-border">
+          <div className="text-center border-b border-border pb-2 mb-2">
+            <p className="font-bold text-sm">{company?.razaoSocial || "Empresa"}</p>
+            <p>CNPJ: {company?.cnpj || "-"}</p>
+          </div>
+          <div className="flex justify-between">
+            <span>Nº Venda:</span>
+            <span>{sale.id}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Data Emissão:</span>
+            <span>{formatDate(sale.createdAt)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Cliente:</span>
+            <span>{sale.customerName}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Itens:</span>
+            <span>{sale.itemsCount}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Pagamento:</span>
+            <span>{sale.paymentMethod}</span>
+          </div>
+          <div className="border-b border-border my-2"></div>
+          <div className="flex justify-between font-bold">
+            <span>TOTAL R$</span>
+            <span>{parseFloat(sale.total).toFixed(2)}</span>
+          </div>
+          <div className="border-b border-border my-2"></div>
+          <div className="space-y-2">
+            <p className="font-bold">Produtos</p>
+            {isLoadingSaleDetails ? (
+              <p className="text-muted-foreground">Carregando itens...</p>
+            ) : items.length > 0 ? (
+              <div className="space-y-2">
+                {items.map((item) => (
+                  <div key={item.id} className="rounded border border-border p-2">
+                    <p className="font-semibold">{item.productName}</p>
+                    <p>
+                      Qtd: {item.quantity} | Unit.: R$ {parseFloat(item.unitPrice).toFixed(2)} |
+                      Subtotal: R$ {parseFloat(item.subtotal).toFixed(2)}
+                    </p>
+                    <p>NCM: {item.ncm || "-"}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground">Sem itens detalhados para esta venda.</p>
+            )}
+          </div>
+          <div className="border-b border-border my-2"></div>
+          <div className="text-center">
+            <p>Consulte pela Chave de Acesso em</p>
+            <p>http://nfce.fazenda.sp.gov.br</p>
+            <p className="mt-2 break-all">{sale.nfceKey || "NÃO AUTORIZADA"}</p>
+          </div>
+          <div className="text-center mt-4">
+            <p className="font-bold">Protocolo de Autorização</p>
+            <p>{sale.nfceProtocol || "-"}</p>
+          </div>
+        </div>
+        <div className="flex gap-2 justify-end mt-4">
+          <Button variant="outline">Baixar XML</Button>
+          <Button>Imprimir</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Sales() {
   const { toast } = useToast();
   const { company } = useAuth();
@@ -1024,8 +1139,8 @@ export default function Sales() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {sale.nfceStatus === "Contingência" ||
-                        sale.nfceStatus === "Pendente Fiscal" ? (
+                        {(sale.nfceStatus === "Contingência" ||
+                          sale.nfceStatus === "Pendente Fiscal") && (
                           <Button
                             size="sm"
                             className="bg-amber-500 hover:bg-amber-600 text-white"
@@ -1039,82 +1154,8 @@ export default function Sales() {
                             )}
                             Transmitir
                           </Button>
-                        ) : (
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                title="Ver Danfe/Cupom"
-                              >
-                                <FileText className="h-4 w-4" />
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent>
-                              <DialogHeader>
-                                <DialogTitle>
-                                  Nota Fiscal de Consumidor Eletrônica
-                                </DialogTitle>
-                                <DialogDescription>
-                                  Detalhes do Documento Fiscal
-                                </DialogDescription>
-                              </DialogHeader>
-                              <div className="bg-muted p-4 rounded-md font-mono text-xs space-y-2 border border-border">
-                                <div className="text-center border-b border-border pb-2 mb-2">
-                                  <p className="font-bold text-sm">
-                                    {company?.razaoSocial || "Empresa"}
-                                  </p>
-                                  <p>CNPJ: {company?.cnpj || "-"}</p>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span>Nº Venda:</span>
-                                  <span>{sale.id}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span>Data Emissão:</span>
-                                  <span>{formatDate(sale.createdAt)}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span>Cliente:</span>
-                                  <span>{sale.customerName}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span>Itens:</span>
-                                  <span>{sale.itemsCount}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span>Pagamento:</span>
-                                  <span>{sale.paymentMethod}</span>
-                                </div>
-                                <div className="border-b border-border my-2"></div>
-                                <div className="flex justify-between font-bold">
-                                  <span>TOTAL R$</span>
-                                  <span>
-                                    {parseFloat(sale.total).toFixed(2)}
-                                  </span>
-                                </div>
-                                <div className="border-b border-border my-2"></div>
-                                <div className="text-center">
-                                  <p>Consulte pela Chave de Acesso em</p>
-                                  <p>http://nfce.fazenda.sp.gov.br</p>
-                                  <p className="mt-2 break-all">
-                                    {sale.nfceKey || "NÃO AUTORIZADA"}
-                                  </p>
-                                </div>
-                                <div className="text-center mt-4">
-                                  <p className="font-bold">
-                                    Protocolo de Autorização
-                                  </p>
-                                  <p>{sale.nfceProtocol || "-"}</p>
-                                </div>
-                              </div>
-                              <div className="flex gap-2 justify-end mt-4">
-                                <Button variant="outline">Baixar XML</Button>
-                                <Button>Imprimir</Button>
-                              </div>
-                            </DialogContent>
-                          </Dialog>
                         )}
+                        <SaleDetailsDialog sale={sale} company={company} />
                       </div>
                     </TableCell>
                   </TableRow>
