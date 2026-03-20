@@ -1564,6 +1564,7 @@ router.post(
               brand: sale.paymentBrand || null,
               authorizationCode: sale.paymentAuthorization || null,
               nsu: sale.paymentNsu || null,
+              provider: sale.paymentProvider || null,
               providerReference: sale.paymentReference || null,
             },
             crt: settings.crt || "1",
