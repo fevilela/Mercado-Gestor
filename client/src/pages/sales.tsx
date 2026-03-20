@@ -140,15 +140,13 @@ function SaleDetailsDialog({ sale, company }: { sale: Sale; company: any }) {
   const items = saleDetails?.items ?? [];
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" title="Ver produtos e NCM da venda">
-          <FileText className="h-4 w-4" />
-          <span className="ml-2">Ver itens/NCM</span>
-        <Button variant="ghost" size="icon" title="Ver informações da NFC-e">
-          <FileText className="h-4 w-4" />
-        </Button>
-      </DialogTrigger>
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm" title="Ver produtos e NCM da venda">
+            <FileText className="h-4 w-4" />
+            <span className="ml-2">Ver itens/NCM</span>
+          </Button>
+        </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Nota Fiscal de Consumidor Eletrônica</DialogTitle>
