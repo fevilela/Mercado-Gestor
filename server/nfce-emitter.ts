@@ -169,7 +169,20 @@ export const generateNfceKey = (params: {
 };
 
 export const mapPaymentCode = (code?: string | null, type?: string | null) => {
-  if (code && code.trim()) return code.trim();
+  if (code && code.trim()) {
+    const normalizedCode = code
+      .trim()
+      .replace(/\s+/g, "")
+      .replace(/^0+(\d)$/, "0$1");
+    const digitsOnly = normalizedCode.replace(/\D/g, "");
+    if (digitsOnly.length > 0) {
+      return digitsOnly.slice(0, 2).padStart(2, "0");
+    }
+    const embeddedDigits = normalizedCode.match(/\d{1,2}/)?.[0];
+    if (embeddedDigits) {
+      return embeddedDigits.padStart(2, "0");
+    }
+  }
   const normalizedType = normalizeText(type).toLowerCase();
   switch (normalizedType) {
     case "pix":
@@ -193,7 +206,11 @@ export const mapPaymentCode = (code?: string | null, type?: string | null) => {
 };
 
 const isCardPaymentCode = (code?: string | null) => {
-  const normalized = String(code || "").trim();
+  const normalized = String(code || "")
+    .trim()
+    .replace(/\D/g, "")
+    .slice(0, 2)
+    .padStart(2, "0");
   return normalized === "03" || normalized === "04";
 };
 

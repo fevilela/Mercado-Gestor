@@ -1498,7 +1498,7 @@ router.post(
           );
           const paymentCode = mapPaymentCode(
             paymentMethod?.nfceCode,
-            paymentMethod?.type,
+            paymentMethod?.type || sale.paymentMethod,
           );
           let cDest = "1";
           let customer: { cpfCnpj?: string | null; state?: string | null } | null =
