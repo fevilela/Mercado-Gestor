@@ -93,6 +93,15 @@ interface SaleRecord {
   createdAt: string;
 }
 
+interface SaleDetailItem {
+  id: number;
+  productName: string;
+  quantity: string;
+  unitPrice: string;
+  subtotal: string;
+  ncm?: string | null;
+}
+
 interface AccessoryHistoryRecord {
   id: number;
   action: string;
@@ -186,6 +195,10 @@ export default function FiscalCentralPage() {
   const [nfceDateFrom, setNfceDateFrom] = useState("");
   const [nfceDateTo, setNfceDateTo] = useState("");
   const [selectedNfceIds, setSelectedNfceIds] = useState<number[]>([]);
+  const [nfceDetailsDialog, setNfceDetailsDialog] = useState<{
+    open: boolean;
+    sale: SaleRecord | null;
+  }>({ open: false, sale: null });
   const [accessoryPeriod, setAccessoryPeriod] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -234,6 +247,20 @@ export default function FiscalCentralPage() {
       return res.json();
     },
   });
+
+  const { data: nfceSaleDetails, isLoading: loadingNfceSaleDetails } =
+    useQuery<SaleDetailsResponse>({
+      queryKey: ["/api/sales", nfceDetailsDialog.sale?.id, "nfce-details"],
+      queryFn: async () => {
+        if (!nfceDetailsDialog.sale?.id) {
+          throw new Error("Venda não selecionada");
+        }
+        const res = await fetch(`/api/sales/${nfceDetailsDialog.sale.id}`);
+        if (!res.ok) throw new Error("Falha ao carregar itens da venda");
+        return res.json();
+      },
+      enabled: nfceDetailsDialog.open && Boolean(nfceDetailsDialog.sale?.id),
+    });
 
   const sefazUf = String(settings?.sefazUf || settings?.state || "MG").toUpperCase();
 
@@ -1176,6 +1203,27 @@ export default function FiscalCentralPage() {
     });
   };
 
+  const openNfceDetailsDialog = async (sale: SaleRecord) => {
+    setNfceDetailsDialog({ open: true, sale });
+    setLoadingNfceSaleDetails(true);
+    setNfceDetailsItems([]);
+    try {
+      const res = await fetch(`/api/sales/${sale.id}`);
+      if (!res.ok) throw new Error("Falha ao carregar itens da venda");
+      const payload = await res.json();
+      setNfceDetailsItems(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error ? error.message : "Falha ao carregar itens da venda.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingNfceSaleDetails(false);
+    }
+  };
+
   const openNfePdf = async (nfeLogId: number) => {
     const url = `/api/fiscal/nfe/${nfeLogId}/pdf`;
     try {
@@ -1795,6 +1843,13 @@ export default function FiscalCentralPage() {
                                   <DropdownMenuContent align="end">
                                     <DropdownMenuLabel>Acoes</DropdownMenuLabel>
                                     <DropdownMenuItem
+                                      onClick={() =>
+                                        setNfceDetailsDialog({ open: true, sale })
+                                      }
+                                    >
+                                      Ver itens/NCM
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
                                       onClick={() => sendNfceMutation.mutate([sale.id])}
                                       disabled={!rowCanSend || sendNfceMutation.isPending}
                                     >
@@ -2334,6 +2389,76 @@ export default function FiscalCentralPage() {
               Confirmar inutilização
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={nfceDetailsDialog.open}
+        onOpenChange={(open) =>
+          setNfceDetailsDialog((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Detalhes da NFC-e</DialogTitle>
+            <DialogDescription>
+              Itens da venda para identificar produto e NCM em rejeições.
+            </DialogDescription>
+          </DialogHeader>
+          {!nfceDetailsDialog.sale ? (
+            <p className="text-sm text-muted-foreground">Nenhuma venda selecionada.</p>
+          ) : (
+            <div className="space-y-3 text-sm">
+              <div className="grid gap-1">
+                <p><span className="font-medium">Venda:</span> #{nfceDetailsDialog.sale.id}</p>
+                <p>
+                  <span className="font-medium">Cliente:</span>{" "}
+                  {nfceDetailsDialog.sale.customerName || "Consumidor"}
+                </p>
+                <p><span className="font-medium">Status:</span> {nfceDetailsDialog.sale.nfceStatus}</p>
+                <p><span className="font-medium">Erro SEFAZ:</span> {nfceDetailsDialog.sale.nfceError || "-"}</p>
+              </div>
+
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Produto</TableHead>
+                      <TableHead>Qtd</TableHead>
+                      <TableHead>Vlr Unit.</TableHead>
+                      <TableHead>Subtotal</TableHead>
+                      <TableHead>NCM</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loadingNfceSaleDetails ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          Carregando itens...
+                        </TableCell>
+                      </TableRow>
+                    ) : (nfceSaleDetails?.items?.length ?? 0) > 0 ? (
+                      nfceSaleDetails?.items?.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>{item.productName}</TableCell>
+                          <TableCell>{item.quantity}</TableCell>
+                          <TableCell>R$ {Number(item.unitPrice).toFixed(2)}</TableCell>
+                          <TableCell>R$ {Number(item.subtotal).toFixed(2)}</TableCell>
+                          <TableCell>{item.ncm || "-"}</TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          Nenhum item encontrado para esta venda.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

@@ -72,6 +72,37 @@ import {
 } from "./product-operational";
 import "./types";
 
+const PRODUCT_CREATE_IDEMPOTENCY_TTL_MS = 30_000;
+const recentProductCreateResponses = new Map<
+  string,
+  { expiresAt: number; payload: unknown }
+>();
+const inFlightProductCreateRequests = new Set<string>();
+
+function consumeRecentProductCreateResponse(key: string): unknown | null {
+  const now = Date.now();
+  const entry = recentProductCreateResponses.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= now) {
+    recentProductCreateResponses.delete(key);
+    return null;
+  }
+  return entry.payload;
+}
+
+function rememberRecentProductCreateResponse(key: string, payload: unknown) {
+  const now = Date.now();
+  for (const [storedKey, entry] of recentProductCreateResponses.entries()) {
+    if (entry.expiresAt <= now) {
+      recentProductCreateResponses.delete(storedKey);
+    }
+  }
+  recentProductCreateResponses.set(key, {
+    expiresAt: now + PRODUCT_CREATE_IDEMPOTENCY_TTL_MS,
+    payload,
+  });
+}
+
 function parseNFeXML(xmlContent: string): Array<{
   name: string;
   ean: string | null;
@@ -690,6 +721,28 @@ export async function registerRoutes(
         const companyId = getCompanyId(req);
         if (!companyId)
           return res.status(401).json({ error: "Não autenticado" });
+        const userId = getUserId(req);
+        const idempotencyKeyHeader = String(
+          req.headers["x-idempotency-key"] || ""
+        ).trim();
+        const productCreateRequestKey =
+          idempotencyKeyHeader && userId
+            ? `${companyId}:${userId}:${idempotencyKeyHeader}`
+            : null;
+
+        if (productCreateRequestKey) {
+          const cachedResponse =
+            consumeRecentProductCreateResponse(productCreateRequestKey);
+          if (cachedResponse) {
+            return res.status(200).json(cachedResponse);
+          }
+          if (inFlightProductCreateRequests.has(productCreateRequestKey)) {
+            return res.status(202).json({
+              message: "Cadastro de produto em processamento. Aguarde alguns segundos.",
+            });
+          }
+          inFlightProductCreateRequests.add(productCreateRequestKey);
+        }
 
         const normalizedBody = normalizePromoDateFields(req.body);
         const {
@@ -761,8 +814,23 @@ export async function registerRoutes(
           return newProduct;
         });
 
+        if (productCreateRequestKey) {
+          rememberRecentProductCreateResponse(productCreateRequestKey, result);
+          inFlightProductCreateRequests.delete(productCreateRequestKey);
+        }
+
         res.status(201).json(result);
       } catch (error) {
+        const companyId = getCompanyId(req);
+        const userId = getUserId(req);
+        const idempotencyKeyHeader = String(
+          req.headers["x-idempotency-key"] || ""
+        ).trim();
+        if (companyId && userId && idempotencyKeyHeader) {
+          inFlightProductCreateRequests.delete(
+            `${companyId}:${userId}:${idempotencyKeyHeader}`
+          );
+        }
         if (error instanceof z.ZodError) {
           return res.status(400).json({ error: error.errors });
         }
@@ -2600,6 +2668,7 @@ export async function registerRoutes(
           return res.status(404).json({ error: "Nenhuma carga enviada" });
         }
         const currentProducts = await storage.getAllProducts(companyId);
+        const currentPaymentMethods = await storage.getPaymentMethods(companyId);
         const currentProductById = new Map<number, any>(
           currentProducts
             .filter((product: any) => product?.isActive !== false)
@@ -2608,19 +2677,54 @@ export async function registerRoutes(
               normalizePdvProduct(product),
             ])
         );
+        const currentPaymentMethodById = new Map<number, any>(
+          currentPaymentMethods
+            .filter((method: any) => method?.isActive !== false)
+            .map((method: any) => [Number(method.id), method])
+        );
         const payload = (load.payload || {}) as any;
         const products = Array.isArray(payload.products) ? payload.products : [];
-        const normalizedProducts = products.map((product: any) => {
-          const productId = Number(product?.id || 0);
-          const catalogProduct = currentProductById.get(productId);
-          return normalizePdvProduct(
-            catalogProduct ? { ...product, ...catalogProduct } : product
-          );
-        });
+        const normalizedProducts = products
+          .map((product: any) => {
+            const productId = Number(product?.id || 0);
+            const catalogProduct = currentProductById.get(productId);
+            return normalizePdvProduct(
+              catalogProduct ? { ...product, ...catalogProduct } : product
+            );
+          })
+          .filter((product: any) => product?.isActive !== false);
+        const normalizedProductIds = new Set(
+          normalizedProducts.map((product: any) => Number(product?.id || 0))
+        );
+        for (const [productId, product] of currentProductById.entries()) {
+          if (!normalizedProductIds.has(productId)) {
+            normalizedProducts.push(normalizePdvProduct(product));
+          }
+        }
+
+        const paymentMethods = Array.isArray(payload.paymentMethods)
+          ? payload.paymentMethods
+          : [];
+        const normalizedPaymentMethods = paymentMethods
+          .map((method: any) => {
+            const methodId = Number(method?.id || 0);
+            const catalogMethod = currentPaymentMethodById.get(methodId);
+            return catalogMethod ? { ...method, ...catalogMethod } : method;
+          })
+          .filter((method: any) => method?.isActive !== false);
+        const normalizedPaymentMethodIds = new Set(
+          normalizedPaymentMethods.map((method: any) => Number(method?.id || 0))
+        );
+        for (const [methodId, method] of currentPaymentMethodById.entries()) {
+          if (!normalizedPaymentMethodIds.has(methodId)) {
+            normalizedPaymentMethods.push(method);
+          }
+        }
 
         res.json({
           ...payload,
           products: normalizedProducts,
+          paymentMethods: normalizedPaymentMethods,
         });
       } catch (error) {
         res.status(500).json({ error: "Failed to fetch PDV load" });

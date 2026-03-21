@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 type PaymentMethodType = "pix" | "credito" | "debito" | "dinheiro" | "outros";
 type TefMethod = "pix" | "credito" | "debito";
@@ -67,7 +68,9 @@ export default function PaymentMethodsPage() {
   const { data: methods = [], refetch } = useQuery<PaymentMethod[]>({
     queryKey: ["/api/payment-methods"],
     queryFn: async () => {
-      const res = await fetch("/api/payment-methods");
+      const res = await fetch("/api/payment-methods", {
+        credentials: "include",
+      });
       if (!res.ok) throw new Error("Falha ao carregar formas de pagamento");
       return res.json();
     },
@@ -88,18 +91,11 @@ export default function PaymentMethodsPage() {
         sortOrder: Number(form.sortOrder) || 0,
         isActive: form.isActive,
       };
-      const res = await fetch(
+      const res = await apiRequest(
+        editingId ? "PATCH" : "POST",
         editingId ? `/api/payment-methods/${editingId}` : "/api/payment-methods",
-        {
-          method: editingId ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
+        payload,
       );
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(error.error || "Falha ao salvar");
-      }
       return res.json();
     },
     onSuccess: () => {
@@ -132,11 +128,7 @@ export default function PaymentMethodsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/payment-methods/${id}`, { method: "DELETE" });
-      if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
-        throw new Error(error.error || "Falha ao excluir");
-      }
+      const res = await apiRequest("DELETE", `/api/payment-methods/${id}`);
       return res.json();
     },
     onSuccess: () => {

@@ -169,7 +169,20 @@ export const generateNfceKey = (params: {
 };
 
 export const mapPaymentCode = (code?: string | null, type?: string | null) => {
-  if (code && code.trim()) return code.trim();
+  if (code && code.trim()) {
+    const normalizedCode = code
+      .trim()
+      .replace(/\s+/g, "")
+      .replace(/^0+(\d)$/, "0$1");
+    const digitsOnly = normalizedCode.replace(/\D/g, "");
+    if (digitsOnly.length > 0) {
+      return digitsOnly.slice(0, 2).padStart(2, "0");
+    }
+    const embeddedDigits = normalizedCode.match(/\d{1,2}/)?.[0];
+    if (embeddedDigits) {
+      return embeddedDigits.padStart(2, "0");
+    }
+  }
   const normalizedType = normalizeText(type).toLowerCase();
   switch (normalizedType) {
     case "pix":
@@ -193,7 +206,11 @@ export const mapPaymentCode = (code?: string | null, type?: string | null) => {
 };
 
 const isCardPaymentCode = (code?: string | null) => {
-  const normalized = String(code || "").trim();
+  const normalized = String(code || "")
+    .trim()
+    .replace(/\D/g, "")
+    .slice(0, 2)
+    .padStart(2, "0");
   return normalized === "03" || normalized === "04";
 };
 
@@ -233,6 +250,51 @@ const normalizeCardAuth = (value?: string | null) =>
   normalizeText(value)
     .replace(/[^A-Za-z0-9]/g, "")
     .slice(0, 128);
+
+const parseJsonObject = (value?: string | null): Record<string, unknown> | null => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveCredenciadoraCnpj = (params: {
+  provider?: string | null;
+  providerReference?: string | null;
+  rawCnpj?: string | null;
+}) => {
+  const direct = onlyDigits(params.rawCnpj);
+  if (direct.length === 14) return direct;
+
+  const fromReference = parseJsonObject(params.providerReference);
+  const candidateKeys = [
+    "credenciadoraCnpj",
+    "acquirerCnpj",
+    "institutionCnpj",
+    "paymentInstitutionCnpj",
+    "cnpj",
+  ];
+  for (const key of candidateKeys) {
+    const value = onlyDigits(String(fromReference?.[key] || ""));
+    if (value.length === 14) return value;
+  }
+
+  const provider = normalizeText(params.provider).toLowerCase();
+  if (provider.includes("stone")) return "16501555000157";
+  if (
+    provider.includes("mercadopago") ||
+    provider.includes("mercado pago") ||
+    provider === "mp"
+  ) {
+    return "10573521000191";
+  }
+
+  return "";
+};
 
 export const buildNfceXml = (params: {
   key: string;
@@ -274,6 +336,8 @@ export const buildNfceXml = (params: {
     brand?: string | null;
     authorizationCode?: string | null;
     nsu?: string | null;
+    provider?: string | null;
+    credenciadoraCnpj?: string | null;
     providerReference?: string | null;
   };
   crt?: string | null;
@@ -385,8 +449,13 @@ export const buildNfceXml = (params: {
     normalizeCardAuth(params.pagamento.authorizationCode) ||
     normalizeCardAuth(params.pagamento.nsu) ||
     normalizeCardAuth(params.pagamento.providerReference);
+  const cardCnpj = resolveCredenciadoraCnpj({
+    provider: params.pagamento.provider,
+    providerReference: params.pagamento.providerReference,
+    rawCnpj: params.pagamento.credenciadoraCnpj,
+  });
   const cardXml = isCardPaymentCode(params.pagamento.codigo)
-    ? `<card><tpIntegra>2</tpIntegra><tBand>${cardBand}</tBand>${
+    ? `<card><tpIntegra>1</tpIntegra>${cardCnpj ? `<CNPJ>${cardCnpj}</CNPJ>` : ""}<tBand>${cardBand}</tBand>${
         cardAuth ? `<cAut>${cardAuth}</cAut>` : ""
       }</card>`
     : "";
