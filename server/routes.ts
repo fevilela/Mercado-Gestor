@@ -9,6 +9,7 @@ import {
   productVariations,
   productMedia,
   kitItems,
+  productIngredients,
   referenceTables,
   customers,
   suppliers,
@@ -92,11 +93,11 @@ function consumeRecentProductCreateResponse(key: string): unknown | null {
 
 function rememberRecentProductCreateResponse(key: string, payload: unknown) {
   const now = Date.now();
-  for (const [storedKey, entry] of recentProductCreateResponses.entries()) {
+  recentProductCreateResponses.forEach((entry, storedKey) => {
     if (entry.expiresAt <= now) {
       recentProductCreateResponses.delete(storedKey);
     }
-  }
+  });
   recentProductCreateResponses.set(key, {
     expiresAt: now + PRODUCT_CREATE_IDEMPOTENCY_TTL_MS,
     payload,
@@ -579,7 +580,14 @@ export async function registerRoutes(
         const productKitItems = product.isKit
           ? await storage.getKitItems(id)
           : [];
-        res.json({ ...product, variations, media, kitItems: productKitItems });
+        const ingredients = await storage.getProductIngredients(id);
+        res.json({
+          ...product,
+          variations,
+          media,
+          kitItems: productKitItems,
+          ingredients,
+        });
       } catch (error) {
         res.status(500).json({ error: "Failed to fetch product" });
       }
@@ -604,11 +612,17 @@ export async function registerRoutes(
     quantity: z.number().min(1),
   });
 
+  const ingredientItemSchema = z.object({
+    ingredientProductId: z.number(),
+    quantity: z.coerce.number().positive(),
+  });
+
   const createProductRequestSchema = z.object({
     product: insertProductSchema,
     variations: z.array(variationSchema).optional(),
     media: z.array(mediaSchema).optional(),
     kitItems: z.array(kitItemSchema).optional(),
+    ingredients: z.array(ingredientItemSchema).optional(),
   });
 
   const updateProductRequestSchema = z.object({
@@ -616,6 +630,7 @@ export async function registerRoutes(
     variations: z.array(variationSchema).optional(),
     media: z.array(mediaSchema).optional(),
     kitItems: z.array(kitItemSchema).optional(),
+    ingredients: z.array(ingredientItemSchema).optional(),
   });
 
   const normalizeDecimalValue = (
@@ -750,6 +765,7 @@ export async function registerRoutes(
           variations,
           media,
           kitItems: kitItemsData,
+          ingredients: ingredientsData,
         } = createProductRequestSchema.parse(normalizedBody);
         const normalizedProductName = normalizeComparableText(product.name);
         const normalizedProductEan = String(product.ean ?? "").trim();
@@ -811,6 +827,18 @@ export async function registerRoutes(
             }
           }
 
+          if (ingredientsData && ingredientsData.length > 0) {
+            for (let index = 0; index < ingredientsData.length; index += 1) {
+              const item = ingredientsData[index];
+              await tx.insert(productIngredients).values({
+                productId: newProduct.id,
+                ingredientProductId: item.ingredientProductId,
+                quantity: item.quantity.toFixed(3),
+                sortOrder: index,
+              });
+            }
+          }
+
           return newProduct;
         });
 
@@ -864,6 +892,7 @@ export async function registerRoutes(
           variations,
           media,
           kitItems: kitItemsData,
+          ingredients: ingredientsData,
         } = parseResult.data;
 
         const result = await db.transaction(async (tx) => {
@@ -931,6 +960,21 @@ export async function registerRoutes(
             }
           }
 
+          if (ingredientsData !== undefined) {
+            await tx
+              .delete(productIngredients)
+              .where(eq(productIngredients.productId, id));
+            for (let index = 0; index < ingredientsData.length; index += 1) {
+              const item = ingredientsData[index];
+              await tx.insert(productIngredients).values({
+                productId: id,
+                ingredientProductId: item.ingredientProductId,
+                quantity: item.quantity.toFixed(3),
+                sortOrder: index,
+              });
+            }
+          }
+
           return updatedProduct;
         });
 
@@ -959,7 +1003,20 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const id = parseInt(req.params.id);
-        await storage.deleteProduct(id, companyId);
+        await db.transaction(async (tx) => {
+          await tx
+            .delete(productIngredients)
+            .where(eq(productIngredients.productId, id));
+          await tx
+            .delete(productIngredients)
+            .where(eq(productIngredients.ingredientProductId, id));
+          await tx
+            .delete(kitItems)
+            .where(eq(kitItems.kitProductId, id));
+          await tx
+            .delete(products)
+            .where(and(eq(products.id, id), eq(products.companyId, companyId)));
+        });
         res.status(204).send();
       } catch (error) {
         res.status(500).json({ error: "Failed to delete product" });
@@ -2696,11 +2753,11 @@ export async function registerRoutes(
         const normalizedProductIds = new Set(
           normalizedProducts.map((product: any) => Number(product?.id || 0))
         );
-        for (const [productId, product] of currentProductById.entries()) {
+        currentProductById.forEach((product, productId) => {
           if (!normalizedProductIds.has(productId)) {
             normalizedProducts.push(normalizePdvProduct(product));
           }
-        }
+        });
 
         const paymentMethods = Array.isArray(payload.paymentMethods)
           ? payload.paymentMethods
@@ -2715,11 +2772,11 @@ export async function registerRoutes(
         const normalizedPaymentMethodIds = new Set(
           normalizedPaymentMethods.map((method: any) => Number(method?.id || 0))
         );
-        for (const [methodId, method] of currentPaymentMethodById.entries()) {
+        currentPaymentMethodById.forEach((method, methodId) => {
           if (!normalizedPaymentMethodIds.has(methodId)) {
             normalizedPaymentMethods.push(method);
           }
-        }
+        });
 
         res.json({
           ...payload,
@@ -2779,7 +2836,7 @@ export async function registerRoutes(
             category: "Importado",
             unit: "UN",
             price: "0",
-            stock: 0,
+            stock: "0",
           })
           .returning();
         savedProduct = created || null;
@@ -2871,26 +2928,104 @@ export async function registerRoutes(
             .json({ error: "Estoque não pode ficar negativo" });
         }
 
-        await storage.createInventoryMovement({
-          productId,
-          companyId,
-          type,
-          quantity: quantityDelta.toFixed(3),
-          reason: reason || null,
-          notes: notes || null,
-          referenceId: null,
-          referenceType: null,
-          variationId: null,
-        });
+        const ingredientsConsumed: Array<{
+          ingredientProductId: number;
+          ingredientName: string;
+          quantity: string;
+        }> = [];
 
-        const updatedProduct = await storage.updateProductStock(
-          productId,
-          companyId,
-          quantityDelta
-        );
+        const updatedProduct = await db.transaction(async (tx) => {
+          if (type === "entrada") {
+            const recipeItems = await tx
+              .select()
+              .from(productIngredients)
+              .where(eq(productIngredients.productId, productId))
+              .orderBy(productIngredients.sortOrder, productIngredients.id);
+
+            for (const recipeItem of recipeItems) {
+              const [ingredientProduct] = await tx
+                .select()
+                .from(products)
+                .where(
+                  and(
+                    eq(products.id, recipeItem.ingredientProductId),
+                    eq(products.companyId, companyId)
+                  )
+                )
+                .limit(1);
+
+              if (!ingredientProduct) {
+                throw new Error("Ingrediente da ficha tecnica nao encontrado");
+              }
+
+              const consumedQuantity =
+                toNumber(recipeItem.quantity, 0) * Math.abs(quantityDelta);
+              if (consumedQuantity <= 0) continue;
+
+              const ingredientNewStock =
+                toNumber(ingredientProduct.stock, 0) - consumedQuantity;
+              if (ingredientNewStock < 0) {
+                throw new Error(
+                  `Estoque insuficiente para o ingrediente ${ingredientProduct.name}`
+                );
+              }
+
+              await tx.insert(inventoryMovements).values({
+                productId: ingredientProduct.id,
+                companyId,
+                type: "saida",
+                quantity: (-consumedQuantity).toFixed(3),
+                reason: "producao",
+                notes:
+                  notes ||
+                  `Baixa automatica pela producao de ${product.name}`,
+                referenceId: productId,
+                referenceType: "recipe_production",
+                variationId: null,
+              });
+
+              await tx
+                .update(products)
+                .set({ stock: sql`${products.stock} - ${consumedQuantity}` })
+                .where(
+                  and(
+                    eq(products.id, ingredientProduct.id),
+                    eq(products.companyId, companyId)
+                  )
+                );
+
+              ingredientsConsumed.push({
+                ingredientProductId: ingredientProduct.id,
+                ingredientName: ingredientProduct.name,
+                quantity: consumedQuantity.toFixed(3),
+              });
+            }
+          }
+
+          await tx.insert(inventoryMovements).values({
+            productId,
+            companyId,
+            type,
+            quantity: quantityDelta.toFixed(3),
+            reason: reason || null,
+            notes: notes || null,
+            referenceId: null,
+            referenceType: null,
+            variationId: null,
+          });
+
+          const [updated] = await tx
+            .update(products)
+            .set({ stock: sql`${products.stock} + ${quantityDelta}` })
+            .where(and(eq(products.id, productId), eq(products.companyId, companyId)))
+            .returning();
+
+          return updated;
+        });
 
         res.json({
           product: updatedProduct,
+          ingredientsConsumed,
           movement: {
             productId,
             type,

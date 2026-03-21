@@ -66,6 +66,7 @@ const productFormSchema = z.object({
   minStock: z.string().optional().nullable(),
   maxStock: z.string().optional().nullable(),
   isKit: z.boolean().default(false),
+  isIngredient: z.boolean().default(false),
   isActive: z.boolean().default(true),
   supplierId: z.number().optional().nullable(),
 });
@@ -88,6 +89,12 @@ interface MediaItem {
 interface KitItemData {
   productId: number;
   productName?: string;
+  quantity: number;
+}
+
+interface IngredientItemData {
+  ingredientProductId: number;
+  ingredientProductName?: string;
   quantity: number;
 }
 
@@ -207,9 +214,14 @@ export default function ProductForm({
   const [variations, setVariations] = useState<Variation[]>([]);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [kitItemsList, setKitItemsList] = useState<KitItemData[]>([]);
+  const [ingredientItemsList, setIngredientItemsList] = useState<
+    IngredientItemData[]
+  >([]);
   const [newImageUrl, setNewImageUrl] = useState("");
   const [selectedKitProduct, setSelectedKitProduct] = useState<string>("");
   const [kitQuantity, setKitQuantity] = useState(1);
+  const [selectedIngredientProduct, setSelectedIngredientProduct] = useState<string>("");
+  const [ingredientQuantity, setIngredientQuantity] = useState("1");
   const [isLookingUpEan, setIsLookingUpEan] = useState(false);
   const [eanLookupError, setEanLookupError] = useState<string | null>(null);
   const submitLockRef = useRef(false);
@@ -324,6 +336,7 @@ export default function ProductForm({
       minStock: "10",
       maxStock: "100",
       isKit: false,
+      isIngredient: false,
       isActive: true,
     },
   });
@@ -344,6 +357,7 @@ export default function ProductForm({
   const watchPrice = form.watch("price");
   const watchPromoPrice = form.watch("promoPrice");
   const watchIsKit = form.watch("isKit");
+  const watchIsIngredient = form.watch("isIngredient");
   const watchProductName = form.watch("name");
   const parseDecimalInputValue = (value: string | number | null | undefined) => {
     const normalized = normalizeDecimalString(value, null);
@@ -530,6 +544,7 @@ export default function ProductForm({
         minStock: formatDecimalInput(editProduct.minStock, "10"),
         maxStock: formatDecimalInput(editProduct.maxStock, "100"),
         isKit: editProduct.isKit || false,
+        isIngredient: editProduct.isIngredient || false,
         isActive: editProduct.isActive !== false,
         supplierId: editProduct.supplierId,
       });
@@ -568,12 +583,14 @@ export default function ProductForm({
       setVariations(editProduct.variations || []);
       setMediaItems(editProduct.media || []);
       setKitItemsList(editProduct.kitItems || []);
+      setIngredientItemsList(editProduct.ingredients || []);
     } else {
       form.reset();
       setOperationalConfig(defaultOperationalConfig);
       setVariations([]);
       setMediaItems([]);
       setKitItemsList([]);
+      setIngredientItemsList([]);
     }
   }, [editProduct, form, open]);
 
@@ -697,6 +714,10 @@ export default function ProductForm({
             quantity: k.quantity,
           }))
         : [],
+      ingredients: ingredientItemsList.map((item) => ({
+        ingredientProductId: item.ingredientProductId,
+        quantity: item.quantity,
+      })),
     };
     submitLockRef.current = true;
     createMutation.mutate(productData);
@@ -799,11 +820,67 @@ export default function ProductForm({
     );
   };
 
+  const addIngredientItem = () => {
+    const normalizedQuantity = Number(
+      normalizeDecimalString(ingredientQuantity, "0") || "0"
+    );
+    if (selectedIngredientProduct && normalizedQuantity > 0) {
+      const product = allProducts.find(
+        (p: any) => p.id.toString() === selectedIngredientProduct
+      );
+      if (
+        product &&
+        !ingredientItemsList.some(
+          (item) => item.ingredientProductId === product.id
+        )
+      ) {
+        setIngredientItemsList([
+          ...ingredientItemsList,
+          {
+            ingredientProductId: product.id,
+            ingredientProductName: product.name,
+            quantity: normalizedQuantity,
+          },
+        ]);
+        setSelectedIngredientProduct("");
+        setIngredientQuantity("1");
+      }
+    }
+  };
+
+  const removeIngredientItem = (ingredientProductId: number) => {
+    setIngredientItemsList(
+      ingredientItemsList.filter(
+        (item) => item.ingredientProductId !== ingredientProductId
+      )
+    );
+  };
+
+  const updateIngredientItemQuantity = (
+    ingredientProductId: number,
+    quantity: number
+  ) => {
+    setIngredientItemsList(
+      ingredientItemsList.map((item) =>
+        item.ingredientProductId === ingredientProductId
+          ? { ...item, quantity }
+          : item
+      )
+    );
+  };
+
   const availableProducts = allProducts.filter(
     (p: any) =>
       p.id !== editProduct?.id &&
       !p.isKit &&
       !kitItemsList.some((k) => k.productId === p.id)
+  );
+
+  const availableIngredients = allProducts.filter(
+    (p: any) =>
+      p.id !== editProduct?.id &&
+      p.isIngredient &&
+      !ingredientItemsList.some((item) => item.ingredientProductId === p.id)
   );
 
   return (
@@ -820,13 +897,14 @@ export default function ProductForm({
             className="space-y-6"
           >
             <Tabs defaultValue="basic" className="w-full">
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="grid w-full grid-cols-6">
                 <TabsTrigger value="basic">Dados Básicos</TabsTrigger>
                 <TabsTrigger value="pricing">Preços</TabsTrigger>
                 <TabsTrigger value="variations">Variações</TabsTrigger>
                 <TabsTrigger value="kit" disabled={!watchIsKit}>
                   Kit
                 </TabsTrigger>
+                <TabsTrigger value="recipe">Fórmula</TabsTrigger>
                 <TabsTrigger value="media">Fotos</TabsTrigger>
               </TabsList>
 
@@ -1226,6 +1304,16 @@ export default function ProductForm({
                       }
                     />
                     <Label htmlFor="isKit">É um Kit/Combo</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="isIngredient"
+                      checked={watchIsIngredient}
+                      onCheckedChange={(checked) =>
+                        form.setValue("isIngredient", checked)
+                      }
+                    />
+                    <Label htmlFor="isIngredient">Usado como matéria-prima</Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <Switch
@@ -1826,6 +1914,123 @@ export default function ProductForm({
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => removeKitItem(item.productId)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="recipe" className="space-y-4 mt-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Fórmula / Ingredientes</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                      Configure os insumos usados para produzir este item. Ao fazer uma
+                      entrada no estoque deste produto, o sistema baixa automaticamente os
+                      ingredientes informados abaixo.
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_140px_auto]">
+                      <div className="space-y-2">
+                        <Label>Ingrediente</Label>
+                        <Select
+                          value={selectedIngredientProduct}
+                          onValueChange={setSelectedIngredientProduct}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione um produto" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableIngredients.map((product: any) => (
+                              <SelectItem
+                                key={product.id}
+                                value={product.id.toString()}
+                              >
+                                {product.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Qtd. por unidade</Label>
+                        <Input
+                          type="number"
+                          min="0.001"
+                          step="0.001"
+                          value={ingredientQuantity}
+                          onChange={(e) => setIngredientQuantity(e.target.value)}
+                        />
+                      </div>
+
+                      <div className="flex items-end">
+                        <Button type="button" onClick={addIngredientItem}>
+                          <Plus className="mr-2 h-4 w-4" /> Adicionar
+                        </Button>
+                      </div>
+                    </div>
+
+                    {ingredientItemsList.length === 0 ? (
+                      <p className="py-8 text-center text-muted-foreground">
+                        Nenhum ingrediente configurado.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {ingredientItemsList.map((item) => {
+                          const product = allProducts.find(
+                            (p: any) => p.id === item.ingredientProductId
+                          );
+                          return (
+                            <div
+                              key={item.ingredientProductId}
+                              className="flex items-center justify-between rounded-lg border p-3"
+                            >
+                              <div>
+                                <p className="font-medium">
+                                  {product?.name || item.ingredientProductName}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  Baixa {Number(item.quantity || 0).toFixed(3)} por unidade
+                                  produzida
+                                </p>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="number"
+                                  min="0.001"
+                                  step="0.001"
+                                  value={item.quantity}
+                                  onChange={(e) =>
+                                    updateIngredientItemQuantity(
+                                      item.ingredientProductId,
+                                      Number(
+                                        normalizeDecimalString(
+                                          e.target.value,
+                                          String(item.quantity)
+                                        ) || item.quantity
+                                      )
+                                    )
+                                  }
+                                  className="w-24"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() =>
+                                    removeIngredientItem(item.ingredientProductId)
+                                  }
                                 >
                                   <Trash2 className="h-4 w-4 text-destructive" />
                                 </Button>

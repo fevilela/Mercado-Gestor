@@ -4,6 +4,7 @@ import {
   productVariations,
   productMedia,
   kitItems,
+  productIngredients,
   customers,
   suppliers,
   transporters,
@@ -223,6 +224,14 @@ export const storage = {
       .select()
       .from(kitItems)
       .where(eq(kitItems.kitProductId, kitProductId));
+  },
+
+  async getProductIngredients(productId: number) {
+    return await db
+      .select()
+      .from(productIngredients)
+      .where(eq(productIngredients.productId, productId))
+      .orderBy(productIngredients.sortOrder, productIngredients.id);
   },
 
   async deleteProduct(id: number, companyId: number) {

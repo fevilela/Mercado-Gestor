@@ -277,6 +277,7 @@ export const products = pgTable("products", {
   minStock: decimal("min_stock", { precision: 12, scale: 3 }).default("10"),
   maxStock: decimal("max_stock", { precision: 12, scale: 3 }).default("100"),
   isKit: boolean("is_kit").default(false),
+  isIngredient: boolean("is_ingredient").default(false),
   isActive: boolean("is_active").default(true),
   supplierId: integer("supplier_id"),
   // ===== Tributação (Impostos) =====
@@ -390,6 +391,26 @@ export const insertKitItemSchema = createInsertSchema(kitItems).omit({
 });
 export type InsertKitItem = z.infer<typeof insertKitItemSchema>;
 export type KitItem = typeof kitItems.$inferSelect;
+
+export const productIngredients = pgTable("product_ingredients", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").notNull(),
+  ingredientProductId: integer("ingredient_product_id").notNull(),
+  quantity: decimal("quantity", { precision: 12, scale: 3 }).notNull().default("1"),
+  sortOrder: integer("sort_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertProductIngredientSchema = createInsertSchema(
+  productIngredients
+).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertProductIngredient = z.infer<
+  typeof insertProductIngredientSchema
+>;
+export type ProductIngredient = typeof productIngredients.$inferSelect;
 
 export const customers = pgTable("customers", {
   id: serial("id").primaryKey(),

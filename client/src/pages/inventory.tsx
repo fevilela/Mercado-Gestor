@@ -1007,8 +1007,12 @@ export default function Inventory() {
       const typeLabel =
         adjustmentTypes.find((t) => t.value === adjustType)?.label ||
         adjustType;
+      const ingredientsMessage =
+        Array.isArray(data?.ingredientsConsumed) && data.ingredientsConsumed.length > 0
+          ? ` ${data.ingredientsConsumed.length} ingrediente(s) baixado(s) automaticamente.`
+          : "";
       toast.success(
-        `Estoque ajustado com sucesso! ${typeLabel}: ${adjustQuantity} unidades`
+        `Estoque ajustado com sucesso! ${typeLabel}: ${adjustQuantity}.${ingredientsMessage}`
       );
       closeAdjustDialog();
     },
@@ -1054,7 +1058,7 @@ export default function Inventory() {
   const handleSubmitAdjustment = () => {
     if (!stockAdjustment) return;
 
-    const quantity = parseInt(adjustQuantity);
+    const quantity = Number(adjustQuantity);
     if (isNaN(quantity) || quantity <= 0) {
       toast.error("Quantidade deve ser um número positivo");
       return;
@@ -1076,7 +1080,7 @@ export default function Inventory() {
 
   const getNewStockPreview = () => {
     if (!stockAdjustment) return 0;
-    const quantity = parseInt(adjustQuantity) || 0;
+    const quantity = Number(adjustQuantity) || 0;
     if (adjustType === "saida" || adjustType === "perda") {
       return stockAdjustment.currentStock - quantity;
     }
