@@ -195,6 +195,39 @@ const toNormalizedNumber = (value: string | number | null | undefined) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const calculateEan13CheckDigit = (base12: string) => {
+  const digits = base12
+    .split("")
+    .map((digit) => Number(digit))
+    .filter((digit) => Number.isFinite(digit));
+  if (digits.length !== 12) return null;
+
+  const total = digits.reduce((sum, digit, index) => {
+    const weight = index % 2 === 0 ? 1 : 3;
+    return sum + digit * weight;
+  }, 0);
+
+  return String((10 - (total % 10)) % 10);
+};
+
+const generateInternalEan13 = (existingEans: Set<string>) => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const seed = `${Date.now()}${Math.floor(Math.random() * 1000)}`
+      .replace(/\D/g, "")
+      .slice(-9)
+      .padStart(9, "0");
+    const base12 = `200${seed}`;
+    const checkDigit = calculateEan13CheckDigit(base12);
+    if (!checkDigit) continue;
+    const ean = `${base12}${checkDigit}`;
+    if (!existingEans.has(ean)) {
+      return ean;
+    }
+  }
+
+  return null;
+};
+
 export default function ProductForm({
   open,
   onOpenChange,
@@ -879,9 +912,26 @@ export default function ProductForm({
   const availableIngredients = allProducts.filter(
     (p: any) =>
       p.id !== editProduct?.id &&
-      p.isIngredient &&
+      p.isActive !== false &&
       !ingredientItemsList.some((item) => item.ingredientProductId === p.id)
   );
+
+  const handleGenerateInternalEan = () => {
+    const existingEans = new Set(
+      allProducts
+        .map((product: any) => String(product?.ean || "").trim())
+        .filter(Boolean)
+    );
+    const generatedEan = generateInternalEan13(existingEans);
+    if (!generatedEan) {
+      toast.error("Nao foi possivel gerar um codigo interno agora");
+      return;
+    }
+    form.setValue("ean", generatedEan, { shouldDirty: true, shouldValidate: true });
+    setEanLookupError(
+      "Codigo interno gerado automaticamente. Use o EAN real do fornecedor quando existir."
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -924,6 +974,13 @@ export default function ProductForm({
                         }
                       }}
                     />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleGenerateInternalEan}
+                    >
+                      Gerar
+                    </Button>
                     <Button
                       type="button"
                       variant="outline"
