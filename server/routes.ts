@@ -14,6 +14,7 @@ import {
   suppliers,
   transporters,
   paymentMachines,
+  paymentMethods,
   digitalCertificates,
   sefazTransmissionLogs,
 } from "@shared/schema";
@@ -34,7 +35,7 @@ import {
   insertSimplesNacionalAliquotSchema,
 } from "@shared/schema";
 import { z } from "zod";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, ilike } from "drizzle-orm";
 import { createHash } from "crypto";
 import { lookupEAN } from "./ean-service";
 import {
@@ -225,6 +226,27 @@ function parseNFeXML(xmlContent: string): Array<{
 
   return produtos;
 }
+
+const RECENT_DUPLICATE_WINDOW_MS = 15000;
+
+const normalizeComparableText = (value: unknown) =>
+  String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+const normalizeComparableDoc = (value: unknown) =>
+  String(value ?? "").replace(/\D/g, "");
+
+const isRecentlyCreatedRecord = (
+  createdAt: Date | string | null | undefined,
+) => {
+  if (!createdAt) return false;
+  const parsedAt =
+    createdAt instanceof Date ? createdAt.getTime() : new Date(createdAt).getTime();
+  if (Number.isNaN(parsedAt)) return false;
+  return Date.now() - parsedAt <= RECENT_DUPLICATE_WINDOW_MS;
+};
 
 function parseNFeHeaderTotals(xmlContent: string): {
   productsTotal: number;
@@ -676,11 +698,31 @@ export async function registerRoutes(
           media,
           kitItems: kitItemsData,
         } = createProductRequestSchema.parse(normalizedBody);
+        const normalizedProductName = normalizeComparableText(product.name);
+        const normalizedProductEan = String(product.ean ?? "").trim();
+        const [recentDuplicateProduct] = await db
+          .select()
+          .from(products)
+          .where(
+            normalizedProductEan
+              ? and(eq(products.companyId, companyId), eq(products.ean, normalizedProductEan))
+              : and(eq(products.companyId, companyId), ilike(products.name, product.name.trim()))
+          )
+          .orderBy(desc(products.createdAt))
+          .limit(1);
+        if (
+          recentDuplicateProduct &&
+          isRecentlyCreatedRecord(recentDuplicateProduct.createdAt) &&
+          normalizeComparableText(recentDuplicateProduct.name) === normalizedProductName &&
+          String(recentDuplicateProduct.ean ?? "").trim() === normalizedProductEan
+        ) {
+          return res.status(200).json(recentDuplicateProduct);
+        }
 
         const result = await db.transaction(async (tx) => {
           const [newProduct] = await tx
             .insert(products)
-            .values({ ...product, companyId })
+            .values({ ...product, ean: normalizedProductEan || null, companyId })
             .returning();
 
           if (variations && variations.length > 0) {
@@ -910,8 +952,29 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const validated = insertCustomerSchema.parse(req.body);
+        const normalizedName = normalizeComparableText(validated.name);
+        const normalizedDoc = normalizeComparableDoc(validated.cpfCnpj);
+        const [recentDuplicateCustomer] = await db
+          .select()
+          .from(customers)
+          .where(
+            normalizedDoc
+              ? and(eq(customers.companyId, companyId), eq(customers.cpfCnpj, normalizedDoc))
+              : and(eq(customers.companyId, companyId), ilike(customers.name, validated.name.trim()))
+          )
+          .orderBy(desc(customers.createdAt))
+          .limit(1);
+        if (
+          recentDuplicateCustomer &&
+          isRecentlyCreatedRecord(recentDuplicateCustomer.createdAt) &&
+          normalizeComparableText(recentDuplicateCustomer.name) === normalizedName &&
+          normalizeComparableDoc(recentDuplicateCustomer.cpfCnpj) === normalizedDoc
+        ) {
+          return res.status(200).json(recentDuplicateCustomer);
+        }
         const customer = await storage.createCustomer({
           ...validated,
+          cpfCnpj: normalizedDoc || validated.cpfCnpj || null,
           companyId,
         });
         res.status(201).json(customer);
@@ -999,8 +1062,29 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const validated = insertSupplierSchema.parse(req.body);
+        const normalizedName = normalizeComparableText(validated.name);
+        const normalizedDoc = normalizeComparableDoc(validated.cnpj);
+        const [recentDuplicateSupplier] = await db
+          .select()
+          .from(suppliers)
+          .where(
+            normalizedDoc
+              ? and(eq(suppliers.companyId, companyId), eq(suppliers.cnpj, normalizedDoc))
+              : and(eq(suppliers.companyId, companyId), ilike(suppliers.name, validated.name.trim()))
+          )
+          .orderBy(desc(suppliers.createdAt))
+          .limit(1);
+        if (
+          recentDuplicateSupplier &&
+          isRecentlyCreatedRecord(recentDuplicateSupplier.createdAt) &&
+          normalizeComparableText(recentDuplicateSupplier.name) === normalizedName &&
+          normalizeComparableDoc(recentDuplicateSupplier.cnpj) === normalizedDoc
+        ) {
+          return res.status(200).json(recentDuplicateSupplier);
+        }
         const supplier = await storage.createSupplier({
           ...validated,
+          cnpj: normalizedDoc || validated.cnpj || null,
           companyId,
         });
         res.status(201).json(supplier);
@@ -1108,7 +1192,31 @@ export async function registerRoutes(
         const companyId = getCompanyId(req);
         if (!companyId) return res.status(401).json({ error: "NÃ£o autenticado" });
         const validated = insertTransporterSchema.parse(req.body);
-        const transporter = await storage.createTransporter({ ...validated, companyId });
+        const normalizedName = normalizeComparableText(validated.name);
+        const normalizedDoc = normalizeComparableDoc(validated.cnpjCpf);
+        const [recentDuplicateTransporter] = await db
+          .select()
+          .from(transporters)
+          .where(
+            normalizedDoc
+              ? and(eq(transporters.companyId, companyId), eq(transporters.cnpjCpf, normalizedDoc))
+              : and(eq(transporters.companyId, companyId), ilike(transporters.name, validated.name.trim()))
+          )
+          .orderBy(desc(transporters.createdAt))
+          .limit(1);
+        if (
+          recentDuplicateTransporter &&
+          isRecentlyCreatedRecord(recentDuplicateTransporter.createdAt) &&
+          normalizeComparableText(recentDuplicateTransporter.name) === normalizedName &&
+          normalizeComparableDoc(recentDuplicateTransporter.cnpjCpf) === normalizedDoc
+        ) {
+          return res.status(200).json(recentDuplicateTransporter);
+        }
+        const transporter = await storage.createTransporter({
+          ...validated,
+          cnpjCpf: normalizedDoc || validated.cnpjCpf || null,
+          companyId,
+        });
         res.status(201).json(transporter);
       } catch (error) {
         if (error instanceof z.ZodError) {
@@ -2179,6 +2287,29 @@ export async function registerRoutes(
         }
         const data = paymentMethodSchema.parse(req.body);
         const processingMode = data.processingMode || (data.tefMethod ? "tef" : "manual");
+        const [recentDuplicatePaymentMethod] = await db
+          .select()
+          .from(paymentMethods)
+          .where(
+            and(
+              eq(paymentMethods.companyId, companyId),
+              ilike(paymentMethods.name, data.name.trim()),
+              eq(paymentMethods.type, data.type)
+            )
+          )
+          .orderBy(desc(paymentMethods.createdAt))
+          .limit(1);
+        if (
+          recentDuplicatePaymentMethod &&
+          isRecentlyCreatedRecord(recentDuplicatePaymentMethod.createdAt) &&
+          normalizeComparableText(recentDuplicatePaymentMethod.name) ===
+            normalizeComparableText(data.name) &&
+          recentDuplicatePaymentMethod.type === data.type &&
+          String(recentDuplicatePaymentMethod.nfceCode ?? "") ===
+            String(data.nfceCode ?? "")
+        ) {
+          return res.status(200).json(recentDuplicatePaymentMethod);
+        }
         const created = await storage.createPaymentMethod({
           companyId,
           name: data.name.trim(),

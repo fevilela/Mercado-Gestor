@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Layout from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +52,7 @@ const processingModeLabels: Record<ProcessingMode, string> = {
 
 export default function PaymentMethodsPage() {
   const { toast } = useToast();
+  const submitLockRef = useRef(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({
     name: "",
@@ -102,6 +103,7 @@ export default function PaymentMethodsPage() {
       return res.json();
     },
     onSuccess: () => {
+      submitLockRef.current = false;
       refetch();
       setEditingId(null);
       setForm({
@@ -119,6 +121,7 @@ export default function PaymentMethodsPage() {
       });
     },
     onError: (error: any) => {
+      submitLockRef.current = false;
       toast({
         title: "Erro",
         description: error?.message || "Falha ao salvar",
@@ -184,6 +187,13 @@ export default function PaymentMethodsPage() {
 
   const tefCapableType = ["pix", "credito", "debito"].includes(form.type);
   const tefEnabled = form.processingMode === "tef" && tefCapableType;
+  const handleSave = () => {
+    if (submitLockRef.current || saveMutation.isPending || !form.name.trim()) {
+      return;
+    }
+    submitLockRef.current = true;
+    saveMutation.mutate();
+  };
 
   return (
     <Layout>
@@ -334,12 +344,13 @@ export default function PaymentMethodsPage() {
 
             <div className="flex gap-2">
               <Button
-                onClick={() => saveMutation.mutate()}
-                disabled={!form.name.trim()}
+                type="button"
+                onClick={handleSave}
+                disabled={!form.name.trim() || saveMutation.isPending}
               >
                 {editingId ? "Atualizar" : "Salvar"}
               </Button>
-              <Button variant="outline" onClick={resetForm}>
+              <Button type="button" variant="outline" onClick={resetForm}>
                 Cancelar
               </Button>
             </div>

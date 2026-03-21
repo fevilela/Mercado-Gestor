@@ -26,7 +26,7 @@ import {
   AlertTriangle,
   ChevronRight,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -111,6 +111,9 @@ interface Transporter {
 export default function Contacts() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const customerSubmitLockRef = useRef(false);
+  const supplierSubmitLockRef = useRef(false);
+  const transporterSubmitLockRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [supplierSearchQuery, setSupplierSearchQuery] = useState("");
   const [transporterSearchQuery, setTransporterSearchQuery] = useState("");
@@ -207,12 +210,14 @@ export default function Contacts() {
       return res.json();
     },
     onSuccess: () => {
+      customerSubmitLockRef.current = false;
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       setIsCustomerDialogOpen(false);
       resetCustomerForm();
       toast({ title: "Cliente criado com sucesso!" });
     },
     onError: () => {
+      customerSubmitLockRef.current = false;
       toast({ title: "Erro ao criar cliente", variant: "destructive" });
     },
   });
@@ -234,6 +239,7 @@ export default function Contacts() {
       return res.json();
     },
     onSuccess: () => {
+      customerSubmitLockRef.current = false;
       queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
       setIsCustomerDialogOpen(false);
       setEditingCustomer(null);
@@ -241,6 +247,7 @@ export default function Contacts() {
       toast({ title: "Cliente atualizado com sucesso!" });
     },
     onError: () => {
+      customerSubmitLockRef.current = false;
       toast({ title: "Erro ao atualizar cliente", variant: "destructive" });
     },
   });
@@ -271,12 +278,14 @@ export default function Contacts() {
       return res.json();
     },
     onSuccess: () => {
+      supplierSubmitLockRef.current = false;
       queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
       setIsSupplierDialogOpen(false);
       resetSupplierForm();
       toast({ title: "Fornecedor criado com sucesso!" });
     },
     onError: () => {
+      supplierSubmitLockRef.current = false;
       toast({ title: "Erro ao criar fornecedor", variant: "destructive" });
     },
   });
@@ -298,6 +307,7 @@ export default function Contacts() {
       return res.json();
     },
     onSuccess: () => {
+      supplierSubmitLockRef.current = false;
       queryClient.invalidateQueries({ queryKey: ["/api/suppliers"] });
       setIsSupplierDialogOpen(false);
       setEditingSupplier(null);
@@ -305,6 +315,7 @@ export default function Contacts() {
       toast({ title: "Fornecedor atualizado com sucesso!" });
     },
     onError: () => {
+      supplierSubmitLockRef.current = false;
       toast({ title: "Erro ao atualizar fornecedor", variant: "destructive" });
     },
   });
@@ -335,12 +346,14 @@ export default function Contacts() {
       return res.json();
     },
     onSuccess: () => {
+      transporterSubmitLockRef.current = false;
       queryClient.invalidateQueries({ queryKey: ["/api/transporters"] });
       setIsTransporterDialogOpen(false);
       resetTransporterForm();
       toast({ title: "Transportadora criada com sucesso!" });
     },
     onError: () => {
+      transporterSubmitLockRef.current = false;
       toast({ title: "Erro ao criar transportadora", variant: "destructive" });
     },
   });
@@ -362,6 +375,7 @@ export default function Contacts() {
       return res.json();
     },
     onSuccess: () => {
+      transporterSubmitLockRef.current = false;
       queryClient.invalidateQueries({ queryKey: ["/api/transporters"] });
       setIsTransporterDialogOpen(false);
       setEditingTransporter(null);
@@ -369,6 +383,7 @@ export default function Contacts() {
       toast({ title: "Transportadora atualizada com sucesso!" });
     },
     onError: () => {
+      transporterSubmitLockRef.current = false;
       toast({ title: "Erro ao atualizar transportadora", variant: "destructive" });
     },
   });
@@ -487,10 +502,18 @@ export default function Contacts() {
   };
 
   const handleCustomerSubmit = () => {
+    if (
+      customerSubmitLockRef.current ||
+      createCustomerMutation.isPending ||
+      updateCustomerMutation.isPending
+    ) {
+      return;
+    }
     if (!customerForm.name.trim()) {
       toast({ title: "Nome é obrigatório", variant: "destructive" });
       return;
     }
+    customerSubmitLockRef.current = true;
     if (editingCustomer) {
       updateCustomerMutation.mutate({
         id: editingCustomer.id,
@@ -502,10 +525,18 @@ export default function Contacts() {
   };
 
   const handleSupplierSubmit = () => {
+    if (
+      supplierSubmitLockRef.current ||
+      createSupplierMutation.isPending ||
+      updateSupplierMutation.isPending
+    ) {
+      return;
+    }
     if (!supplierForm.name.trim()) {
       toast({ title: "Nome é obrigatório", variant: "destructive" });
       return;
     }
+    supplierSubmitLockRef.current = true;
     if (editingSupplier) {
       updateSupplierMutation.mutate({
         id: editingSupplier.id,
@@ -517,10 +548,18 @@ export default function Contacts() {
   };
 
   const handleTransporterSubmit = () => {
+    if (
+      transporterSubmitLockRef.current ||
+      createTransporterMutation.isPending ||
+      updateTransporterMutation.isPending
+    ) {
+      return;
+    }
     if (!transporterForm.name.trim()) {
       toast({ title: "Nome e obrigatorio", variant: "destructive" });
       return;
     }
+    transporterSubmitLockRef.current = true;
     if (editingTransporter) {
       updateTransporterMutation.mutate({
         id: editingTransporter.id,
