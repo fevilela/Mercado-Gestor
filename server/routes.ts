@@ -613,16 +613,33 @@ export async function registerRoutes(
           return res.status(401).json({ error: "Não autenticado" });
 
         const id = parseInt(req.params.id);
+        if (!Number.isFinite(id)) {
+          return res.status(400).json({ error: "ID de produto inválido" });
+        }
         const product = await storage.getProduct(id, companyId);
         if (!product) {
           return res.status(404).json({ error: "Product not found" });
         }
-        const variations = await storage.getProductVariations(id);
-        const media = await storage.getProductMedia(id);
-        const productKitItems = product.isKit
-          ? await storage.getKitItems(id)
-          : [];
-        const ingredients = await storage.getProductIngredients(id);
+        const [variationsResult, mediaResult, productKitItemsResult, ingredientsResult] =
+          await Promise.allSettled([
+            storage.getProductVariations(id),
+            storage.getProductMedia(id),
+            product.isKit ? storage.getKitItems(id) : Promise.resolve([]),
+            storage.getProductIngredients(id),
+          ]);
+
+        const variations =
+          variationsResult.status === "fulfilled" ? variationsResult.value : [];
+        const media =
+          mediaResult.status === "fulfilled" ? mediaResult.value : [];
+        const productKitItems =
+          productKitItemsResult.status === "fulfilled"
+            ? productKitItemsResult.value
+            : [];
+        const ingredients =
+          ingredientsResult.status === "fulfilled"
+            ? ingredientsResult.value
+            : [];
         res.json({
           ...product,
           variations,
@@ -631,6 +648,7 @@ export async function registerRoutes(
           ingredients,
         });
       } catch (error) {
+        console.error("Failed to fetch product:", error);
         res.status(500).json({ error: "Failed to fetch product" });
       }
     }
@@ -2964,7 +2982,15 @@ export async function registerRoutes(
         const quantityDelta =
           type === "saida" || type === "perda"
             ? -Math.abs(quantity)
-            : Math.abs(quantity);
+            : type === "ajuste"
+              ? quantity
+              : Math.abs(quantity);
+
+        if (!Number.isFinite(quantityDelta) || quantityDelta === 0) {
+          return res
+            .status(400)
+            .json({ error: "Quantidade do ajuste deve ser diferente de zero" });
+        }
 
         const newStock = toNumber(product.stock, 0) + quantityDelta;
         if (newStock < 0) {
@@ -3084,6 +3110,16 @@ export async function registerRoutes(
       } catch (error) {
         if (error instanceof z.ZodError) {
           return res.status(400).json({ error: error.errors });
+        }
+        if (error instanceof Error) {
+          const message = error.message || "Falha ao ajustar estoque";
+          if (
+            message.includes("Estoque insuficiente") ||
+            message.includes("nao encontrado") ||
+            message.includes("não encontrado")
+          ) {
+            return res.status(400).json({ error: message });
+          }
         }
         console.error("Failed to adjust stock:", error);
         res.status(500).json({ error: "Falha ao ajustar estoque" });
