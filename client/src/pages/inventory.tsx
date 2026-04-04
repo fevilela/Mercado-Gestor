@@ -996,8 +996,18 @@ export default function Inventory() {
         body: JSON.stringify(data),
       });
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || "Falha ao ajustar estoque");
+        const raw = await res.text();
+        let parsedError: any = null;
+        try {
+          parsedError = raw ? JSON.parse(raw) : null;
+        } catch {
+          parsedError = null;
+        }
+        throw new Error(
+          parsedError?.error ||
+            raw ||
+            "Falha ao ajustar estoque"
+        );
       }
       return res.json();
     },
@@ -1021,11 +1031,19 @@ export default function Inventory() {
   });
 
   const handleEdit = async (product: any) => {
-    const res = await fetch(`/api/products/${product.id}`);
-    if (res.ok) {
+    try {
+      const res = await fetch(`/api/products/${product.id}`);
+      if (!res.ok) {
+        const message = await res.text();
+        throw new Error(message || "Não foi possível carregar o produto");
+      }
       const fullProduct = await res.json();
       setEditProduct(fullProduct);
       setFormOpen(true);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Falha ao abrir edição";
+      toast.error(message);
     }
   };
 
