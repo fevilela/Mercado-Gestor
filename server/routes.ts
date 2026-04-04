@@ -2964,7 +2964,15 @@ export async function registerRoutes(
         const quantityDelta =
           type === "saida" || type === "perda"
             ? -Math.abs(quantity)
-            : Math.abs(quantity);
+            : type === "ajuste"
+              ? quantity
+              : Math.abs(quantity);
+
+        if (!Number.isFinite(quantityDelta) || quantityDelta === 0) {
+          return res
+            .status(400)
+            .json({ error: "Quantidade do ajuste deve ser diferente de zero" });
+        }
 
         const newStock = toNumber(product.stock, 0) + quantityDelta;
         if (newStock < 0) {
