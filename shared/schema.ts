@@ -397,6 +397,7 @@ export const productIngredients = pgTable("product_ingredients", {
   productId: integer("product_id").notNull(),
   ingredientProductId: integer("ingredient_product_id").notNull(),
   quantity: decimal("quantity", { precision: 12, scale: 3 }).notNull().default("1"),
+  consumptionUnit: text("consumption_unit").notNull().default("kg"),
   sortOrder: integer("sort_order").default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });

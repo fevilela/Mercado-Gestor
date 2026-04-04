@@ -615,6 +615,7 @@ export async function registerRoutes(
   const ingredientItemSchema = z.object({
     ingredientProductId: z.number(),
     quantity: z.coerce.number().positive(),
+    consumptionUnit: z.enum(["kg", "g"]).optional().default("kg"),
   });
 
   const createProductRequestSchema = z.object({
@@ -834,6 +835,7 @@ export async function registerRoutes(
                 productId: newProduct.id,
                 ingredientProductId: item.ingredientProductId,
                 quantity: item.quantity.toFixed(3),
+                consumptionUnit: item.consumptionUnit || "kg",
                 sortOrder: index,
               });
             }
@@ -970,6 +972,7 @@ export async function registerRoutes(
                 productId: id,
                 ingredientProductId: item.ingredientProductId,
                 quantity: item.quantity.toFixed(3),
+                consumptionUnit: item.consumptionUnit || "kg",
                 sortOrder: index,
               });
             }
@@ -2959,7 +2962,9 @@ export async function registerRoutes(
               }
 
               const consumedQuantity =
-                toNumber(recipeItem.quantity, 0) * Math.abs(quantityDelta);
+                (recipeItem.consumptionUnit === "g"
+                  ? toNumber(recipeItem.quantity, 0) / 1000
+                  : toNumber(recipeItem.quantity, 0)) * Math.abs(quantityDelta);
               if (consumedQuantity <= 0) continue;
 
               const ingredientNewStock =

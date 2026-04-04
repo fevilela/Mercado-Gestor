@@ -96,6 +96,7 @@ interface IngredientItemData {
   ingredientProductId: number;
   ingredientProductName?: string;
   quantity: number;
+  consumptionUnit: "kg" | "g";
 }
 
 interface ProductFormProps {
@@ -255,6 +256,7 @@ export default function ProductForm({
   const [kitQuantity, setKitQuantity] = useState(1);
   const [selectedIngredientProduct, setSelectedIngredientProduct] = useState<string>("");
   const [ingredientQuantity, setIngredientQuantity] = useState("1");
+  const [ingredientConsumptionUnit, setIngredientConsumptionUnit] = useState<"kg" | "g">("kg");
   const [isLookingUpEan, setIsLookingUpEan] = useState(false);
   const [eanLookupError, setEanLookupError] = useState<string | null>(null);
   const submitLockRef = useRef(false);
@@ -616,7 +618,12 @@ export default function ProductForm({
       setVariations(editProduct.variations || []);
       setMediaItems(editProduct.media || []);
       setKitItemsList(editProduct.kitItems || []);
-      setIngredientItemsList(editProduct.ingredients || []);
+      setIngredientItemsList(
+        (editProduct.ingredients || []).map((item: any) => ({
+          ...item,
+          consumptionUnit: item.consumptionUnit === "g" ? "g" : "kg",
+        }))
+      );
     } else {
       form.reset();
       setOperationalConfig(defaultOperationalConfig);
@@ -750,6 +757,7 @@ export default function ProductForm({
       ingredients: ingredientItemsList.map((item) => ({
         ingredientProductId: item.ingredientProductId,
         quantity: item.quantity,
+        consumptionUnit: item.consumptionUnit || "kg",
       })),
     };
     submitLockRef.current = true;
@@ -873,10 +881,12 @@ export default function ProductForm({
             ingredientProductId: product.id,
             ingredientProductName: product.name,
             quantity: normalizedQuantity,
+            consumptionUnit: ingredientConsumptionUnit,
           },
         ]);
         setSelectedIngredientProduct("");
         setIngredientQuantity("1");
+        setIngredientConsumptionUnit("kg");
       }
     }
   };
@@ -897,6 +907,19 @@ export default function ProductForm({
       ingredientItemsList.map((item) =>
         item.ingredientProductId === ingredientProductId
           ? { ...item, quantity }
+          : item
+      )
+    );
+  };
+
+  const updateIngredientItemUnit = (
+    ingredientProductId: number,
+    consumptionUnit: "kg" | "g"
+  ) => {
+    setIngredientItemsList(
+      ingredientItemsList.map((item) =>
+        item.ingredientProductId === ingredientProductId
+          ? { ...item, consumptionUnit }
           : item
       )
     );
@@ -1996,7 +2019,7 @@ export default function ProductForm({
                       ingredientes informados abaixo.
                     </div>
 
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_140px_auto]">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_140px_120px_auto]">
                       <div className="space-y-2">
                         <Label>Ingrediente</Label>
                         <Select
@@ -2030,6 +2053,24 @@ export default function ProductForm({
                         />
                       </div>
 
+                      <div className="space-y-2">
+                        <Label>Unidade</Label>
+                        <Select
+                          value={ingredientConsumptionUnit}
+                          onValueChange={(value) =>
+                            setIngredientConsumptionUnit(value as "kg" | "g")
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Unidade" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="kg">kg</SelectItem>
+                            <SelectItem value="g">g</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
                       <div className="flex items-end">
                         <Button type="button" onClick={addIngredientItem}>
                           <Plus className="mr-2 h-4 w-4" /> Adicionar
@@ -2057,7 +2098,8 @@ export default function ProductForm({
                                   {product?.name || item.ingredientProductName}
                                 </p>
                                 <p className="text-sm text-muted-foreground">
-                                  Baixa {Number(item.quantity || 0).toFixed(3)} por unidade
+                                  Baixa {Number(item.quantity || 0).toFixed(3)}{" "}
+                                  {item.consumptionUnit === "g" ? "g" : "kg"} por unidade
                                   produzida
                                 </p>
                               </div>
@@ -2081,6 +2123,23 @@ export default function ProductForm({
                                   }
                                   className="w-24"
                                 />
+                                <Select
+                                  value={item.consumptionUnit || "kg"}
+                                  onValueChange={(value) =>
+                                    updateIngredientItemUnit(
+                                      item.ingredientProductId,
+                                      value as "kg" | "g"
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="w-20">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="kg">kg</SelectItem>
+                                    <SelectItem value="g">g</SelectItem>
+                                  </SelectContent>
+                                </Select>
                                 <Button
                                   type="button"
                                   variant="ghost"
@@ -2197,4 +2256,3 @@ export default function ProductForm({
     </Dialog>
   );
 }
-
