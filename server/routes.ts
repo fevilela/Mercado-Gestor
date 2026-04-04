@@ -2984,7 +2984,7 @@ export async function registerRoutes(
 
         const updatedProduct = await db.transaction(async (tx) => {
           await tx.execute(
-            sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+            sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId, unit_id: unitId })}, true)`,
           );
 
           const [product] = await tx
