@@ -1099,8 +1099,16 @@ export default function Inventory() {
     if (!stockAdjustment) return;
 
     const quantity = parseDecimalInput(adjustQuantity);
-    if (isNaN(quantity) || quantity <= 0) {
-      toast.error("Quantidade deve ser um número positivo");
+    const isInvalidQuantity =
+      isNaN(quantity) ||
+      (adjustType === "ajuste" ? quantity < 0 : quantity <= 0);
+
+    if (isInvalidQuantity) {
+      toast.error(
+        adjustType === "ajuste"
+          ? "Quantidade deve ser um número maior ou igual a zero"
+          : "Quantidade deve ser um número positivo"
+      );
       return;
     }
 
@@ -1122,6 +1130,9 @@ export default function Inventory() {
     if (!stockAdjustment) return 0;
     const quantity = parseDecimalInput(adjustQuantity) || 0;
     const currentStock = Number(stockAdjustment.currentStock) || 0;
+    if (adjustType === "ajuste") {
+      return quantity;
+    }
     if (adjustType === "saida" || adjustType === "perda") {
       return currentStock - quantity;
     }
