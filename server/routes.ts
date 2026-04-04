@@ -559,6 +559,7 @@ export async function registerRoutes(
         const companyId = getCompanyId(req);
         if (!companyId)
           return res.status(401).json({ error: "Não autenticado" });
+        const unitId = getUnitId(req);
 
         const productsList = await storage.getAllProducts(companyId);
         res.json(productsList);
@@ -2970,6 +2971,7 @@ export async function registerRoutes(
         const companyId = getCompanyId(req);
         if (!companyId)
           return res.status(401).json({ error: "Não autenticado" });
+        const unitId = getUnitId(req);
 
         const { productId, quantity, type, reason, notes } =
           adjustStockSchema.parse(req.body);
@@ -3052,6 +3054,7 @@ export async function registerRoutes(
               await tx.insert(inventoryMovements).values({
                 productId: ingredientProduct.id,
                 companyId,
+                unitId,
                 type: "saida",
                 quantity: (-consumedQuantity).toFixed(3),
                 reason: "producao",
@@ -3084,6 +3087,7 @@ export async function registerRoutes(
           await tx.insert(inventoryMovements).values({
             productId,
             companyId,
+            unitId,
             type,
             quantity: quantityDelta.toFixed(3),
             reason: reason || null,
@@ -3098,6 +3102,10 @@ export async function registerRoutes(
             .set({ stock: sql`${products.stock} + ${quantityDelta}` })
             .where(and(eq(products.id, productId), eq(products.companyId, companyId)))
             .returning();
+
+          if (!updated) {
+            throw new Error("Produto não encontrado");
+          }
 
           return { updated, quantityDelta };
         });
