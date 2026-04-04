@@ -1055,10 +1055,33 @@ export default function Inventory() {
     setAdjustNotes("");
   };
 
+  const parseDecimalInput = (value: string): number => {
+    const normalizedValue = value.trim().replace(/\s+/g, "");
+    if (!normalizedValue) return NaN;
+
+    const hasComma = normalizedValue.includes(",");
+    const hasDot = normalizedValue.includes(".");
+
+    if (hasComma && hasDot) {
+      const lastComma = normalizedValue.lastIndexOf(",");
+      const lastDot = normalizedValue.lastIndexOf(".");
+      if (lastComma > lastDot) {
+        return Number(normalizedValue.replace(/\./g, "").replace(",", "."));
+      }
+      return Number(normalizedValue.replace(/,/g, ""));
+    }
+
+    if (hasComma) {
+      return Number(normalizedValue.replace(",", "."));
+    }
+
+    return Number(normalizedValue);
+  };
+
   const handleSubmitAdjustment = () => {
     if (!stockAdjustment) return;
 
-    const quantity = Number(adjustQuantity);
+    const quantity = parseDecimalInput(adjustQuantity);
     if (isNaN(quantity) || quantity <= 0) {
       toast.error("Quantidade deve ser um número positivo");
       return;
@@ -1080,11 +1103,12 @@ export default function Inventory() {
 
   const getNewStockPreview = () => {
     if (!stockAdjustment) return 0;
-    const quantity = Number(adjustQuantity) || 0;
+    const quantity = parseDecimalInput(adjustQuantity) || 0;
+    const currentStock = Number(stockAdjustment.currentStock) || 0;
     if (adjustType === "saida" || adjustType === "perda") {
-      return stockAdjustment.currentStock - quantity;
+      return currentStock - quantity;
     }
-    return stockAdjustment.currentStock + quantity;
+    return currentStock + quantity;
   };
 
   const filteredProducts = products.filter((product: any) => {
@@ -2061,9 +2085,9 @@ export default function Inventory() {
                 <Label htmlFor="adjustQuantity">Quantidade *</Label>
                 <Input
                   id="adjustQuantity"
-                  type="number"
-                  min="1"
-                  placeholder="Ex: 10"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Ex: 10 ou 0,500"
                   value={adjustQuantity}
                   onChange={(e) => setAdjustQuantity(e.target.value)}
                   data-testid="input-adjust-quantity"
