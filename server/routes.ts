@@ -3006,6 +3006,10 @@ export async function registerRoutes(
         }> = [];
 
         const updatedProduct = await db.transaction(async (tx) => {
+          await tx.execute(
+            sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
+          );
+
           if (type === "entrada") {
             const recipeItems = await tx
               .select()
