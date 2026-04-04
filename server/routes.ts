@@ -135,7 +135,7 @@ function parseNFeXML(xmlContent: string): Array<{
   discountValue: string;
   bcIcmsValue: string;
 }> {
-  const produtos: Array<{
+  type ParsedNFeProduct = {
     name: string;
     ean: string | null;
     ncm: string | null;
@@ -160,7 +160,10 @@ function parseNFeXML(xmlContent: string): Array<{
     icmsStValue: string;
     discountValue: string;
     bcIcmsValue: string;
-  }> = [];
+  };
+
+  const produtos: ParsedNFeProduct[] = [];
+  const productIndexByKey = new Map<string, number>();
 
   const detPattern = /<det[^>]*>([\s\S]*?)<\/det>/gi;
   let detMatch;
@@ -233,7 +236,7 @@ function parseNFeXML(xmlContent: string): Array<{
     );
     const bcIcmsValue = asMoney(getTagValue("vBC", icmsContent));
 
-    produtos.push({
+    const parsedProduct: ParsedNFeProduct = {
       name,
       ean: ean && ean !== "SEM GTIN" ? ean : null,
       ncm,
@@ -258,7 +261,41 @@ function parseNFeXML(xmlContent: string): Array<{
       icmsStValue,
       discountValue,
       bcIcmsValue,
-    });
+    };
+
+    const productKey = [
+      parsedProduct.ean || "",
+      parsedProduct.name.trim().toLowerCase(),
+      parsedProduct.ncm || "",
+      parsedProduct.unit,
+      parsedProduct.cfop,
+      parsedProduct.price,
+    ].join("|");
+
+    const existingIndex = productIndexByKey.get(productKey);
+    if (existingIndex === undefined) {
+      productIndexByKey.set(productKey, produtos.length);
+      produtos.push(parsedProduct);
+      continue;
+    }
+
+    const current = produtos[existingIndex];
+    current.quantity = normalizeQuantity(current.quantity + parsedProduct.quantity);
+    current.discountValue = (
+      Number(current.discountValue) + Number(parsedProduct.discountValue)
+    ).toFixed(2);
+    current.icmsValue = (
+      Number(current.icmsValue) + Number(parsedProduct.icmsValue)
+    ).toFixed(2);
+    current.ipiValue = (
+      Number(current.ipiValue) + Number(parsedProduct.ipiValue)
+    ).toFixed(2);
+    current.icmsStValue = (
+      Number(current.icmsStValue) + Number(parsedProduct.icmsStValue)
+    ).toFixed(2);
+    current.bcIcmsValue = (
+      Number(current.bcIcmsValue) + Number(parsedProduct.bcIcmsValue)
+    ).toFixed(2);
   }
 
   return produtos;
@@ -568,7 +605,7 @@ export async function registerRoutes(
   app.get(
     "/api/products/:id",
     requireAuth,
-    requirePermission("inventory:view"),
+    requirePermission("inventory:view", "inventory:edit"),
     async (req, res) => {
       try {
         const companyId = getCompanyId(req);
