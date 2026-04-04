@@ -104,6 +104,11 @@ function rememberRecentProductCreateResponse(key: string, payload: unknown) {
   });
 }
 
+const normalizeQuantity = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Number(value.toFixed(3));
+};
+
 function parseNFeXML(xmlContent: string): Array<{
   name: string;
   ean: string | null;
@@ -233,7 +238,7 @@ function parseNFeXML(xmlContent: string): Array<{
       ean: ean && ean !== "SEM GTIN" ? ean : null,
       ncm,
       unit: unit.toUpperCase(),
-      quantity: Math.floor(quantity),
+      quantity: normalizeQuantity(quantity),
       price,
       purchasePrice: price,
       cfop,
@@ -3104,9 +3109,8 @@ export async function registerRoutes(
             ? ((salePrice - purchasePrice) / purchasePrice) * 100
             : 30;
         const unitsPerPackage = 1;
-        const stockQuantity = Math.max(
-          0,
-          Math.floor(prod.quantity * unitsPerPackage)
+        const stockQuantity = normalizeQuantity(
+          prod.quantity * unitsPerPackage
         );
         return {
           tempId: index,
@@ -3217,11 +3221,8 @@ export async function registerRoutes(
           typeof prodData.stockQuantity === "number"
             ? prodData.stockQuantity
             : prodData.quantity * unitsPerPackage;
-        const quantityToStock = Math.max(
-          0,
-          Math.floor(
-            Number.isFinite(resolvedStockQuantity) ? resolvedStockQuantity : 0
-          )
+        const quantityToStock = normalizeQuantity(
+          Number.isFinite(resolvedStockQuantity) ? resolvedStockQuantity : 0
         );
         if (prodData.isExisting && prodData.existingProductId) {
           await db.transaction(async (tx) => {

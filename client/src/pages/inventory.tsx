@@ -291,6 +291,7 @@ export default function Inventory() {
   };
 
   const round2 = (value: number) => Number(value.toFixed(2));
+  const round3 = (value: number) => Number(value.toFixed(3));
 
   const calcSalePriceFromMargin = (purchasePrice: number, margin: number) =>
     purchasePrice * (1 + margin / 100);
@@ -461,9 +462,7 @@ export default function Inventory() {
             : 30;
           const stockQuantity = Math.max(
             0,
-            Math.floor(
-              Number(product.stockQuantity ?? packageQty * unitsPerPackage)
-            )
+            round3(Number(product.stockQuantity ?? packageQty * unitsPerPackage))
           );
           return {
             ...product,
@@ -701,7 +700,7 @@ export default function Inventory() {
               const quantity = Math.max(0, newQuantity);
               const stockQuantity = Math.max(
                 0,
-                Math.floor(quantity * (p.unitsPerPackage || 1))
+                round3(quantity * (p.unitsPerPackage || 1))
               );
               const purchasePrice = calcUnitCost(
                 toMoney(p.totalPurchaseValue),
@@ -735,7 +734,7 @@ export default function Inventory() {
               const unitsPerPackage = Math.max(1, newValue);
               const stockQuantity = Math.max(
                 0,
-                Math.floor(p.quantity * unitsPerPackage)
+                round3(p.quantity * unitsPerPackage)
               );
               const purchasePrice = calcUnitCost(
                 toMoney(p.totalPurchaseValue),
@@ -2373,12 +2372,13 @@ export default function Inventory() {
                           <Input
                             type="number"
                             min="0"
+                            step="0.001"
                             className="w-20"
                             value={product.quantity}
                             onChange={(e) =>
                               updatePreviewQuantity(
                                 product.tempId,
-                                parseInt(e.target.value) || 0
+                                parseFloat(e.target.value) || 0
                               )
                             }
                           />
