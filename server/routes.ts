@@ -2974,31 +2974,6 @@ export async function registerRoutes(
         const { productId, quantity, type, reason, notes } =
           adjustStockSchema.parse(req.body);
 
-        const product = await storage.getProduct(productId, companyId);
-        if (!product) {
-          return res.status(404).json({ error: "Produto não encontrado" });
-        }
-
-        const quantityDelta =
-          type === "saida" || type === "perda"
-            ? -Math.abs(quantity)
-            : type === "ajuste"
-              ? quantity
-              : Math.abs(quantity);
-
-        if (!Number.isFinite(quantityDelta) || quantityDelta === 0) {
-          return res
-            .status(400)
-            .json({ error: "Quantidade do ajuste deve ser diferente de zero" });
-        }
-
-        const newStock = toNumber(product.stock, 0) + quantityDelta;
-        if (newStock < 0) {
-          return res
-            .status(400)
-            .json({ error: "Estoque não pode ficar negativo" });
-        }
-
         const ingredientsConsumed: Array<{
           ingredientProductId: number;
           ingredientName: string;
@@ -3009,6 +2984,33 @@ export async function registerRoutes(
           await tx.execute(
             sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: companyId })}, true)`,
           );
+
+          const [product] = await tx
+            .select()
+            .from(products)
+            .where(and(eq(products.id, productId), eq(products.companyId, companyId)))
+            .limit(1);
+
+          if (!product) {
+            throw new Error("Produto não encontrado");
+          }
+
+          const currentStock = toNumber(product.stock, 0);
+          const quantityDelta =
+            type === "saida" || type === "perda"
+              ? -Math.abs(quantity)
+              : type === "ajuste"
+                ? quantity - currentStock
+                : Math.abs(quantity);
+
+          if (!Number.isFinite(quantityDelta) || quantityDelta === 0) {
+            throw new Error("Quantidade do ajuste deve ser diferente de zero");
+          }
+
+          const newStock = toNumber(product.stock, 0) + quantityDelta;
+          if (newStock < 0) {
+            throw new Error("Estoque não pode ficar negativo");
+          }
 
           if (type === "entrada") {
             const recipeItems = await tx
@@ -3097,16 +3099,16 @@ export async function registerRoutes(
             .where(and(eq(products.id, productId), eq(products.companyId, companyId)))
             .returning();
 
-          return updated;
+          return { updated, quantityDelta };
         });
 
         res.json({
-          product: updatedProduct,
+          product: updatedProduct.updated,
           ingredientsConsumed,
           movement: {
             productId,
             type,
-            quantity: quantityDelta.toFixed(3),
+            quantity: updatedProduct.quantityDelta.toFixed(3),
             reason,
             notes,
           },
@@ -3119,6 +3121,8 @@ export async function registerRoutes(
           const message = error.message || "Falha ao ajustar estoque";
           if (
             message.includes("Estoque insuficiente") ||
+            message.includes("Estoque não pode ficar negativo") ||
+            message.includes("Quantidade do ajuste deve ser diferente de zero") ||
             message.includes("nao encontrado") ||
             message.includes("não encontrado")
           ) {
