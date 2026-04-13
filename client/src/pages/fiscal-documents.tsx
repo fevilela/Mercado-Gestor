@@ -961,6 +961,28 @@ export default function FiscalDocuments() {
     },
   });
 
+  const reconcileNfceTotalMutation = useMutation<any, Error, { saleId: number }>({
+    mutationFn: async ({ saleId }) => {
+      const res = await fetch("/api/fiscal/nfce/reconcile-total", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ saleId }),
+      });
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Falha ao ajustar total da venda");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+      toast.success(data?.message || "Total da venda ajustado com sucesso.");
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
   const inutilizeNfceMutation = useMutation<any, Error, typeof inutilizeForm>({
     mutationFn: async (payload) => {
       const res = await fetch("/api/fiscal/nfce/inutilize", {
@@ -3595,6 +3617,17 @@ export default function FiscalDocuments() {
                                     data-testid={`button-reset-nfce-${sale.id}`}
                                   >
                                     Resetar
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={reconcileNfceTotalMutation.isPending}
+                                    onClick={() =>
+                                      reconcileNfceTotalMutation.mutate({ saleId: sale.id })
+                                    }
+                                    data-testid={`button-reconcile-nfce-total-${sale.id}`}
+                                  >
+                                    Ajustar 0,01
                                   </Button>
                                   <Button
                                     size="sm"
