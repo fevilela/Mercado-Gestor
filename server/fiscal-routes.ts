@@ -1523,6 +1523,35 @@ router.post(
             customer = null;
             customerCpfCnpj = "";
           }
+          const nfceItems = resolvedItems.map((item) => ({
+            id: item.productId,
+            nome: item.productName,
+            ean: item.ean,
+            ncm: item.ncm,
+            cfop: null,
+            unidade: "UN",
+            quantidade: Number(item.quantity),
+            valorUnitario: Number(item.unitPrice),
+            valorTotal: Number(item.subtotal),
+          }));
+          const roundToCents = (value: number) =>
+            Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+          const nfceTotalFromItems = roundToCents(
+            nfceItems.reduce((sum, item) => sum + Number(item.valorTotal || 0), 0),
+          );
+          const paymentAmountFromSale = roundToCents(Number(sale.total || 0));
+          const paymentAmountForXml =
+            Math.abs(paymentAmountFromSale - nfceTotalFromItems) <= 0.01
+              ? nfceTotalFromItems
+              : paymentAmountFromSale;
+          if (paymentAmountForXml + 0.0001 < nfceTotalFromItems) {
+            return res.status(400).json({
+              error: `Total da venda menor que total dos itens para NFC-e (itens=${nfceTotalFromItems.toFixed(
+                2,
+              )}, venda=${paymentAmountFromSale.toFixed(2)}).`,
+            });
+          }
+
           const xml = buildNfceXml({
             key: nfceKeyUsed,
             cNF: nfceCnfUsed,
@@ -1547,20 +1576,10 @@ router.post(
                 cep: company.zipCode,
               },
             },
-            itens: resolvedItems.map((item) => ({
-              id: item.productId,
-              nome: item.productName,
-              ean: item.ean,
-              ncm: item.ncm,
-              cfop: null,
-              unidade: "UN",
-              quantidade: Number(item.quantity),
-              valorUnitario: Number(item.unitPrice),
-              valorTotal: Number(item.subtotal),
-            })),
+            itens: nfceItems,
             pagamento: {
               codigo: paymentCode,
-              valor: Number(sale.total),
+              valor: paymentAmountForXml,
               brand: sale.paymentBrand || null,
               authorizationCode: sale.paymentAuthorization || null,
               nsu: sale.paymentNsu || null,
