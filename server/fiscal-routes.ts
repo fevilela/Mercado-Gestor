@@ -1523,6 +1523,35 @@ router.post(
             customer = null;
             customerCpfCnpj = "";
           }
+          const nfceItems = resolvedItems.map((item) => ({
+            id: item.productId,
+            nome: item.productName,
+            ean: item.ean,
+            ncm: item.ncm,
+            cfop: null,
+            unidade: "UN",
+            quantidade: Number(item.quantity),
+            valorUnitario: Number(item.unitPrice),
+            valorTotal: Number(item.subtotal),
+          }));
+          const roundToCents = (value: number) =>
+            Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+          const nfceTotalFromItems = roundToCents(
+            nfceItems.reduce((sum, item) => sum + Number(item.valorTotal || 0), 0),
+          );
+          const paymentAmountFromSale = roundToCents(Number(sale.total || 0));
+          const paymentAmountForXml =
+            Math.abs(paymentAmountFromSale - nfceTotalFromItems) <= 0.01
+              ? nfceTotalFromItems
+              : paymentAmountFromSale;
+          if (paymentAmountForXml + 0.0001 < nfceTotalFromItems) {
+            return res.status(400).json({
+              error: `Total da venda menor que total dos itens para NFC-e (itens=${nfceTotalFromItems.toFixed(
+                2,
+              )}, venda=${paymentAmountFromSale.toFixed(2)}).`,
+            });
+          }
+
           const xml = buildNfceXml({
             key: nfceKeyUsed,
             cNF: nfceCnfUsed,
@@ -1547,20 +1576,10 @@ router.post(
                 cep: company.zipCode,
               },
             },
-            itens: resolvedItems.map((item) => ({
-              id: item.productId,
-              nome: item.productName,
-              ean: item.ean,
-              ncm: item.ncm,
-              cfop: null,
-              unidade: "UN",
-              quantidade: Number(item.quantity),
-              valorUnitario: Number(item.unitPrice),
-              valorTotal: Number(item.subtotal),
-            })),
+            itens: nfceItems,
             pagamento: {
               codigo: paymentCode,
-              valor: Number(sale.total),
+              valor: paymentAmountForXml,
               brand: sale.paymentBrand || null,
               authorizationCode: sale.paymentAuthorization || null,
               nsu: sale.paymentNsu || null,
@@ -1909,6 +1928,69 @@ router.post(
     } catch (error) {
       return res.status(400).json({
         error: error instanceof Error ? error.message : "Erro ao resetar NFC-e",
+      });
+    }
+  },
+);
+
+router.post(
+  "/nfce/reconcile-total",
+  requireAuth,
+  requirePermission("fiscal:emit_nfce"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const saleId = Number(req.body.saleId);
+      if (!saleId) {
+        return res.status(400).json({ error: "Venda nao informada" });
+      }
+
+      const sale = await storage.getSale(saleId, companyId);
+      if (!sale) {
+        return res.status(404).json({ error: "Venda nao encontrada" });
+      }
+
+      const items = await storage.getSaleItems(saleId);
+      if (!items.length) {
+        return res.status(400).json({ error: "Venda sem itens" });
+      }
+
+      const roundToCents = (value: number) =>
+        Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+      const saleTotal = roundToCents(Number(sale.total || 0));
+      const itemsTotal = roundToCents(
+        items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0),
+      );
+      const diff = roundToCents(itemsTotal - saleTotal);
+
+      if (Math.abs(diff) > 0.01) {
+        return res.status(400).json({
+          error: `Diferenca maior que R$ 0,01 (itens=${itemsTotal.toFixed(
+            2,
+          )}, venda=${saleTotal.toFixed(2)}). Ajuste os itens da venda.`,
+        });
+      }
+
+      const updated = await storage.updateSaleTotal(
+        saleId,
+        companyId,
+        itemsTotal.toFixed(2),
+      );
+      return res.json({
+        success: true,
+        sale: updated,
+        message: `Total ajustado para R$ ${itemsTotal.toFixed(2)}.`,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao ajustar total da venda",
       });
     }
   },

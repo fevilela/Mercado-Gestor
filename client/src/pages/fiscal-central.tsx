@@ -678,6 +678,86 @@ export default function FiscalCentralPage() {
     },
   });
 
+  const reconcileNfceTotalMutation = useMutation({
+    mutationFn: async (sale: SaleRecord) => {
+      const res = await fetch("/api/fiscal/nfce/reconcile-total", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ saleId: sale.id }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "Falha ao ajustar total da NFC-e");
+      }
+      return payload;
+    },
+    onSuccess: (payload) => {
+      toast({
+        title: "Sucesso",
+        description: payload?.message || "Total ajustado com sucesso.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error ? error.message : "Falha ao ajustar total da NFC-e",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const reconcileNfceBatchMutation = useMutation({
+    mutationFn: async (saleIds: number[]) => {
+      const results = await Promise.all(
+        saleIds.map(async (saleId) => {
+          const res = await fetch("/api/fiscal/nfce/reconcile-total", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ saleId }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            return {
+              ok: false as const,
+              error: payload?.error || `Falha ao ajustar NFC-e ${saleId}`,
+            };
+          }
+          return { ok: true as const };
+        }),
+      );
+      const adjusted = results.filter((item) => item.ok).length;
+      const errors = results
+        .filter((item) => !item.ok)
+        .map((item) => ("error" in item ? item.error : "Falha desconhecida"));
+      return { adjusted, failed: errors.length, errors };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+      if (result.failed > 0) {
+        toast({
+          title: "Ajuste parcial",
+          description: `Ajustadas ${result.adjusted}. ${result.failed} falharam: ${result.errors[0]}`,
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Sucesso",
+        description: `${result.adjusted} NFC-e ajustadas.`,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description:
+          error instanceof Error ? error.message : "Falha ao ajustar NFC-e selecionadas",
+        variant: "destructive",
+      });
+    },
+  });
+
   const cancelNfeExtemporaneousMutation = useMutation({
     mutationFn: async (doc: NFeHistoryRecord) => {
       const res = await fetch("/api/fiscal/sefaz/cancel-extemporaneous", {
@@ -1726,6 +1806,25 @@ export default function FiscalCentralPage() {
                     Limpar filtros
                   </Button>
                   <Button
+                    variant="outline"
+                    onClick={() =>
+                      reconcileNfceBatchMutation.mutate(
+                        selectableNfce
+                          .filter((sale) => selectedNfceIds.includes(sale.id))
+                          .map((sale) => sale.id),
+                      )
+                    }
+                    disabled={
+                      reconcileNfceBatchMutation.isPending ||
+                      selectedNfceIds.length === 0
+                    }
+                  >
+                    {reconcileNfceBatchMutation.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Ajustar 0,01 ({selectedNfceIds.length})
+                  </Button>
+                  <Button
                     onClick={() =>
                       sendNfceMutation.mutate(
                         selectableNfce
@@ -1860,6 +1959,12 @@ export default function FiscalCentralPage() {
                                       disabled={!rowCanReset || resetNfceMutation.isPending}
                                     >
                                       Resetar NFC-e
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => reconcileNfceTotalMutation.mutate(sale)}
+                                      disabled={reconcileNfceTotalMutation.isPending}
+                                    >
+                                      Ajustar 0,01
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() => openNfcePdf(sale.id)}

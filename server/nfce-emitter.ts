@@ -363,10 +363,13 @@ export const buildNfceXml = (params: {
   );
   const totalTributos = 0;
   const totalNF = totalProdutos;
-  const vTrocoValue =
-    params.pagamento.valor < totalNF
-      ? Math.max(0, totalNF - params.pagamento.valor)
-      : 0;
+  const paymentValue = Math.max(0, Number(params.pagamento.valor || 0));
+  if (paymentValue + 0.0001 < totalNF) {
+    throw new Error(
+      `Valor do pagamento (${formatNumber(paymentValue)}) menor que o total da NFC-e (${formatNumber(totalNF)}).`,
+    );
+  }
+  const vTrocoValue = paymentValue > totalNF ? paymentValue - totalNF : 0;
   const crt = params.crt || "1";
   const isSimples = crt === "1" || crt === "2";
   const emitIe = params.emitente.ie?.trim() ? params.emitente.ie : "ISENTO";
@@ -483,7 +486,7 @@ export const buildNfceXml = (params: {
   )}</vTotTrib></ICMSTot></total><transp><modFrete>9</modFrete></transp><pag><detPag><tPag>${
     params.pagamento.codigo
   }</tPag>${xPagXml}<vPag>${formatNumber(
-    params.pagamento.valor,
+    paymentValue,
   )}</vPag>${cardXml}</detPag>${
     vTrocoValue > 0 ? `<vTroco>${formatNumber(vTrocoValue)}</vTroco>` : ""
   }</pag>${respTecXml}</infNFe></NFe>`;
