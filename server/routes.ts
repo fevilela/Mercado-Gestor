@@ -2193,20 +2193,6 @@ export async function registerRoutes(
         const isNfceAuto =
           Boolean(settings?.nfceEnabled) && isFiscalConfigured;
 
-        const saleData = {
-          ...sale,
-          companyId,
-          userId,
-          paymentStatus: payment.status,
-          paymentNsu: payment.nsu || null,
-          paymentBrand: normalizePaymentText(payment.brand),
-          paymentProvider: normalizePaymentText(payment.provider),
-          paymentAuthorization: payment.authorizationCode || null,
-          paymentReference: payment.providerReference || null,
-          nfceStatus: isNfceAuto ? "Pendente" : "Pendente Fiscal",
-          status: isFiscalConfigured ? "Concluído" : "Aguardando Emissão",
-        };
-
         const normalizedItems = [];
 
         for (const item of items) {
@@ -2250,6 +2236,37 @@ export async function registerRoutes(
             -toNumber(item.stockQuantity, 0)
           );
         }
+
+        const roundToCents = (value: number) =>
+          Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+        const saleTotal = roundToCents(toNumber(sale.total, 0));
+        const itemsTotal = roundToCents(
+          normalizedItems.reduce(
+            (sum, item) => sum + toNumber(item.subtotal, 0),
+            0
+          )
+        );
+        const totalDiff = roundToCents(itemsTotal - saleTotal);
+        if (Math.abs(totalDiff) > 0.01) {
+          return res.status(400).json({
+            error: `Total da venda divergente dos itens (itens=${itemsTotal.toFixed(2)}, venda=${saleTotal.toFixed(2)}).`,
+          });
+        }
+
+        const saleData = {
+          ...sale,
+          total: itemsTotal.toFixed(2),
+          companyId,
+          userId,
+          paymentStatus: payment.status,
+          paymentNsu: payment.nsu || null,
+          paymentBrand: normalizePaymentText(payment.brand),
+          paymentProvider: normalizePaymentText(payment.provider),
+          paymentAuthorization: payment.authorizationCode || null,
+          paymentReference: payment.providerReference || null,
+          nfceStatus: isNfceAuto ? "Pendente" : "Pendente Fiscal",
+          status: isFiscalConfigured ? "Concluído" : "Aguardando Emissão",
+        };
 
         const newSale = await storage.createSale(saleData, normalizedItems as any);
         res.status(201).json({
