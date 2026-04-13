@@ -1934,6 +1934,69 @@ router.post(
 );
 
 router.post(
+  "/nfce/reconcile-total",
+  requireAuth,
+  requirePermission("fiscal:emit_nfce"),
+  async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId) {
+        return res.status(401).json({ error: "Nao autenticado" });
+      }
+
+      const saleId = Number(req.body.saleId);
+      if (!saleId) {
+        return res.status(400).json({ error: "Venda nao informada" });
+      }
+
+      const sale = await storage.getSale(saleId, companyId);
+      if (!sale) {
+        return res.status(404).json({ error: "Venda nao encontrada" });
+      }
+
+      const items = await storage.getSaleItems(saleId);
+      if (!items.length) {
+        return res.status(400).json({ error: "Venda sem itens" });
+      }
+
+      const roundToCents = (value: number) =>
+        Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+      const saleTotal = roundToCents(Number(sale.total || 0));
+      const itemsTotal = roundToCents(
+        items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0),
+      );
+      const diff = roundToCents(itemsTotal - saleTotal);
+
+      if (Math.abs(diff) > 0.01) {
+        return res.status(400).json({
+          error: `Diferenca maior que R$ 0,01 (itens=${itemsTotal.toFixed(
+            2,
+          )}, venda=${saleTotal.toFixed(2)}). Ajuste os itens da venda.`,
+        });
+      }
+
+      const updated = await storage.updateSaleTotal(
+        saleId,
+        companyId,
+        itemsTotal.toFixed(2),
+      );
+      return res.json({
+        success: true,
+        sale: updated,
+        message: `Total ajustado para R$ ${itemsTotal.toFixed(2)}.`,
+      });
+    } catch (error) {
+      return res.status(400).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erro ao ajustar total da venda",
+      });
+    }
+  },
+);
+
+router.post(
   "/nfce/cancel",
   requireAuth,
   requirePermission("fiscal:cancel_nfce"),

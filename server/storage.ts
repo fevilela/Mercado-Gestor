@@ -489,6 +489,15 @@ export const storage = {
     return sale;
   },
 
+  async updateSaleTotal(id: number, companyId: number, total: string) {
+    const [sale] = await db
+      .update(sales)
+      .set({ total })
+      .where(and(eq(sales.id, id), eq(sales.companyId, companyId)))
+      .returning();
+    return sale;
+  },
+
   async resetSaleNfce(id: number, companyId: number) {
     const [sale] = await db
       .update(sales)
