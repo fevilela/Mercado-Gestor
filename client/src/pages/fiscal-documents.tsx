@@ -983,6 +983,50 @@ export default function FiscalDocuments() {
     },
   });
 
+  const reconcileNfceBatchMutation = useMutation<
+    { adjusted: number; failed: number; errors: string[] },
+    Error,
+    number[]
+  >({
+    mutationFn: async (saleIds) => {
+      const results = await Promise.all(
+        saleIds.map(async (saleId) => {
+          const res = await fetch("/api/fiscal/nfce/reconcile-total", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ saleId }),
+          });
+          if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            return {
+              ok: false as const,
+              error: error.error || `Falha ao ajustar venda ${saleId}`,
+            };
+          }
+          return { ok: true as const };
+        }),
+      );
+      const adjusted = results.filter((item) => item.ok).length;
+      const errors = results
+        .filter((item) => !item.ok)
+        .map((item) => ("error" in item ? item.error : "Falha desconhecida"));
+      return { adjusted, failed: errors.length, errors };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+      if (data.failed > 0) {
+        toast.error(
+          `Ajustadas ${data.adjusted}. ${data.failed} falharam: ${data.errors[0]}`,
+        );
+      } else {
+        toast.success(`Totais ajustados: ${data.adjusted}`);
+      }
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
   const inutilizeNfceMutation = useMutation<any, Error, typeof inutilizeForm>({
     mutationFn: async (payload) => {
       const res = await fetch("/api/fiscal/nfce/inutilize", {
@@ -2308,6 +2352,14 @@ export default function FiscalDocuments() {
     sendNfceMutation.mutate(selectedNfceIds);
   };
 
+  const handleBatchReconcile = () => {
+    if (selectedNfceIds.length === 0) {
+      toast.error("Selecione NFC-e para ajustar");
+      return;
+    }
+    reconcileNfceBatchMutation.mutate(selectedNfceIds);
+  };
+
   const updateNfeOps = (field: keyof typeof nfeOps, value: string) => {
     setNfeOps((prev) => ({ ...prev, [field]: value }));
   };
@@ -3516,6 +3568,17 @@ export default function FiscalDocuments() {
                 </Alert>
 
                 <div className="flex items-center gap-2">
+                  <Button
+                    onClick={handleBatchReconcile}
+                    variant="outline"
+                    disabled={reconcileNfceBatchMutation.isPending}
+                    data-testid="button-reconcile-nfce-batch"
+                  >
+                    {reconcileNfceBatchMutation.isPending && (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    )}
+                    Ajustar 0,01 selecionadas
+                  </Button>
                   <Button
                     onClick={handleBatchSend}
                     disabled={sendNfceMutation.isPending}
