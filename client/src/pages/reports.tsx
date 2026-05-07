@@ -949,7 +949,7 @@ export default function Reports() {
           const sale = salesById.get(item.saleId);
           const saleDate = sale?.createdAt || "";
           const current = acc[key] || { qty: 0, revenue: 0, lastAt: "" };
-          current.qty += item.quantity;
+          current.qty += toNumber(item.quantity);
           current.revenue += toNumber(item.subtotal);
           if (!current.lastAt || saleDate > current.lastAt) {
             current.lastAt = saleDate;
