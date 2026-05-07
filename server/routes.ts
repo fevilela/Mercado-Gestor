@@ -961,6 +961,14 @@ export async function registerRoutes(
         const result = await db.transaction(async (tx) => {
           let updatedProduct;
           if (product) {
+            const [existing] = await tx
+              .select()
+              .from(products)
+              .where(and(eq(products.id, id), eq(products.companyId, companyId)));
+            if (!existing) {
+              throw new Error("Product not found");
+            }
+
             const [updated] = await tx
               .update(products)
               .set({ ...product, updatedAt: new Date() })
@@ -971,6 +979,27 @@ export async function registerRoutes(
             if (!updated) {
               throw new Error("Product not found");
             }
+
+            if (product.stock !== undefined) {
+              const oldStock = Number(existing.stock ?? 0);
+              const newStock = Number(product.stock ?? 0);
+              const delta = newStock - oldStock;
+              if (Math.abs(delta) >= 0.001) {
+                await tx.insert(inventoryMovements).values({
+                  productId: id,
+                  companyId,
+                  unitId: null,
+                  type: delta > 0 ? "entrada" : "saida",
+                  quantity: delta.toFixed(3),
+                  reason: "correcao_cadastro",
+                  referenceId: id,
+                  referenceType: "product_edit",
+                  notes: "Estoque corrigido via edição do cadastro",
+                  variationId: null,
+                });
+              }
+            }
+
             updatedProduct = updated;
           } else {
             const [existing] = await tx
@@ -2269,6 +2298,22 @@ export async function registerRoutes(
         };
 
         const newSale = await storage.createSale(saleData, normalizedItems as any);
+
+        for (const item of normalizedItems) {
+          await db.insert(inventoryMovements).values({
+            productId: item.productId,
+            companyId,
+            unitId: null,
+            type: "saida",
+            quantity: (-toNumber(item.stockQuantity, 0)).toFixed(3),
+            reason: "venda",
+            referenceId: newSale.id,
+            referenceType: "sale",
+            notes: null,
+            variationId: null,
+          });
+        }
+
         res.status(201).json({
           sale: newSale,
           fiscalConfigured: isFiscalConfigured,
@@ -3180,6 +3225,24 @@ export async function registerRoutes(
       }
     }
   );
+
+  app.get("/api/inventory/movements", requireAuth, async (req, res) => {
+    try {
+      const companyId = getCompanyId(req);
+      if (!companyId)
+        return res.status(401).json({ error: "Não autenticado" });
+
+      const fromStr = typeof req.query.from === "string" ? req.query.from : null;
+      const toStr = typeof req.query.to === "string" ? req.query.to : null;
+      const from = fromStr ? new Date(`${fromStr}T00:00:00`) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const to = toStr ? new Date(`${toStr}T23:59:59`) : new Date();
+
+      const movements = await storage.getInventoryMovementsInRange(companyId, from, to);
+      res.json(movements);
+    } catch (error) {
+      res.status(500).json({ error: "Falha ao buscar movimentações" });
+    }
+  });
 
   const importXmlSchema = z.object({
     xmlContent: z.string().min(1),

@@ -216,6 +216,18 @@ const REPORT_ICON_STYLE_BY_GROUP: Record<string, string> = {
   "Relatorios de Auditoria": "bg-slate-100 text-slate-600",
 };
 
+interface InventoryMovement {
+  id: number;
+  productId: number;
+  type: string;
+  quantity: string;
+  reason: string | null;
+  referenceId: number | null;
+  referenceType: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
 interface ReportBuildContext {
   filteredSales: Sale[];
   filteredPayables: Payable[];
@@ -228,7 +240,10 @@ interface ReportBuildContext {
   nfeHistory: NfeHistoryRecord[];
   accessoryAudit: AccessoryAuditRecord[];
   allSales: Sale[];
+  dateFrom: string;
+  dateTo: string;
   loadSaleItemsForSales: (sales: Sale[]) => Promise<SaleItem[]>;
+  loadInventoryMovements: () => Promise<InventoryMovement[]>;
 }
 type DetailLevel = "resumo" | "completo";
 
@@ -454,6 +469,13 @@ export default function Reports() {
     );
 
     return targetSales.flatMap((sale) => saleItemsCacheRef.current.get(sale.id) || []);
+  };
+
+  const loadInventoryMovements = async (): Promise<InventoryMovement[]> => {
+    return fetchJsonOrFallback<InventoryMovement[]>(
+      `/api/inventory/movements?from=${dateFrom}&to=${dateTo}`,
+      []
+    );
   };
 
   const buildReport = async (reportId: string, context: ReportBuildContext): Promise<ReportOutput> => {
@@ -940,64 +962,94 @@ export default function Reports() {
         };
       }
       case "estoque_movimentacao": {
-        const fromSalesItems = await context.loadSaleItemsForSales(context.filteredSales);
-        const salesById = new Map(context.filteredSales.map((sale) => [sale.id, sale]));
-        const grouped = fromSalesItems.reduce<
-          Record<string, { qty: number; revenue: number; lastAt: string }>
-        >((acc, item) => {
-          const key = item.productName || `Produto ${item.productId}`;
-          const sale = salesById.get(item.saleId);
-          const saleDate = sale?.createdAt || "";
-          const current = acc[key] || { qty: 0, revenue: 0, lastAt: "" };
-          current.qty += toNumber(item.quantity);
-          current.revenue += toNumber(item.subtotal);
-          if (!current.lastAt || saleDate > current.lastAt) {
-            current.lastAt = saleDate;
-          }
-          acc[key] = current;
-          return acc;
-        }, {});
+        const [movements, saleItemsRaw] = await Promise.all([
+          context.loadInventoryMovements(),
+          context.loadSaleItemsForSales(context.filteredSales),
+        ]);
 
-        const rows = Object.entries(grouped)
-          .sort((a, b) => b[1].qty - a[1].qty)
-          .map(([name, info]) => ({
-            Produto: name,
-            TipoMovimento: "Saida (venda)",
-            Quantidade: info.qty,
-            ValorMovimentado: money(info.revenue),
-            UltimaMovimentacao: fmtDate(info.lastAt),
-            Origem: "Venda PDV/caixa",
+        const productNameById = new Map(context.products.map((p) => [p.id, p.name]));
+        const salesById = new Map(context.filteredSales.map((s) => [s.id, s]));
+
+        const labelType = (type: string, reason: string | null, refType: string | null): string => {
+          if (refType === "sale") return "Saída PDV";
+          if (refType === "recipe_production") return "Saída (produção)";
+          if (reason === "correcao_cadastro") return type === "entrada" ? "Entrada (correção cadastro)" : "Saída (correção cadastro)";
+          if (type === "entrada") return "Entrada";
+          if (type === "saida") return "Saída Manual";
+          if (type === "ajuste") return "Ajuste";
+          if (type === "perda") return "Perda";
+          return type;
+        };
+
+        type MovRow = { date: string; product: string; typeLabel: string; qty: number; count: number };
+        const grouped: Record<string, MovRow> = {};
+
+        const saleIdsCoveredByMovements = new Set(
+          movements
+            .filter((m) => m.referenceType === "sale" && m.referenceId != null)
+            .map((m) => m.referenceId as number)
+        );
+
+        for (const m of movements) {
+          const day = m.createdAt ? m.createdAt.slice(0, 10) : "?";
+          const productName = productNameById.get(m.productId) || `Produto ${m.productId}`;
+          const typeLabel = labelType(m.type, m.reason, m.referenceType);
+          const key = `${day}||${productName}||${typeLabel}`;
+          const existing = grouped[key] || { date: day, product: productName, typeLabel, qty: 0, count: 0 };
+          existing.qty += toNumber(m.quantity);
+          existing.count += 1;
+          grouped[key] = existing;
+        }
+
+        for (const item of saleItemsRaw) {
+          if (saleIdsCoveredByMovements.has(item.saleId)) continue;
+          const sale = salesById.get(item.saleId);
+          const day = sale?.createdAt ? sale.createdAt.slice(0, 10) : "?";
+          const productName = item.productName || `Produto ${item.productId}`;
+          const typeLabel = "Saída PDV";
+          const key = `${day}||${productName}||${typeLabel}`;
+          const existing = grouped[key] || { date: day, product: productName, typeLabel, qty: 0, count: 0 };
+          existing.qty -= toNumber(item.quantity);
+          existing.count += 1;
+          grouped[key] = existing;
+        }
+
+        const rows = Object.values(grouped)
+          .sort((a, b) => b.date.localeCompare(a.date) || a.product.localeCompare(b.product))
+          .map((r) => ({
+            Data: r.date,
+            Produto: r.product,
+            TipoMovimento: r.typeLabel,
+            Quantidade: r.qty,
+            Registros: r.count,
           }));
+
         if (detailLevel === "resumo") {
-          const totalQty = rows.reduce((acc, row) => acc + toNumber(row.Quantidade), 0);
+          const byType: Record<string, number> = {};
+          for (const r of rows) {
+            const t = String(r.TipoMovimento);
+            byType[t] = (byType[t] || 0) + toNumber(r.Quantidade);
+          }
           return {
             id: reportId,
             title: "Movimentacao de estoque",
             group: "Relatorios de Estoque",
-            description: "Resumo de saídas no período",
-            columns: ["Indicador", "Valor"],
-            rows: [
-              { Indicador: "Produtos com movimentacao", Valor: rows.length },
-              { Indicador: "Quantidade total movimentada", Valor: totalQty },
-            ],
-            note: "Entradas/ajustes/perdas exigem ajuste de estoque para rastreio completo.",
+            description: "Resumo de movimentações no período",
+            columns: ["TipoMovimento", "QuantidadeTotal"],
+            rows: Object.entries(byType).map(([tipo, qty]) => ({
+              TipoMovimento: tipo,
+              QuantidadeTotal: qty,
+            })),
           };
         }
+
         return {
           id: reportId,
           title: "Movimentacao de estoque",
           group: "Relatorios de Estoque",
-          description: "Detalhamento por produto das movimentacoes registradas no periodo",
-          columns: [
-            "Produto",
-            "TipoMovimento",
-            "Quantidade",
-            "ValorMovimentado",
-            "UltimaMovimentacao",
-            "Origem",
-          ],
+          description: "Movimentações por dia, produto e tipo",
+          columns: ["Data", "Produto", "TipoMovimento", "Quantidade", "Registros"],
           rows,
-          note: "Entradas/ajustes/perdas exigem uso do ajuste de estoque para rastreio completo.",
         };
       }
       case "estoque_minimo": {
@@ -1437,7 +1489,10 @@ export default function Reports() {
     nfeHistory,
     accessoryAudit,
     allSales: sales,
+    dateFrom,
+    dateTo,
     loadSaleItemsForSales,
+    loadInventoryMovements,
   });
 
   const generateReport = async (reportId: string): Promise<ReportOutput> => {
