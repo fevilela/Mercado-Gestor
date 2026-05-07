@@ -2228,6 +2228,8 @@ router.post(
         reason,
       });
 
+      await storage.markSalesInutilizedByNfceRange(companyId, serie, startNumber, endNumber);
+
       res.json({
         success: true,
         record,

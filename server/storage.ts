@@ -489,6 +489,29 @@ export const storage = {
     return sale;
   },
 
+  async markSalesInutilizedByNfceRange(
+    companyId: number,
+    serie: string,
+    startNumber: number,
+    endNumber: number
+  ) {
+    // NF-Ce key layout (0-indexed): cUF(2) AAMM(4) CNPJ(14) mod(2) serie(3) nNF(9) ...
+    // SQL SUBSTRING is 1-indexed: serie at pos 23 len 3, nNF at pos 26 len 9
+    const seriePadded = serie.padStart(3, "0");
+    await db
+      .update(sales)
+      .set({ nfceStatus: "Inutilizada" })
+      .where(
+        and(
+          eq(sales.companyId, companyId),
+          sql`nfce_key IS NOT NULL`,
+          sql`LENGTH(nfce_key) = 44`,
+          sql`SUBSTRING(nfce_key, 23, 3) = ${seriePadded}`,
+          sql`CAST(SUBSTRING(nfce_key, 26, 9) AS INTEGER) BETWEEN ${startNumber} AND ${endNumber}`
+        )
+      );
+  },
+
   async updateSaleTotal(id: number, companyId: number, total: string) {
     const [sale] = await db
       .update(sales)
