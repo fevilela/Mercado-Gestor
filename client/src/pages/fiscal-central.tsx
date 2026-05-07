@@ -870,6 +870,16 @@ export default function FiscalCentralPage() {
     },
   });
 
+  const interpretInutilizacaoError = (message: string): string => {
+    if (/\b241\b/.test(message))
+      return "Um dos números da faixa já foi utilizado em uma NF-Ce autorizada pelo SEFAZ. Não é possível inutilizar. Para invalidar essa nota, use a opção de Cancelamento (disponível no menu da linha).";
+    if (/\b242\b/.test(message))
+      return "A numeração informada está fora da faixa permitida pela SEFAZ.";
+    if (/\b243\b/.test(message))
+      return "A faixa de numeração já foi inutilizada anteriormente.";
+    return message;
+  };
+
   const inutilizeNfeMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/fiscal/sefaz/inutilize", {
@@ -908,12 +918,10 @@ export default function FiscalCentralPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/fiscal/sefaz/inutilize/history"] });
     },
     onError: (error) => {
+      const raw = error instanceof Error ? error.message : "Falha ao inutilizar numeração";
       toast({
-        title: "Erro",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Falha ao inutilizar numeração",
+        title: "Erro na inutilização",
+        description: interpretInutilizacaoError(raw),
         variant: "destructive",
       });
     },
@@ -994,12 +1002,10 @@ export default function FiscalCentralPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/fiscal/sefaz/inutilize/history"] });
     },
     onError: (error) => {
+      const raw = error instanceof Error ? error.message : "Falha ao inutilizar numeracao";
       toast({
-        title: "Erro",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Falha ao inutilizar numeracao",
+        title: "Erro na inutilização",
+        description: interpretInutilizacaoError(raw),
         variant: "destructive",
       });
     },
