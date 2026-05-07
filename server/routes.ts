@@ -3237,7 +3237,7 @@ export async function registerRoutes(
       const from = fromStr ? new Date(`${fromStr}T00:00:00`) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
       const to = toStr ? new Date(`${toStr}T23:59:59`) : new Date();
 
-      const movements = await storage.getInventoryMovementsInRange(companyId, from, to);
+      const movements = await storage.getInventoryMovementsWithBalance(companyId, from, to);
       res.json(movements);
     } catch (error) {
       res.status(500).json({ error: "Falha ao buscar movimentações" });

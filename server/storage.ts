@@ -835,18 +835,66 @@ export const storage = {
       .orderBy(desc(inventoryMovements.createdAt));
   },
 
-  async getInventoryMovementsInRange(companyId: number, from: Date, to: Date) {
-    return await db
-      .select()
-      .from(inventoryMovements)
-      .where(
-        and(
-          eq(inventoryMovements.companyId, companyId),
-          gte(inventoryMovements.createdAt, from),
-          lte(inventoryMovements.createdAt, to)
-        )
+  async getInventoryMovementsWithBalance(companyId: number, from: Date, to: Date) {
+    const rows = await db.execute(sql`
+      WITH all_movements AS (
+        SELECT
+          im.id,
+          im.product_id,
+          im.type,
+          im.quantity::numeric            AS quantity,
+          im.reason,
+          im.reference_id,
+          im.reference_type,
+          im.notes,
+          im.created_at,
+          SUM(im.quantity::numeric) OVER (
+            PARTITION BY im.product_id
+            ORDER BY im.created_at ASC, im.id ASC
+            ROWS UNBOUNDED PRECEDING
+          ) AS running_total
+        FROM inventory_movements im
+        WHERE im.company_id = ${companyId}
+      ),
+      product_totals AS (
+        SELECT product_id, SUM(quantity::numeric) AS total_qty
+        FROM inventory_movements
+        WHERE company_id = ${companyId}
+        GROUP BY product_id
       )
-      .orderBy(desc(inventoryMovements.createdAt));
+      SELECT
+        am.id,
+        am.product_id,
+        am.type,
+        am.quantity,
+        am.reason,
+        am.reference_id,
+        am.reference_type,
+        am.notes,
+        am.created_at,
+        p.name                                                             AS product_name,
+        (p.stock::numeric - COALESCE(pt.total_qty, 0) + am.running_total - am.quantity) AS stock_before,
+        (p.stock::numeric - COALESCE(pt.total_qty, 0) + am.running_total)               AS stock_after
+      FROM all_movements am
+      JOIN products p ON p.id = am.product_id AND p.company_id = ${companyId}
+      LEFT JOIN product_totals pt ON pt.product_id = am.product_id
+      WHERE am.created_at >= ${from} AND am.created_at <= ${to}
+      ORDER BY am.created_at DESC, am.id DESC
+    `);
+    return rows.rows as Array<{
+      id: number;
+      product_id: number;
+      product_name: string;
+      type: string;
+      quantity: string;
+      reason: string | null;
+      reference_id: number | null;
+      reference_type: string | null;
+      notes: string | null;
+      created_at: Date;
+      stock_before: string;
+      stock_after: string;
+    }>;
   },
 
   async createInventoryMovement(data: InsertInventoryMovement) {

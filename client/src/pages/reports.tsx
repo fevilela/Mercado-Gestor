@@ -218,14 +218,17 @@ const REPORT_ICON_STYLE_BY_GROUP: Record<string, string> = {
 
 interface InventoryMovement {
   id: number;
-  productId: number;
+  product_id: number;
+  product_name: string;
   type: string;
   quantity: string;
   reason: string | null;
-  referenceId: number | null;
-  referenceType: string | null;
+  reference_id: number | null;
+  reference_type: string | null;
   notes: string | null;
-  createdAt: string;
+  created_at: string;
+  stock_before: string;
+  stock_after: string;
 }
 
 interface ReportBuildContext {
@@ -967,7 +970,6 @@ export default function Reports() {
           context.loadSaleItemsForSales(context.filteredSales),
         ]);
 
-        const productNameById = new Map(context.products.map((p) => [p.id, p.name]));
         const salesById = new Map(context.filteredSales.map((s) => [s.id, s]));
 
         const labelType = (type: string, reason: string | null, refType: string | null): string => {
@@ -981,54 +983,49 @@ export default function Reports() {
           return type;
         };
 
-        type MovRow = { date: string; product: string; typeLabel: string; qty: number; count: number };
-        const grouped: Record<string, MovRow> = {};
+        const fmt3 = (v: string | number) => {
+          const n = toNumber(v);
+          return n % 1 === 0 ? String(n) : n.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+        };
 
         const saleIdsCoveredByMovements = new Set(
           movements
-            .filter((m) => m.referenceType === "sale" && m.referenceId != null)
-            .map((m) => m.referenceId as number)
+            .filter((m) => m.reference_type === "sale" && m.reference_id != null)
+            .map((m) => m.reference_id as number)
         );
 
-        for (const m of movements) {
-          const day = m.createdAt ? m.createdAt.slice(0, 10) : "?";
-          const productName = productNameById.get(m.productId) || `Produto ${m.productId}`;
-          const typeLabel = labelType(m.type, m.reason, m.referenceType);
-          const key = `${day}||${productName}||${typeLabel}`;
-          const existing = grouped[key] || { date: day, product: productName, typeLabel, qty: 0, count: 0 };
-          existing.qty += toNumber(m.quantity);
-          existing.count += 1;
-          grouped[key] = existing;
-        }
+        const movementRows = movements.map((m) => ({
+          Data: m.created_at ? String(m.created_at).slice(0, 10) : "?",
+          Produto: m.product_name,
+          TipoMovimento: labelType(m.type, m.reason, m.reference_type),
+          EstoqueAntes: fmt3(m.stock_before),
+          Movimentado: fmt3(m.quantity),
+          EstoqueDepois: fmt3(m.stock_after),
+        }));
 
-        for (const item of saleItemsRaw) {
-          if (saleIdsCoveredByMovements.has(item.saleId)) continue;
-          const sale = salesById.get(item.saleId);
-          const day = sale?.createdAt ? sale.createdAt.slice(0, 10) : "?";
-          const productName = item.productName || `Produto ${item.productId}`;
-          const typeLabel = "Saída PDV";
-          const key = `${day}||${productName}||${typeLabel}`;
-          const existing = grouped[key] || { date: day, product: productName, typeLabel, qty: 0, count: 0 };
-          existing.qty -= toNumber(item.quantity);
-          existing.count += 1;
-          grouped[key] = existing;
-        }
+        const historicRows = saleItemsRaw
+          .filter((item) => !saleIdsCoveredByMovements.has(item.saleId))
+          .map((item) => {
+            const sale = salesById.get(item.saleId);
+            return {
+              Data: sale?.createdAt ? sale.createdAt.slice(0, 10) : "?",
+              Produto: item.productName || `Produto ${item.productId}`,
+              TipoMovimento: "Saída PDV",
+              EstoqueAntes: "—",
+              Movimentado: fmt3(-toNumber(item.quantity)),
+              EstoqueDepois: "—",
+            };
+          });
 
-        const rows = Object.values(grouped)
-          .sort((a, b) => b.date.localeCompare(a.date) || a.product.localeCompare(b.product))
-          .map((r) => ({
-            Data: r.date,
-            Produto: r.product,
-            TipoMovimento: r.typeLabel,
-            Quantidade: r.qty,
-            Registros: r.count,
-          }));
+        const rows = [...movementRows, ...historicRows].sort(
+          (a, b) => b.Data.localeCompare(a.Data) || a.Produto.localeCompare(b.Produto)
+        );
 
         if (detailLevel === "resumo") {
           const byType: Record<string, number> = {};
           for (const r of rows) {
             const t = String(r.TipoMovimento);
-            byType[t] = (byType[t] || 0) + toNumber(r.Quantidade);
+            byType[t] = (byType[t] || 0) + toNumber(r.Movimentado);
           }
           return {
             id: reportId,
@@ -1047,8 +1044,8 @@ export default function Reports() {
           id: reportId,
           title: "Movimentacao de estoque",
           group: "Relatorios de Estoque",
-          description: "Movimentações por dia, produto e tipo",
-          columns: ["Data", "Produto", "TipoMovimento", "Quantidade", "Registros"],
+          description: "Movimentações por dia, produto e tipo com saldo antes/depois",
+          columns: ["Data", "Produto", "TipoMovimento", "EstoqueAntes", "Movimentado", "EstoqueDepois"],
           rows,
         };
       }
