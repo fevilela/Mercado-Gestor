@@ -1,4 +1,5 @@
 import { Router } from "express";
+import JSZip from "jszip";
 import {
   NFeSalesValidationSchema,
   NFCeValidationSchema,
@@ -5602,6 +5603,39 @@ router.post("/sefaz/receipt", async (req, res) => {
       error:
         error instanceof Error ? error.message : "Erro ao consultar recibo",
     });
+  }
+});
+
+router.get("/xml/export", requireAuth, async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    if (!companyId) return res.status(401).json({ error: "Não autenticado" });
+
+    const docType = typeof req.query.type === "string" ? req.query.type : "NFCe";
+    const fromStr = typeof req.query.from === "string" ? req.query.from : null;
+    const toStr = typeof req.query.to === "string" ? req.query.to : null;
+    const from = fromStr ? new Date(`${fromStr}T00:00:00`) : undefined;
+    const to = toStr ? new Date(`${toStr}T23:59:59`) : undefined;
+
+    const records = await storage.listFiscalXmlsByType(companyId, docType, from, to);
+
+    if (records.length === 0) {
+      return res.status(404).json({ error: "Nenhum XML encontrado para os filtros informados." });
+    }
+
+    const zip = new JSZip();
+    for (const record of records) {
+      const filename = `${docType}_${record.documentKey}.xml`;
+      zip.file(filename, record.xmlContent);
+    }
+
+    const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    const dateTag = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${docType}_xmls_${dateTag}.zip"`);
+    res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ error: "Falha ao gerar arquivo ZIP de XMLs." });
   }
 });
 

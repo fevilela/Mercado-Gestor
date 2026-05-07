@@ -708,6 +708,34 @@ export default function FiscalCentralPage() {
     },
   });
 
+  const [downloadingXml, setDownloadingXml] = useState<"NFCe" | "NFe" | null>(null);
+
+  const downloadXmlsZip = async (type: "NFCe" | "NFe", from: string, to: string) => {
+    setDownloadingXml(type);
+    try {
+      const params = new URLSearchParams({ type });
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      const res = await fetch(`/api/fiscal/xml/export?${params}`, { credentials: "include" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: "Erro ao baixar XMLs", description: err.error || "Tente novamente.", variant: "destructive" });
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${type}_xmls_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Erro ao baixar XMLs", description: "Falha na conexão.", variant: "destructive" });
+    } finally {
+      setDownloadingXml(null);
+    }
+  };
+
   const reconcileNfceBatchMutation = useMutation({
     mutationFn: async (saleIds: number[]) => {
       const results = await Promise.all(
@@ -1542,6 +1570,16 @@ export default function FiscalCentralPage() {
                     )}
                     Enviar selecionadas ({selectedNfeIds.length})
                   </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => downloadXmlsZip("NFe", nfeDateFrom, nfeDateTo)}
+                    disabled={downloadingXml === "NFe"}
+                  >
+                    {downloadingXml === "NFe" && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Baixar XMLs
+                  </Button>
                 </div>
 
                 {loadingNfe ? (
@@ -1823,6 +1861,16 @@ export default function FiscalCentralPage() {
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     )}
                     Ajustar 0,01 ({selectedNfceIds.length})
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => downloadXmlsZip("NFCe", nfceDateFrom, nfceDateTo)}
+                    disabled={downloadingXml === "NFCe"}
+                  >
+                    {downloadingXml === "NFCe" && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Baixar XMLs
                   </Button>
                   <Button
                     onClick={() =>

@@ -1636,6 +1636,20 @@ export const storage = {
     return record;
   },
 
+  async listFiscalXmlsByType(companyId: number, documentType: string, from?: Date, to?: Date) {
+    const conditions = [
+      eq(fiscalXmlStorage.companyId, companyId),
+      eq(fiscalXmlStorage.documentType, documentType),
+    ];
+    if (from) conditions.push(gte(fiscalXmlStorage.createdAt, from));
+    if (to) conditions.push(lte(fiscalXmlStorage.createdAt, to));
+    return await db
+      .select()
+      .from(fiscalXmlStorage)
+      .where(and(...conditions))
+      .orderBy(desc(fiscalXmlStorage.createdAt));
+  },
+
   async getFiscalXmlByKey(companyId: number, documentKey: string) {
     const [record] = await db
       .select()
