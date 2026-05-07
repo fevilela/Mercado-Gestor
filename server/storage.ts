@@ -837,52 +837,82 @@ export const storage = {
 
   async getInventoryMovementsWithBalance(companyId: number, from: Date, to: Date) {
     const rows = await db.execute(sql`
-      WITH all_movements AS (
+      WITH all_events AS (
         SELECT
-          im.id,
+          'movement'           AS source,
+          im.id                AS source_id,
           im.product_id,
           im.type,
-          im.quantity::numeric            AS quantity,
+          im.quantity::numeric AS quantity,
           im.reason,
           im.reference_id,
           im.reference_type,
           im.notes,
-          im.created_at,
-          SUM(im.quantity::numeric) OVER (
-            PARTITION BY im.product_id
-            ORDER BY im.created_at ASC, im.id ASC
-            ROWS UNBOUNDED PRECEDING
-          ) AS running_total
+          im.created_at
         FROM inventory_movements im
         WHERE im.company_id = ${companyId}
+
+        UNION ALL
+
+        SELECT
+          'sale_item'                                           AS source,
+          si.id                                                 AS source_id,
+          si.product_id,
+          'saida'                                               AS type,
+          -(COALESCE(si.stock_quantity, si.quantity)::numeric)  AS quantity,
+          'venda'                                               AS reason,
+          s.id                                                  AS reference_id,
+          'sale'                                                AS reference_type,
+          NULL::text                                            AS notes,
+          s.created_at
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id AND s.company_id = ${companyId}
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM inventory_movements im2
+          WHERE im2.reference_type = 'sale'
+            AND im2.reference_id = s.id
+            AND im2.product_id = si.product_id
+            AND im2.company_id = ${companyId}
+        )
+      ),
+      all_events_running AS (
+        SELECT *,
+          SUM(quantity) OVER (
+            PARTITION BY product_id
+            ORDER BY created_at ASC, source_id ASC
+            ROWS UNBOUNDED PRECEDING
+          ) AS running_total
+        FROM all_events
       ),
       product_totals AS (
-        SELECT product_id, SUM(quantity::numeric) AS total_qty
-        FROM inventory_movements
-        WHERE company_id = ${companyId}
+        SELECT product_id, SUM(quantity) AS total_qty
+        FROM all_events
         GROUP BY product_id
       )
       SELECT
-        am.id,
-        am.product_id,
-        am.type,
-        am.quantity,
-        am.reason,
-        am.reference_id,
-        am.reference_type,
-        am.notes,
-        am.created_at,
-        p.name                                                             AS product_name,
-        (p.stock::numeric - COALESCE(pt.total_qty, 0) + am.running_total - am.quantity) AS stock_before,
-        (p.stock::numeric - COALESCE(pt.total_qty, 0) + am.running_total)               AS stock_after
-      FROM all_movements am
-      JOIN products p ON p.id = am.product_id AND p.company_id = ${companyId}
-      LEFT JOIN product_totals pt ON pt.product_id = am.product_id
-      WHERE am.created_at >= ${from} AND am.created_at <= ${to}
-      ORDER BY am.created_at DESC, am.id DESC
+        ae.source,
+        ae.source_id,
+        ae.product_id,
+        ae.type,
+        ae.quantity,
+        ae.reason,
+        ae.reference_id,
+        ae.reference_type,
+        ae.notes,
+        ae.created_at,
+        p.name                                                                            AS product_name,
+        p.stock::numeric - COALESCE(pt.total_qty, 0) + ae.running_total - ae.quantity    AS stock_before,
+        p.stock::numeric - COALESCE(pt.total_qty, 0) + ae.running_total                  AS stock_after
+      FROM all_events_running ae
+      JOIN products p ON p.id = ae.product_id AND p.company_id = ${companyId}
+      LEFT JOIN product_totals pt ON pt.product_id = ae.product_id
+      WHERE ae.created_at >= ${from} AND ae.created_at <= ${to}
+      ORDER BY ae.created_at DESC, ae.source_id DESC
     `);
     return rows.rows as Array<{
-      id: number;
+      source: string;
+      source_id: number;
       product_id: number;
       product_name: string;
       type: string;

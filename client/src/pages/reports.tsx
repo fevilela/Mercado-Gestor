@@ -217,7 +217,8 @@ const REPORT_ICON_STYLE_BY_GROUP: Record<string, string> = {
 };
 
 interface InventoryMovement {
-  id: number;
+  source: string;
+  source_id: number;
   product_id: number;
   product_name: string;
   type: string;
@@ -965,12 +966,7 @@ export default function Reports() {
         };
       }
       case "estoque_movimentacao": {
-        const [movements, saleItemsRaw] = await Promise.all([
-          context.loadInventoryMovements(),
-          context.loadSaleItemsForSales(context.filteredSales),
-        ]);
-
-        const salesById = new Map(context.filteredSales.map((s) => [s.id, s]));
+        const movements = await context.loadInventoryMovements();
 
         const labelType = (type: string, reason: string | null, refType: string | null): string => {
           if (refType === "sale") return "Saída PDV";
@@ -985,41 +981,17 @@ export default function Reports() {
 
         const fmt3 = (v: string | number) => {
           const n = toNumber(v);
-          return n % 1 === 0 ? String(n) : n.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+          return n.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
         };
 
-        const saleIdsCoveredByMovements = new Set(
-          movements
-            .filter((m) => m.reference_type === "sale" && m.reference_id != null)
-            .map((m) => m.reference_id as number)
-        );
-
-        const movementRows = movements.map((m) => ({
+        const rows = movements.map((m) => ({
           Data: m.created_at ? String(m.created_at).slice(0, 10) : "?",
           Produto: m.product_name,
           TipoMovimento: labelType(m.type, m.reason, m.reference_type),
           EstoqueAntes: fmt3(m.stock_before),
-          Movimentado: fmt3(m.quantity),
+          Movimentado: fmt3(toNumber(m.quantity)),
           EstoqueDepois: fmt3(m.stock_after),
         }));
-
-        const historicRows = saleItemsRaw
-          .filter((item) => !saleIdsCoveredByMovements.has(item.saleId))
-          .map((item) => {
-            const sale = salesById.get(item.saleId);
-            return {
-              Data: sale?.createdAt ? sale.createdAt.slice(0, 10) : "?",
-              Produto: item.productName || `Produto ${item.productId}`,
-              TipoMovimento: "Saída PDV",
-              EstoqueAntes: "—",
-              Movimentado: fmt3(-toNumber(item.quantity)),
-              EstoqueDepois: "—",
-            };
-          });
-
-        const rows = [...movementRows, ...historicRows].sort(
-          (a, b) => b.Data.localeCompare(a.Data) || a.Produto.localeCompare(b.Produto)
-        );
 
         if (detailLevel === "resumo") {
           const byType: Record<string, number> = {};
