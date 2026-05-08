@@ -1631,7 +1631,7 @@ export default function Reports() {
   const visibleFilterColumns = useMemo(() => {
     if (!rawReport) return [];
     if (rawReport.id === "fiscal_vendas_periodo") {
-      return rawReport.columns.filter((column) => column.toLowerCase() !== "valor");
+      return rawReport.columns.filter((column) => !["valor", "datahora"].includes(column.toLowerCase()));
     }
     return rawReport.columns;
   }, [rawReport]);
