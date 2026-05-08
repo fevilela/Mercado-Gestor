@@ -1810,6 +1810,22 @@ export default function Reports() {
                   <CardDescription>{rawReport?.description}</CardDescription>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-muted-foreground whitespace-nowrap">De</label>
+                    <Input
+                      type="date"
+                      className="h-9 w-[140px]"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                    />
+                    <label className="text-xs text-muted-foreground whitespace-nowrap">Até</label>
+                    <Input
+                      type="date"
+                      className="h-9 w-[140px]"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                    />
+                  </div>
                   <div className="min-w-[180px]">
                     <Select
                       value={detailLevel}
@@ -1824,11 +1840,18 @@ export default function Reports() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => activeReportId && handleOpenReport(activeReportId)}
+                    disabled={isGenerating}
+                  >
+                    {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Gerar
+                  </Button>
                   <Button variant="outline" onClick={handleBackToList}>
                     Voltar para lista
                   </Button>
                   <Button onClick={applyColumnFilters} disabled={isGenerating || !rawReport}>
-                    {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Filtrar
                   </Button>
                 </div>
