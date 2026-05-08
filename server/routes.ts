@@ -1523,6 +1523,38 @@ export async function registerRoutes(
   );
 
   app.get(
+    "/api/sales/items/batch",
+    requireAuth,
+    requirePermission("reports:view"),
+    async (req, res) => {
+      try {
+        const companyId = getCompanyId(req);
+        if (!companyId)
+          return res.status(401).json({ error: "Não autenticado" });
+
+        const idsParam = String(req.query.ids || "");
+        const saleIds = idsParam
+          .split(",")
+          .map((s) => parseInt(s.trim(), 10))
+          .filter((n) => Number.isFinite(n) && n > 0);
+
+        if (saleIds.length === 0) {
+          return res.json({});
+        }
+
+        const itemsMap = await storage.getSaleItemsBatch(saleIds);
+        const result: Record<number, unknown[]> = {};
+        for (const [saleId, items] of itemsMap.entries()) {
+          result[saleId] = items;
+        }
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch sale items batch" });
+      }
+    }
+  );
+
+  app.get(
     "/api/sales/:id",
     requireAuth,
     requirePermission("reports:view"),

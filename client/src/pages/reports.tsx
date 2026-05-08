@@ -456,21 +456,24 @@ export default function Reports() {
       .map((sale) => sale.id)
       .filter((id) => !saleItemsCacheRef.current.has(id));
 
-    await Promise.all(
-      idsToFetch.map(async (id) => {
-        try {
-          const response = await fetch(`/api/sales/${id}`, { credentials: "include" });
-          if (!response.ok) {
-            saleItemsCacheRef.current.set(id, []);
-            return;
+    if (idsToFetch.length > 0) {
+      try {
+        const response = await fetch(
+          `/api/sales/items/batch?ids=${idsToFetch.join(",")}`,
+          { credentials: "include" },
+        );
+        if (response.ok) {
+          const payload = (await response.json()) as Record<string, SaleItem[]>;
+          for (const id of idsToFetch) {
+            saleItemsCacheRef.current.set(id, payload[id] ?? []);
           }
-          const payload = (await response.json()) as { items?: SaleItem[] };
-          saleItemsCacheRef.current.set(id, Array.isArray(payload.items) ? payload.items : []);
-        } catch {
-          saleItemsCacheRef.current.set(id, []);
+        } else {
+          for (const id of idsToFetch) saleItemsCacheRef.current.set(id, []);
         }
-      }),
-    );
+      } catch {
+        for (const id of idsToFetch) saleItemsCacheRef.current.set(id, []);
+      }
+    }
 
     return targetSales.flatMap((sale) => saleItemsCacheRef.current.get(sale.id) || []);
   };
