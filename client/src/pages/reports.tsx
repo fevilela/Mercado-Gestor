@@ -1042,7 +1042,7 @@ export default function Reports() {
         const byProduct = saleItems.reduce<Record<string, { qty: number; revenue: number }>>((acc, item) => {
           const key = item.productName || `Produto ${item.productId}`;
           const current = acc[key] || { qty: 0, revenue: 0 };
-          current.qty += item.quantity;
+          current.qty += toNumber(item.quantity);
           current.revenue += toNumber(item.subtotal);
           acc[key] = current;
           return acc;
@@ -1223,7 +1223,7 @@ export default function Reports() {
           const key = item.productName || `Produto ${item.productId}`;
           const current = acc[key] || { qty: 0, revenue: 0, countSales: 0, lastSaleAt: "" };
           const sale = salesById.get(item.saleId);
-          current.qty += item.quantity;
+          current.qty += toNumber(item.quantity);
           current.revenue += toNumber(item.subtotal);
           current.countSales += 1;
           const createdAt = sale?.createdAt || "";
@@ -1350,17 +1350,19 @@ export default function Reports() {
         };
       }
       case "gerencial_comparativo_mensal": {
-        const months = Array.from({ length: 6 }, (_, i) => subMonths(new Date(), 5 - i));
-        const monthly = months.map((monthDate) => {
-          const key = format(monthDate, "yyyy-MM");
-          const total = context.allSales
-            .filter((sale) => {
-              const saleDate = parseDateSafe(sale.createdAt);
-              return saleDate ? format(saleDate, "yyyy-MM") === key : false;
-            })
-            .reduce((acc, sale) => acc + toNumber(sale.total), 0);
-          return { month: format(monthDate, "MMM/yyyy", { locale: ptBR }), total };
-        });
+        const grouped = context.filteredSales.reduce<Record<string, number>>((acc, sale) => {
+          const saleDate = parseDateSafe(sale.createdAt);
+          if (!saleDate) return acc;
+          const key = format(saleDate, "yyyy-MM");
+          acc[key] = (acc[key] || 0) + toNumber(sale.total);
+          return acc;
+        }, {});
+        const monthly = Object.entries(grouped)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, total]) => ({
+            month: format(parseISO(`${key}-01`), "MMM/yyyy", { locale: ptBR }),
+            total,
+          }));
 
         return {
           id: reportId,
@@ -1377,6 +1379,7 @@ export default function Reports() {
               VariacaoVsMesAnterior: index === 0 ? "-" : `${variation.toFixed(2)}%`,
             };
           }),
+          note: monthly.length === 0 ? "Nenhuma venda no periodo selecionado." : undefined,
         };
       }
       case "auditoria_log_usuarios": {
