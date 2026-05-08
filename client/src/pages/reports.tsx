@@ -1575,20 +1575,38 @@ export default function Reports() {
     printWindow.print();
   };
 
-  const handleOpenReport = async (reportId: string) => {
+  const applyFiltersToRows = (report: ReportOutput, filters: Record<string, string>): ReportRow[] => {
+    const normalizedFilters = Object.entries(filters)
+      .filter(([, value]) => value.trim() !== "")
+      .map(([col, val]) => [col, val.toLowerCase().trim()] as const);
+    if (normalizedFilters.length === 0) return report.rows;
+    return report.rows.filter((row) =>
+      normalizedFilters.every(([col, val]) => {
+        const cellVal = String(row[col] ?? "").toLowerCase().trim();
+        const rawValues = report.rows.map((r) => String(r[col] ?? "").trim()).filter((v) => v.length > 0);
+        const unique = Array.from(new Set(rawValues));
+        const n = col.toLowerCase();
+        const isPreset = n.includes("status") || n.includes("tipo") || n.includes("classe") ||
+          n.includes("inadimplente") || n.includes("ematraso") || n.includes("sucesso");
+        const isSmall = unique.length > 0 && unique.length <= 12 && unique.every((v) => v.length <= 40);
+        return isPreset || isSmall ? cellVal === val : cellVal.includes(val);
+      })
+    );
+  };
+
+  const handleOpenReport = async (reportId: string, resetFilters = true) => {
     try {
       setIsGenerating(true);
       const report = await generateReport(reportId);
       setSelectedReportId(reportId);
       setActiveReportId(reportId);
       setRawReport(report);
-      setHasAppliedFilter(false);
-      setFilteredRows([]);
-      const initialFilters = report.columns.reduce<Record<string, string>>((acc, col) => {
-        acc[col] = "";
-        return acc;
-      }, {});
-      setColumnFilters(initialFilters);
+      const filtersToApply = resetFilters
+        ? report.columns.reduce<Record<string, string>>((acc, col) => { acc[col] = ""; return acc; }, {})
+        : report.columns.reduce<Record<string, string>>((acc, col) => { acc[col] = columnFilters[col] ?? ""; return acc; }, {});
+      setColumnFilters(filtersToApply);
+      setFilteredRows(applyFiltersToRows(report, filtersToApply));
+      setHasAppliedFilter(true);
     } catch (error) {
       toast({
         title: "Erro ao gerar relatorio",
@@ -1671,30 +1689,6 @@ export default function Reports() {
 
     return config;
   }, [rawReport]);
-
-  const applyColumnFilters = () => {
-    if (!rawReport) return;
-    const normalizedFilters = Object.entries(columnFilters)
-      .filter(([, value]) => value.trim() !== "")
-      .map(([column, value]) => [column, value.toLowerCase().trim()] as const);
-
-    const result =
-      normalizedFilters.length === 0
-        ? rawReport.rows
-        : rawReport.rows.filter((row) =>
-            normalizedFilters.every(([column, value]) => {
-              const cellValue = String(row[column] ?? "").toLowerCase().trim();
-              const filterType = filterConfigByColumn.get(column)?.type || "text";
-              if (filterType === "select") {
-                return cellValue === value;
-              }
-              return cellValue.includes(value);
-            }),
-          );
-
-    setFilteredRows(result);
-    setHasAppliedFilter(true);
-  };
 
   const canExport = rawReport && hasAppliedFilter;
   const reportRowsPagination = useTablePagination(filteredRows);
@@ -1843,18 +1837,14 @@ export default function Reports() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => activeReportId && handleOpenReport(activeReportId)}
-                    disabled={isGenerating}
-                  >
-                    {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Gerar
-                  </Button>
                   <Button variant="outline" onClick={handleBackToList}>
                     Voltar para lista
                   </Button>
-                  <Button onClick={applyColumnFilters} disabled={isGenerating || !rawReport}>
+                  <Button
+                    onClick={() => activeReportId && handleOpenReport(activeReportId, false)}
+                    disabled={isGenerating}
+                  >
+                    {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Filtrar
                   </Button>
                 </div>
