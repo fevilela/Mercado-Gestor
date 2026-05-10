@@ -1469,9 +1469,31 @@ export default function FiscalDocuments() {
     setIsNoteClosed(false);
   };
 
+  const NON_TAXABLE_CFOPS = new Set(["5927", "6927", "5928", "6928"]);
+
   const handleItemChange = (index: number, field: string, value: string) => {
     const newItems = [...formData.items];
-    newItems[index] = { ...newItems[index], [field]: value };
+    if (field === "cfop" && NON_TAXABLE_CFOPS.has(value)) {
+      newItems[index] = {
+        ...newItems[index],
+        cfop: value,
+        csosn: "400",
+        cstIcms: "41",
+        cstIpi: "99",
+        cstPisCofins: "49",
+        icmsAliquot: "0",
+        icmsReduction: "0",
+        icmsStAliquot: "0",
+        destinationIcmsAliquot: "0",
+        fcpAliquot: "0",
+        ipiAliquot: "0",
+        pisAliquot: "0",
+        cofinsAliquot: "0",
+      };
+      toast.info("CFOP de baixa de estoque: tributação zerada automaticamente (CSOSN 400 / CST 41).");
+    } else {
+      newItems[index] = { ...newItems[index], [field]: value };
+    }
     setFormData({ ...formData, items: newItems });
     setHeaderTaxes((prev) => buildAutoHeaderTotals(newItems, prev));
     const recalcFields = new Set([

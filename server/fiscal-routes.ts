@@ -766,6 +766,12 @@ router.post("/nfe/validate", requireAuth, async (req, res) => {
       });
     }
 
+    // CFOPs de saída não tributada (baixa de estoque, ajuste, perda, etc.)
+    const NON_TAXABLE_CFOPS = new Set([
+      "5927", "6927", // Baixa por perda/roubo/deterioração
+      "5928", "6928", // Baixa por perda apurada mediante inventário
+    ]);
+
     const resolvedItems = [];
 
     // Validar CSOSN para cada item
@@ -795,6 +801,35 @@ router.post("/nfe/validate", requireAuth, async (req, res) => {
           valid: false,
           error: `CEST inválido para o produto ${productLabel}. Valor informado: "${rawCest}"`,
         });
+      }
+
+      // CFOPs de baixa/perda: tributação zerada, sem passar pela matriz de vendas
+      if (NON_TAXABLE_CFOPS.has(String(item.cfop || ""))) {
+        resolvedItems.push({
+          ...item,
+          ncm,
+          cest,
+          appliedTaxRuleId: null,
+          taxMatrix: { cfop: item.cfop, csosn: "400", cst: "41" },
+          resolvedFiscal: {
+            cfop: item.cfop,
+            csosn: "400",
+            cstIcms: "41",
+            cstIpi: "99",
+            cstPis: "49",
+            cstCofins: "49",
+            icmsAliquot: 0,
+            icmsReduction: 0,
+            icmsStAliquot: 0,
+            destinationIcmsAliquot: 0,
+            fcpAliquot: 0,
+            ipiAliquot: 0,
+            pisAliquot: 0,
+            cofinsAliquot: 0,
+          },
+          ibpt: null,
+        });
+        continue;
       }
 
       const resolvedCustomerType =
@@ -965,20 +1000,26 @@ router.post("/nfe/calculate-taxes", async (req, res) => {
     let totalTaxes = 0;
     let baseValue = 0;
 
+    const NON_TAXABLE_CFOPS_CALC = new Set([
+      "5927", "6927",
+      "5928", "6928",
+    ]);
+
     for (const item of items) {
+      const isNonTaxableCfop = NON_TAXABLE_CFOPS_CALC.has(String(item.cfop || ""));
       const taxes = TaxCalculator.calculateAllTaxes(
         item.quantity,
         item.unitPrice,
-        item.icmsAliquot ?? 18,
-        item.icmsReduction || 0,
-        item.icmsStAliquot || 0,
-        item.ipiAliquot || 0,
-        item.pisAliquot || 0,
-        item.cofinsAliquot || 0,
+        isNonTaxableCfop ? 0 : (item.icmsAliquot ?? 18),
+        isNonTaxableCfop ? 0 : (item.icmsReduction || 0),
+        isNonTaxableCfop ? 0 : (item.icmsStAliquot || 0),
+        isNonTaxableCfop ? 0 : (item.ipiAliquot || 0),
+        isNonTaxableCfop ? 0 : (item.pisAliquot || 0),
+        isNonTaxableCfop ? 0 : (item.cofinsAliquot || 0),
         item.issAliquot || 0,
         item.irrfAliquot || 0,
-        item.destinationIcmsAliquot ?? 18,
-        item.fcpAliquot || 0,
+        isNonTaxableCfop ? 0 : (item.destinationIcmsAliquot ?? 18),
+        isNonTaxableCfop ? 0 : (item.fcpAliquot || 0),
         applyDifal,
       );
       const icmsExpanded = taxes.icmsValue + taxes.difalValue + taxes.fcpValue;
