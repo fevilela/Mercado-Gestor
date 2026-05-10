@@ -58,6 +58,7 @@ export interface NFEConfig {
   naturezaOperacao?: string;
   items: NFEItem[];
   cfop: string;
+  nfeNumber?: number;
 }
 
 const padNumber = (value: string | number, len: number) =>
@@ -451,7 +452,9 @@ export class NFEGenerator {
     certificatePassword?: string,
     environment: "homologacao" | "producao" = "homologacao",
   ): { xml: string; signed?: boolean } {
-    const nNF = padNumber(Math.floor(Math.random() * 999999999) + 1, 9);
+    const nNF = config.nfeNumber
+      ? padNumber(config.nfeNumber, 9)
+      : padNumber(Math.floor(Math.random() * 999999999) + 1, 9);
     const cNF = padNumber(Math.floor(Math.random() * 99999999), 8);
     const nfeKey = this.generateNFEKey({
       ufCode: config.ufCode || "31",

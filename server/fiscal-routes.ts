@@ -2389,6 +2389,44 @@ router.post("/nfe/draft", requireAuth, async (req, res) => {
   }
 });
 
+router.delete("/nfe/draft/:id", requireAuth, async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ error: "Empresa nao identificada" });
+    }
+
+    const logId = Number(req.params.id);
+    if (!Number.isFinite(logId) || logId <= 0) {
+      return res.status(400).json({ error: "ID invalido" });
+    }
+
+    const [existing] = await db
+      .select({ id: sefazTransmissionLogs.id, action: sefazTransmissionLogs.action, companyId: sefazTransmissionLogs.companyId })
+      .from(sefazTransmissionLogs)
+      .where(and(eq(sefazTransmissionLogs.id, logId), eq(sefazTransmissionLogs.companyId, companyId)))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ error: "Rascunho nao encontrado" });
+    }
+
+    if (existing.action !== "draft") {
+      return res.status(400).json({ error: "Apenas rascunhos podem ser excluidos" });
+    }
+
+    await db
+      .delete(sefazTransmissionLogs)
+      .where(and(eq(sefazTransmissionLogs.id, logId), eq(sefazTransmissionLogs.companyId, companyId)));
+
+    return res.json({ success: true, message: "Rascunho excluido com sucesso" });
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : "Erro ao excluir rascunho",
+    });
+  }
+});
+
 router.post(
   "/nfse/emit",
   requireAuth,
@@ -3522,10 +3560,24 @@ router.post(
         settings?.sefazUf || company?.state || "MG",
       ).toUpperCase();
 
+      // Buscar próximo número da sequência configurada
+      const seriesNum = Number(String(series || "1").replace(/\D/g, "")) || 1;
+      let nfeNumber: number | undefined;
+      try {
+        const { number } = await storage.getNextDocumentNumber(companyId, "NF-e", seriesNum);
+        nfeNumber = number;
+      } catch (seqErr) {
+        return res.status(400).json({
+          error: seqErr instanceof Error
+            ? `Numeração NF-e não configurada ou esgotada: ${seqErr.message}`
+            : "Numeração NF-e não configurada. Cadastre uma sequência ativa em Configurações > Numeração.",
+        });
+      }
+
       // Gerar XML base e assinar com a mesma stack de assinatura usada no envio.
       const { NFEGenerator } = await import("./nfe-generator");
       const generated = NFEGenerator.generateXML(
-        config,
+        { ...config, nfeNumber },
         series,
         undefined,
         undefined,

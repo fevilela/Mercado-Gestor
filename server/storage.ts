@@ -153,6 +153,7 @@ export const storage = {
   },
 
   async searchCustomers(query: string, companyId: number, limit: number = 10) {
+    const normalizedQuery = query.replace(/\D/g, "");
     return await db
       .select({
         id: customers.id,
@@ -172,7 +173,11 @@ export const storage = {
           eq(customers.companyId, companyId),
           or(
             ilike(customers.name, `%${query}%`),
-            ilike(customers.cpfCnpj, `%${query}%`)
+            ilike(customers.cpfCnpj, `%${query}%`),
+            // Match digits-only query against stored formatted CNPJ/CPF
+            normalizedQuery.length >= 3
+              ? sql`regexp_replace(${customers.cpfCnpj}, '[^0-9]', '', 'g') ilike ${"%" + normalizedQuery + "%"}`
+              : sql`false`
           )
         )
       )

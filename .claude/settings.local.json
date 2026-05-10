@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\ferna\\\\Downloads\\\\Mercado-Gestor\" -Recurse -Directory)",
+      "Bash(Select-Object -First 30)"
+    ]
+  }
+}

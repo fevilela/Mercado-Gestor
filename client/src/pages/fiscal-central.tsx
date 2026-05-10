@@ -157,6 +157,10 @@ export default function FiscalCentralPage() {
     endNumber: "",
     reason: "",
   });
+  const [nfeDraftDeleteDialog, setNfeDraftDeleteDialog] = useState<{
+    open: boolean;
+    doc: NFeHistoryRecord | null;
+  }>({ open: false, doc: null });
   const [nfeSearch, setNfeSearch] = useState("");
   const [nfeStatusFilter, setNfeStatusFilter] = useState("all");
   const [nfeDateFrom, setNfeDateFrom] = useState("");
@@ -922,6 +926,27 @@ export default function FiscalCentralPage() {
       toast({
         title: "Erro na inutilização",
         description: interpretInutilizacaoError(raw),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteDraftMutation = useMutation({
+    mutationFn: async (doc: NFeHistoryRecord) => {
+      const res = await fetch(`/api/fiscal/nfe/draft/${doc.id}`, { method: "DELETE" });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.error || "Falha ao excluir rascunho");
+      return payload;
+    },
+    onSuccess: () => {
+      toast({ title: "Rascunho excluído", description: "O rascunho foi removido com sucesso." });
+      setNfeDraftDeleteDialog({ open: false, doc: null });
+      queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description: error instanceof Error ? error.message : "Falha ao excluir rascunho",
         variant: "destructive",
       });
     },
@@ -1774,6 +1799,15 @@ export default function FiscalCentralPage() {
                                     >
                                       Inutilizar numeração
                                     </DropdownMenuItem>
+                                    {String(doc.status || "").toLowerCase() === "rascunho" && (
+                                      <DropdownMenuItem
+                                        onClick={() => setNfeDraftDeleteDialog({ open: true, doc })}
+                                        disabled={deleteDraftMutation.isPending}
+                                        className="text-destructive focus:text-destructive"
+                                      >
+                                        Excluir rascunho
+                                      </DropdownMenuItem>
+                                    )}
                                   </DropdownMenuContent>
                                 </DropdownMenu>
                               </TableCell>
@@ -2269,6 +2303,36 @@ export default function FiscalCentralPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      <Dialog
+        open={nfeDraftDeleteDialog.open}
+        onOpenChange={(open) => setNfeDraftDeleteDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir rascunho</DialogTitle>
+            <DialogDescription>
+              Esta ação é irreversível. O rascunho será removido permanentemente do histórico.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Cliente: <strong>{(nfeDraftDeleteDialog.doc as any)?.customerName || "—"}</strong>
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNfeDraftDeleteDialog({ open: false, doc: null })}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteDraftMutation.isPending}
+              onClick={() => nfeDraftDeleteDialog.doc && deleteDraftMutation.mutate(nfeDraftDeleteDialog.doc)}
+            >
+              {deleteDraftMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={nfeCancelDialog.open}

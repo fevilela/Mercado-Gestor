@@ -1903,9 +1903,11 @@ export default function FiscalDocuments() {
       toast.info("Nota ja fechada. Edite algum campo para recalcular e fechar novamente.");
       return;
     }
-    if (!formData.customerId) {
-      setNfeActionStatus("Bloqueado: selecione um cliente");
-      toast.error("Selecione um cliente para fechar a nota");
+    const hasCustomerDoc = String(formData.customerCPFCNPJ || "").replace(/\D/g, "").length >= 11;
+    const hasCustomerName = (nfeDestExtra.name || "").trim().length > 0;
+    if (!formData.customerId && !(hasCustomerDoc && hasCustomerName)) {
+      setNfeActionStatus("Bloqueado: informe o CNPJ/CPF e nome do destinatario");
+      toast.error("Informe o CNPJ/CPF e o nome do destinatário, ou use 'Buscar Cliente'");
       return;
     }
     if (!effectiveCfopCode) {
