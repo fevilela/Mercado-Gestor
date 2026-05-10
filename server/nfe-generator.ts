@@ -5,6 +5,7 @@ export interface NFEItem {
   productName: string;
   ncm: string;
   cfop: string;
+  unit?: string;
   quantity: number;
   unitPrice: number;
   icmsAliquot: number;
@@ -681,12 +682,12 @@ export class NFEGenerator {
         <xProd>${xProd}</xProd>
         <NCM>${ncm}</NCM>
         <CFOP>${cfop}</CFOP>
-        <uCom>UN</uCom>
+        <uCom>${escapeXml(item.unit || "UN")}</uCom>
         <qCom>${qCom}</qCom>
         <vUnCom>${vUnCom}</vUnCom>
         <vProd>${vProd}</vProd>
         <cEANTrib>SEM GTIN</cEANTrib>
-        <uTrib>UN</uTrib>
+        <uTrib>${escapeXml(item.unit || "UN")}</uTrib>
         <qTrib>${qCom}</qTrib>
         <vUnTrib>${vUnCom}</vUnTrib>
         <indTot>1</indTot>

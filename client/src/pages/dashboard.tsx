@@ -29,7 +29,7 @@ import {
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { format, isToday, parseISO } from "date-fns";
+import { format, isToday, parseISO, subDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useState } from "react";
 
@@ -49,6 +49,7 @@ interface Product {
   stock: number;
   minStock: number;
   price: string;
+  purchasePrice?: string;
   category: string;
 }
 
@@ -136,12 +137,35 @@ export default function Dashboard() {
     { name: "Acima do mín.", value: aboveCount, color: "#2f8fff" },
   ];
   const heatmapRows = 6;
-  const heatmapCols = 14;
+  const heatmapCols = 12; // 12 blocos de 2h = 24h
+
+  const last6Days = Array.from({ length: heatmapRows }, (_, i) =>
+    subDays(new Date(), heatmapRows - 1 - i)
+  );
+
   const heatmapValue = (row: number, col: number) => {
-    const intensity =
-      Math.max(0, 1 - Math.abs(col - 8) / 8) * (row + 1) * 0.2;
-    return Math.max(0, Math.round(Math.min(0.55, intensity) * 100));
+    const dayStr = format(last6Days[row], "yyyy-MM-dd");
+    const startHour = col * 2;
+    const endHour = startHour + 2;
+    return sales.filter((sale: Sale) => {
+      try {
+        const d = parseISO(sale.createdAt);
+        return (
+          format(d, "yyyy-MM-dd") === dayStr &&
+          d.getHours() >= startHour &&
+          d.getHours() < endHour
+        );
+      } catch { return false; }
+    }).length;
   };
+
+  const heatmapMax = Math.max(
+    1,
+    ...Array.from({ length: heatmapRows }, (_, row) =>
+      Array.from({ length: heatmapCols }, (_, col) => heatmapValue(row, col))
+    ).flat()
+  );
+
   const hourlyTotals: number[] = Array.from({ length: heatmapCols }, (_, col) => {
     let totalForCol = 0;
     for (let row = 0; row < heatmapRows; row += 1) {
@@ -152,13 +176,20 @@ export default function Dashboard() {
   const peakCol = hourlyTotals.indexOf(Math.max(...hourlyTotals));
   const peakStartHour = (peakCol * 2).toString().padStart(2, "0");
   const peakEndHour = (peakCol * 2 + 2).toString().padStart(2, "0");
-  const heatmapTotal: number = hourlyTotals.reduce(
-    (acc: number, v: number) => acc + v,
-    0
-  );
+  const heatmapTotal = hourlyTotals.reduce((acc, v) => acc + v, 0);
   const heatmapAverage = Math.round(heatmapTotal / heatmapCols);
 
-  const estimatedProfit = todayTotal * 0.32;
+  const avgMarginRate = (() => {
+    const priced = products.filter(
+      (p: Product) =>
+        parseFloat(p.price || "0") > 0 && parseFloat(p.purchasePrice || "0") > 0
+    );
+    if (priced.length === 0) return 0.3;
+    const totalRevenue = priced.reduce((acc: number, p: Product) => acc + parseFloat(p.price), 0);
+    const totalCost = priced.reduce((acc: number, p: Product) => acc + parseFloat(p.purchasePrice!), 0);
+    return totalRevenue > 0 ? (totalRevenue - totalCost) / totalRevenue : 0.3;
+  })();
+  const estimatedProfit = todayTotal * avgMarginRate;
 
   const weekDays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"];
   const salesByDay = weekDays.map((dayName, index) => {
@@ -349,7 +380,7 @@ export default function Dashboard() {
                 })}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Margem média de 32%
+                Margem média de {(avgMarginRate * 100).toFixed(0)}%
               </p>
             </CardContent>
           </Card>
@@ -422,7 +453,7 @@ export default function Dashboard() {
                         <span
                           key={`${row}-${col}`}
                           className="h-8 flex-1 rounded-sm"
-                          style={{ backgroundColor: `rgba(58,136,255,${(value / 100).toFixed(2)})` }}
+                          style={{ backgroundColor: `rgba(58,136,255,${Math.min(1, value / heatmapMax).toFixed(2)})` }}
                           title={`${(col * 2).toString().padStart(2, "0")}h - ${(col * 2 + 2).toString().padStart(2, "0")}h: ${value} pontos`}
                         />
                       );

@@ -171,6 +171,7 @@ interface FormItem {
   productName: string;
   description: string;
   quantity: string;
+  unit: string;
   unitPrice: string;
   ncm: string;
   csosn: string;
@@ -1358,6 +1359,7 @@ export default function FiscalDocuments() {
           productName: "",
           description: "",
           quantity: "1",
+          unit: "UN",
           unitPrice: "0",
           ncm: "",
           csosn: "101",
@@ -1407,6 +1409,7 @@ export default function FiscalDocuments() {
           productName: product.name,
           description: product.name,
           quantity: "1",
+          unit: product.unit || "UN",
           unitPrice: product.price,
           ncm: product.ncm || "",
           csosn: product.csosnCode || "101",
@@ -1829,6 +1832,7 @@ export default function FiscalDocuments() {
         productName: item.productName || item.description || `ITEM ${index + 1}`,
         ncm: item.ncm || "00000000",
         cfop: item.cfop || formData.cfopCode || "5102",
+        unit: item.unit || "UN",
         quantity: Math.max(0.0001, toAmount(item.quantity)),
         unitPrice: Math.max(0, toAmount(item.unitPrice)),
         icmsAliquot: Math.max(0, toAmount(item.icmsAliquot)),
@@ -2211,7 +2215,7 @@ export default function FiscalDocuments() {
           cstIpi: item.cstIpi || "99",
           cstPisCofins: item.cstPisCofins || "07",
           quantity: toAmount(item.quantity),
-          unit: "UN",
+          unit: item.unit || "UN",
           unitPrice: toAmount(item.unitPrice),
           totalValue: round2(toAmount(item.unitPrice) * toAmount(item.quantity)),
           icmsValue: 0,
@@ -2549,7 +2553,7 @@ export default function FiscalDocuments() {
                                 <TableCell>{item.productName || "Produto nao selecionado"}</TableCell>
                                 <TableCell>{item.ncm || "-"}</TableCell>
                                 <TableCell>{item.cfop || formData.cfopCode || "-"}</TableCell>
-                                <TableCell>{item.quantity}</TableCell>
+                                <TableCell>{item.quantity} {item.unit || "UN"}</TableCell>
                                 <TableCell>R$ {toAmount(item.unitPrice).toFixed(2)}</TableCell>
                                 <TableCell>R$ {(toAmount(item.quantity) * toAmount(item.unitPrice)).toFixed(2)}</TableCell>
                               </TableRow>
@@ -2578,18 +2582,36 @@ export default function FiscalDocuments() {
                             <>
                               <div><span className="font-medium">Descricao:</span> {selectedNfeItem.description || selectedNfeItem.productName || "-"}</div>
                               <div><span className="font-medium">NCM:</span> {selectedNfeItem.ncm || "-"}</div>
-                              <div className="grid gap-3 md:grid-cols-2">
+                              <div className="grid gap-3 md:grid-cols-3">
                                 <div>
                                   <Label>Quantidade</Label>
                                   <Input
                                     type="number"
                                     min="0"
-                                    step="1"
+                                    step="any"
                                     value={selectedNfeItem.quantity}
                                     onChange={(e) =>
                                       handleItemChange(selectedNfeItemIndex, "quantity", e.target.value)
                                     }
                                   />
+                                </div>
+                                <div>
+                                  <Label>Unidade</Label>
+                                  <Select
+                                    value={selectedNfeItem.unit || "UN"}
+                                    onValueChange={(v) =>
+                                      handleItemChange(selectedNfeItemIndex, "unit", v)
+                                    }
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="UN">UN – Unidade</SelectItem>
+                                      <SelectItem value="KG">KG – Quilograma</SelectItem>
+                                      <SelectItem value="G">G – Grama</SelectItem>
+                                    </SelectContent>
+                                  </Select>
                                 </div>
                                 <div>
                                   <Label>Valor unitario</Label>
@@ -2944,13 +2966,13 @@ export default function FiscalDocuments() {
                         {formData.items[editingTaxItemIndex].productName ||
                           "Item sem produto"}
                       </p>
-                      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
                         <div>
                           <Label>Quantidade</Label>
                           <Input
                             type="number"
                             min="0"
-                            step="1"
+                            step="any"
                             value={formData.items[editingTaxItemIndex].quantity}
                             onChange={(e) =>
                               handleItemChange(
@@ -2960,6 +2982,24 @@ export default function FiscalDocuments() {
                               )
                             }
                           />
+                        </div>
+                        <div>
+                          <Label>Unidade</Label>
+                          <Select
+                            value={formData.items[editingTaxItemIndex].unit || "UN"}
+                            onValueChange={(v) =>
+                              handleItemChange(editingTaxItemIndex, "unit", v)
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="UN">UN – Unidade</SelectItem>
+                              <SelectItem value="KG">KG – Quilograma</SelectItem>
+                              <SelectItem value="G">G – Grama</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                         <div>
                           <Label>Valor unitario (R$)</Label>

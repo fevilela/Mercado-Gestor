@@ -969,7 +969,7 @@ router.post("/nfe/calculate-taxes", async (req, res) => {
       const taxes = TaxCalculator.calculateAllTaxes(
         item.quantity,
         item.unitPrice,
-        item.icmsAliquot || 18,
+        item.icmsAliquot ?? 18,
         item.icmsReduction || 0,
         item.icmsStAliquot || 0,
         item.ipiAliquot || 0,
@@ -977,7 +977,7 @@ router.post("/nfe/calculate-taxes", async (req, res) => {
         item.cofinsAliquot || 0,
         item.issAliquot || 0,
         item.irrfAliquot || 0,
-        item.destinationIcmsAliquot || 18,
+        item.destinationIcmsAliquot ?? 18,
         item.fcpAliquot || 0,
         applyDifal,
       );

@@ -48,6 +48,7 @@ import {
   Loader2,
   Check,
   Trash2,
+  Pencil,
 } from "lucide-react";
 import {
   LineChart,
@@ -218,6 +219,39 @@ export default function Finance() {
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
 
+  const [editingPayable, setEditingPayable] = useState<Payable | null>(null);
+  const [editingReceivable, setEditingReceivable] = useState<Receivable | null>(null);
+  const [editPayableForm, setEditPayableForm] = useState({
+    description: "", category: "Outros", amount: "", dueDate: "", notes: "", supplierId: "",
+  });
+  const [editReceivableForm, setEditReceivableForm] = useState({
+    description: "", category: "Vendas", amount: "", dueDate: "", notes: "", customerId: "",
+  });
+
+  const openEditPayable = (p: Payable) => {
+    setEditPayableForm({
+      description: p.description,
+      category: p.category,
+      amount: parseFloat(p.amount).toFixed(2),
+      dueDate: format(parseISO(p.dueDate), "yyyy-MM-dd"),
+      notes: p.notes || "",
+      supplierId: p.supplierId?.toString() || "",
+    });
+    setEditingPayable(p);
+  };
+
+  const openEditReceivable = (r: Receivable) => {
+    setEditReceivableForm({
+      description: r.description,
+      category: r.category,
+      amount: parseFloat(r.amount).toFixed(2),
+      dueDate: format(parseISO(r.dueDate), "yyyy-MM-dd"),
+      notes: r.notes || "",
+      customerId: r.customerId?.toString() || "",
+    });
+    setEditingReceivable(r);
+  };
+
   const createPayableMutation = useMutation({
     mutationFn: async (data: {
       description: string;
@@ -321,6 +355,48 @@ export default function Finance() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/receivables"] });
       toast({ title: "Conta marcada como recebida" });
+    },
+  });
+
+  const updatePayableMutation = useMutation({
+    mutationFn: async (data: { id: number; description: string; category: string; amount: string; dueDate: string; supplierId?: number; supplierName?: string; notes?: string }) => {
+      const { id, ...body } = data;
+      const res = await fetch(`/api/payables/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, dueDate: new Date(body.dueDate).toISOString() }),
+      });
+      if (!res.ok) throw new Error("Failed to update payable");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/payables"] });
+      setEditingPayable(null);
+      toast({ title: "Conta a pagar atualizada" });
+    },
+    onError: () => {
+      toast({ title: "Erro ao atualizar conta a pagar", variant: "destructive" });
+    },
+  });
+
+  const updateReceivableMutation = useMutation({
+    mutationFn: async (data: { id: number; description: string; category: string; amount: string; dueDate: string; customerId?: number; customerName?: string; notes?: string }) => {
+      const { id, ...body } = data;
+      const res = await fetch(`/api/receivables/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, dueDate: new Date(body.dueDate).toISOString() }),
+      });
+      if (!res.ok) throw new Error("Failed to update receivable");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/receivables"] });
+      setEditingReceivable(null);
+      toast({ title: "Conta a receber atualizada" });
+    },
+    onError: () => {
+      toast({ title: "Erro ao atualizar conta a receber", variant: "destructive" });
     },
   });
 
@@ -951,9 +1027,7 @@ export default function Finance() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() =>
-                                    markPayablePaidMutation.mutate(payable.id)
-                                  }
+                                  onClick={() => markPayablePaidMutation.mutate(payable.id)}
                                   disabled={markPayablePaidMutation.isPending}
                                 >
                                   <Check className="h-4 w-4" />
@@ -961,10 +1035,15 @@ export default function Finance() {
                               )}
                               <Button
                                 size="sm"
+                                variant="outline"
+                                onClick={() => openEditPayable(payable)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
                                 variant="destructive"
-                                onClick={() =>
-                                  deletePayableMutation.mutate(payable.id)
-                                }
+                                onClick={() => deletePayableMutation.mutate(payable.id)}
                                 disabled={deletePayableMutation.isPending}
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -1166,24 +1245,23 @@ export default function Finance() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() =>
-                                    markReceivableReceivedMutation.mutate(
-                                      receivable.id
-                                    )
-                                  }
-                                  disabled={
-                                    markReceivableReceivedMutation.isPending
-                                  }
+                                  onClick={() => markReceivableReceivedMutation.mutate(receivable.id)}
+                                  disabled={markReceivableReceivedMutation.isPending}
                                 >
                                   <Check className="h-4 w-4" />
                                 </Button>
                               )}
                               <Button
                                 size="sm"
+                                variant="outline"
+                                onClick={() => openEditReceivable(receivable)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
                                 variant="destructive"
-                                onClick={() =>
-                                  deleteReceivableMutation.mutate(receivable.id)
-                                }
+                                onClick={() => deleteReceivableMutation.mutate(receivable.id)}
                                 disabled={deleteReceivableMutation.isPending}
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -1270,6 +1348,200 @@ export default function Finance() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Dialog editar conta a pagar */}
+      <Dialog open={!!editingPayable} onOpenChange={(open) => !open && setEditingPayable(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Conta a Pagar</DialogTitle>
+            <DialogDescription>Altere os dados da conta</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Descricao *</Label>
+              <Input
+                value={editPayableForm.description}
+                onChange={(e) => setEditPayableForm((p) => ({ ...p, description: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Categoria *</Label>
+              <Select
+                value={editPayableForm.category}
+                onValueChange={(v) => setEditPayableForm((p) => ({ ...p, category: v }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PAYABLE_CATEGORIES.map((cat) => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Valor *</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={editPayableForm.amount}
+                onChange={(e) => setEditPayableForm((p) => ({ ...p, amount: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Data de Vencimento *</Label>
+              <Input
+                type="date"
+                value={editPayableForm.dueDate}
+                onChange={(e) => setEditPayableForm((p) => ({ ...p, dueDate: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Fornecedor</Label>
+              <Select
+                value={editPayableForm.supplierId || "__none__"}
+                onValueChange={(v) => setEditPayableForm((p) => ({ ...p, supplierId: v === "__none__" ? "" : v }))}
+              >
+                <SelectTrigger><SelectValue placeholder="Selecione um fornecedor..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Nenhum</SelectItem>
+                  {suppliers.map((s) => (
+                    <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Observacoes</Label>
+              <Input
+                value={editPayableForm.notes}
+                onChange={(e) => setEditPayableForm((p) => ({ ...p, notes: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                if (!editingPayable) return;
+                const sup = suppliers.find((s) => s.id.toString() === editPayableForm.supplierId);
+                updatePayableMutation.mutate({
+                  id: editingPayable.id,
+                  description: editPayableForm.description,
+                  category: editPayableForm.category,
+                  amount: editPayableForm.amount,
+                  dueDate: editPayableForm.dueDate,
+                  supplierId: sup?.id,
+                  supplierName: sup?.name,
+                  notes: editPayableForm.notes,
+                });
+              }}
+              disabled={updatePayableMutation.isPending || !editPayableForm.description || !editPayableForm.amount || !editPayableForm.dueDate}
+            >
+              {updatePayableMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog editar conta a receber */}
+      <Dialog open={!!editingReceivable} onOpenChange={(open) => !open && setEditingReceivable(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar Conta a Receber</DialogTitle>
+            <DialogDescription>Altere os dados da conta</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Descricao *</Label>
+              <Input
+                value={editReceivableForm.description}
+                onChange={(e) => setEditReceivableForm((p) => ({ ...p, description: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Categoria *</Label>
+              <Select
+                value={editReceivableForm.category}
+                onValueChange={(v) => setEditReceivableForm((p) => ({ ...p, category: v }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {RECEIVABLE_CATEGORIES.map((cat) => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Valor *</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={editReceivableForm.amount}
+                onChange={(e) => setEditReceivableForm((p) => ({ ...p, amount: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Data de Vencimento *</Label>
+              <Input
+                type="date"
+                value={editReceivableForm.dueDate}
+                onChange={(e) => setEditReceivableForm((p) => ({ ...p, dueDate: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Cliente</Label>
+              <Select
+                value={editReceivableForm.customerId || "__none__"}
+                onValueChange={(v) => setEditReceivableForm((p) => ({ ...p, customerId: v === "__none__" ? "" : v }))}
+              >
+                <SelectTrigger><SelectValue placeholder="Selecione um cliente..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Nenhum</SelectItem>
+                  {customers.map((c) => (
+                    <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Observacoes</Label>
+              <Input
+                value={editReceivableForm.notes}
+                onChange={(e) => setEditReceivableForm((p) => ({ ...p, notes: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                if (!editingReceivable) return;
+                const cust = customers.find((c) => c.id.toString() === editReceivableForm.customerId);
+                updateReceivableMutation.mutate({
+                  id: editingReceivable.id,
+                  description: editReceivableForm.description,
+                  category: editReceivableForm.category,
+                  amount: editReceivableForm.amount,
+                  dueDate: editReceivableForm.dueDate,
+                  customerId: cust?.id,
+                  customerName: cust?.name,
+                  notes: editReceivableForm.notes,
+                });
+              }}
+              disabled={updateReceivableMutation.isPending || !editReceivableForm.description || !editReceivableForm.amount || !editReceivableForm.dueDate}
+            >
+              {updateReceivableMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
