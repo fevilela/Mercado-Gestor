@@ -430,6 +430,7 @@ export default function FiscalDocuments() {
     ieIndicator: "contribuinte",
     email: "",
     address: "",
+    name: "",
   });
   const [nfeTransport, setNfeTransport] = useState({
     freightMode: "0",
@@ -1228,6 +1229,7 @@ export default function FiscalDocuments() {
     }));
     setNfeDestExtra((prev) => ({
       ...prev,
+      name: customer.name || "",
       email: customer.email || "",
       address: addressParts.join(" - "),
       ieIndicator: customer.isIcmsContributor ? "contribuinte" : "isento",
@@ -1248,7 +1250,7 @@ export default function FiscalDocuments() {
 
     try {
       const res = await fetch(
-        `/api/customers/search/${encodeURIComponent(rawDoc)}`
+        `/api/customers/search/${encodeURIComponent(normalizedDoc)}`
       );
 
       if (!res.ok) {
@@ -1760,7 +1762,7 @@ export default function FiscalDocuments() {
         body: JSON.stringify({
           summary: {
             nfeSeries: "1",
-            customerName: selectedCustomer?.name || null,
+            customerName: nfeDestExtra.name || selectedCustomer?.name || null,
             noteTotal: round2(toAmount(headerTaxes.noteTotal)),
           },
           snapshot: payload,
@@ -1806,7 +1808,7 @@ export default function FiscalDocuments() {
       companyCity: String(settings?.city || "LAVRAS"),
       companyAddress: String(settings?.address || "RUA NAO INFORMADA"),
       companyZipCode: companyZip || "37200000",
-      customerName: String(selectedCustomer?.name || "CONSUMIDOR"),
+      customerName: String(nfeDestExtra.name || selectedCustomer?.name || "CONSUMIDOR"),
       customerCNPJ: customerDoc.length === 14 ? customerDoc : undefined,
       customerCPF: customerDoc.length === 11 ? customerDoc : undefined,
       customerIE: String(nfeDestExtra.ie || "").trim() || undefined,
@@ -2002,9 +2004,9 @@ export default function FiscalDocuments() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            description: `NF-e - ${selectedCustomer?.name || "Cliente"} (${nfeIdentification.naturezaOperacao})`,
+            description: `NF-e - ${nfeDestExtra.name || selectedCustomer?.name || "Cliente"} (${nfeIdentification.naturezaOperacao})`,
             customerId: formData.customerId ? Number(formData.customerId) : null,
-            customerName: selectedCustomer?.name || null,
+            customerName: nfeDestExtra.name || selectedCustomer?.name || null,
             category: "Vendas",
             amount: receivableAmount.toFixed(2),
             dueDate: dueDateIso,
@@ -2498,7 +2500,7 @@ export default function FiscalDocuments() {
                       <div className="flex items-end"><Button className="w-full" variant="outline" onClick={handleSearchCustomerByDocument}>Buscar Cliente</Button></div>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
-                      <div><Label>Nome / Razao Social</Label><Input value={selectedCustomer?.name || ""} readOnly /></div>
+                      <div><Label>Nome / Razao Social</Label><Input value={nfeDestExtra.name} onChange={(e) => setNfeDestExtra((p) => ({ ...p, name: e.target.value }))} placeholder="Nome ou Razao Social" /></div>
                       <div><Label>Email</Label><Input value={nfeDestExtra.email} onChange={(e) => setNfeDestExtra((p) => ({ ...p, email: e.target.value }))} /></div>
                       <div><Label>IE</Label><Input value={nfeDestExtra.ie} onChange={(e) => setNfeDestExtra((p) => ({ ...p, ie: e.target.value }))} /></div>
                       <div><Label>Indicador IE</Label><Input value={nfeDestExtra.ieIndicator} onChange={(e) => setNfeDestExtra((p) => ({ ...p, ieIndicator: e.target.value }))} /></div>
