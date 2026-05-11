@@ -82,6 +82,7 @@ const round2 = (value: number) => Math.round(value * 100) / 100;
 
 const escapeXml = (value: string) =>
   String(value ?? "")
+    .trim()
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -699,10 +700,10 @@ export class NFEGenerator {
         <ICMS>
           ${icmsXmlByRegime}
         </ICMS>
-        ${difalXml}
         ${ipiXml}
         ${pisXml}
         ${cofinsXml}
+        ${difalXml}
       </imposto>
     </det>`;
       })
