@@ -943,7 +943,7 @@ export default function FiscalCentralPage() {
       return payload;
     },
     onSuccess: (payload) => {
-      toast({ title: "NF-e resetada", description: payload?.message || "NF-e removida. Gere uma nova nota." });
+      toast({ title: "NF-e pronta para reenvio", description: payload?.message || "Tentativas de envio removidas. Reenvie a NF-e ao SEFAZ." });
       setNfeResetDialog({ open: false, doc: null });
       queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
     },
@@ -2376,7 +2376,7 @@ export default function FiscalCentralPage() {
           <DialogHeader>
             <DialogTitle>Resetar NF-e</DialogTitle>
             <DialogDescription>
-              Esta ação remove a NF-e gerada do histórico para que uma nova nota possa ser gerada. A numeração utilizada será perdida. Esta ação é irreversível.
+              Remove as tentativas de envio com falha, mantendo o XML gerado intacto. Após o reset, a NF-e fica disponível para ser reenviada ao SEFAZ com o mesmo número.
             </DialogDescription>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">

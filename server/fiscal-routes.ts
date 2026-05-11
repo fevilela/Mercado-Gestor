@@ -2460,12 +2460,8 @@ router.post("/nfe/reset/:id", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "NF-e autorizada nao pode ser resetada. Use cancelamento." });
     }
 
-    // Remove o log de generate
-    await db
-      .delete(sefazTransmissionLogs)
-      .where(and(eq(sefazTransmissionLogs.id, logId), eq(sefazTransmissionLogs.companyId, companyId)));
-
-    // Remove logs de submit/receipt associados à mesma chave
+    // Remove APENAS os logs de submit/receipt (tentativas de envio com falha)
+    // O log de "generate" é preservado — o XML continua disponível para reenvio
     if (documentKey) {
       const relatedLogs = await db
         .select({ id: sefazTransmissionLogs.id, action: sefazTransmissionLogs.action, requestPayload: sefazTransmissionLogs.requestPayload, responsePayload: sefazTransmissionLogs.responsePayload })
@@ -2491,7 +2487,7 @@ router.post("/nfe/reset/:id", requireAuth, async (req, res) => {
       }
     }
 
-    return res.json({ success: true, message: "NF-e resetada. Gere uma nova nota com a proxima numeracao." });
+    return res.json({ success: true, message: "Tentativas de envio removidas. A NF-e esta pronta para ser reenviada ao SEFAZ." });
   } catch (error) {
     return res.status(400).json({
       error: error instanceof Error ? error.message : "Erro ao resetar NF-e",
