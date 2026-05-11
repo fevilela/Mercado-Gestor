@@ -1209,6 +1209,7 @@ export default function FiscalDocuments() {
       totalTaxes: "0",
     };
     setFormData({ ...formData, items: newItems });
+    setHeaderTaxes((prev) => buildAutoHeaderTotals(newItems, prev));
     setIsNoteClosed(false);
     setProductSearch("");
     setProductSearchOpen(false);
