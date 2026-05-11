@@ -145,6 +145,17 @@ const forceXmlTpAmb = (xmlContent: string, tpAmb: "1" | "2"): string => {
   return xmlContent;
 };
 
+// Corrige nomes de elementos ICMSSN gerados incorretamente por versoes antigas
+// do gerador. O XSD NF-e 4.00 define ICMSSN102 para CSOSN 102/103/300/400 e
+// ICMSSN202 para CSOSN 202/203 — os elementos ICMSSN400/300/103/203 nao existem.
+const fixIcmssnElementNames = (xmlContent: string): string => {
+  return String(xmlContent || "")
+    .replace(/<ICMSSN(300|103|400)>/g, "<ICMSSN102>")
+    .replace(/<\/ICMSSN(300|103|400)>/g, "</ICMSSN102>")
+    .replace(/<ICMSSN203>/g, "<ICMSSN202>")
+    .replace(/<\/ICMSSN203>/g, "</ICMSSN202>");
+};
+
 const normalizeXmlSerieTag = (xmlContent: string): string => {
   const source = String(xmlContent || "");
   const match = source.match(/<serie>(\d+)<\/serie>/i);
@@ -4452,6 +4463,10 @@ router.post(
       // Evita divergencia entre assinatura validada externamente e payload final enviado:
       // sempre re-assina no pipeline de envio antes de chamar a SEFAZ.
       xmlContent = stripXmlSignature(xmlContent);
+      // Corrige nomes de elementos ICMSSN gerados por versoes antigas do gerador
+      // (ex.: <ICMSSN400> -> <ICMSSN102>). Invalida assinatura antiga, ok pois
+      // re-assina logo adiante.
+      xmlContent = fixIcmssnElementNames(xmlContent);
 
       const resolvedEnvironment = await resolveSefazEnvironment(companyId);
 

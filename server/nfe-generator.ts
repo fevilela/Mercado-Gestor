@@ -163,7 +163,7 @@ const buildIcmsForSimples = (params: {
   const vBCST = asMoney(base);
   const vICMSST = asMoney(icmsStValue);
   const pRedBC = asMoney(icmsReduction);
-  const benefitXml = buildBenefitXml(params);
+  const pST = asMoney(icmsAliquot); // aliquota suportada consumidor final
 
   if (csosn === "101") {
     // Quando nao ha credito de ICMS informado, evita montar 101 com credito zero
@@ -172,7 +172,6 @@ const buildIcmsForSimples = (params: {
       return `<ICMSSN102>
             <orig>${orig}</orig>
             <CSOSN>102</CSOSN>
-            ${benefitXml}
           </ICMSSN102>`;
     }
     return `<ICMSSN101>
@@ -183,16 +182,33 @@ const buildIcmsForSimples = (params: {
           </ICMSSN101>`;
   }
 
+  // XSD usa ICMSSN102 para CSOSN 102, 103, 300 e 400 — não existem
+  // elementos ICMSSN400/300/103 no schema NF-e 4.00.
   if (["102", "103", "300", "400"].includes(csosn)) {
-    return `<ICMSSN${csosn}>
+    return `<ICMSSN102>
             <orig>${orig}</orig>
             <CSOSN>${csosn}</CSOSN>
-            ${benefitXml}
-          </ICMSSN${csosn}>`;
+          </ICMSSN102>`;
   }
 
-  if (csosn === "201" || csosn === "202") {
-    return `<ICMSSN${csosn}>
+  if (csosn === "201") {
+    return `<ICMSSN201>
+            <orig>${orig}</orig>
+            <CSOSN>201</CSOSN>
+            <modBCST>4</modBCST>
+            <pMVAST>0.00</pMVAST>
+            <pRedBCST>${pRedBC}</pRedBCST>
+            <vBCST>${vBCST}</vBCST>
+            <pICMSST>${pICMS}</pICMSST>
+            <vICMSST>${vICMSST}</vICMSST>
+            <pCredSN>${pICMS}</pCredSN>
+            <vCredICMSSN>${vICMS}</vCredICMSSN>
+          </ICMSSN201>`;
+  }
+
+  // XSD usa ICMSSN202 para CSOSN 202 e 203 — não existe ICMSSN203.
+  if (csosn === "202" || csosn === "203") {
+    return `<ICMSSN202>
             <orig>${orig}</orig>
             <CSOSN>${csosn}</CSOSN>
             <modBCST>4</modBCST>
@@ -201,25 +217,22 @@ const buildIcmsForSimples = (params: {
             <vBCST>${vBCST}</vBCST>
             <pICMSST>${pICMS}</pICMSST>
             <vICMSST>${vICMSST}</vICMSST>
-            ${benefitXml}
-          </ICMSSN${csosn}>`;
-  }
-
-  if (csosn === "203") {
-    return `<ICMSSN203>
-            <orig>${orig}</orig>
-            <CSOSN>203</CSOSN>
-            ${benefitXml}
-          </ICMSSN203>`;
+          </ICMSSN202>`;
   }
 
   if (csosn === "500") {
+    // Grupo vBCSTRet/pST/vICMSSTRet é opcional no schema (minOccurs=0).
+    // Só inclui quando há valor de ST retido anteriormente.
+    const stGroup =
+      icmsStValue > 0
+        ? `<vBCSTRet>${vBCST}</vBCSTRet>
+            <pST>${pST}</pST>
+            <vICMSSTRet>${vICMSST}</vICMSSTRet>`
+        : "";
     return `<ICMSSN500>
             <orig>${orig}</orig>
             <CSOSN>500</CSOSN>
-            <vBCSTRet>${vBCST}</vBCSTRet>
-            <vICMSSTRet>${vICMSST}</vICMSSTRet>
-            ${benefitXml}
+            ${stGroup}
           </ICMSSN500>`;
   }
 
@@ -231,7 +244,6 @@ const buildIcmsForSimples = (params: {
             <vBC>${vBC}</vBC>
             <pICMS>${pICMS}</pICMS>
             <vICMS>${vICMS}</vICMS>
-            ${benefitXml}
           </ICMSSN900>`;
   }
 
