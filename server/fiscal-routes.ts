@@ -2427,6 +2427,78 @@ router.delete("/nfe/draft/:id", requireAuth, async (req, res) => {
   }
 });
 
+router.post("/nfe/reset/:id", requireAuth, async (req, res) => {
+  try {
+    const companyId = getCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ error: "Empresa nao identificada" });
+    }
+
+    const logId = Number(req.params.id);
+    if (!Number.isFinite(logId) || logId <= 0) {
+      return res.status(400).json({ error: "ID invalido" });
+    }
+
+    const [existing] = await db
+      .select()
+      .from(sefazTransmissionLogs)
+      .where(and(eq(sefazTransmissionLogs.id, logId), eq(sefazTransmissionLogs.companyId, companyId)))
+      .limit(1);
+
+    if (!existing) {
+      return res.status(404).json({ error: "NF-e nao encontrada" });
+    }
+    if (existing.action !== "generate") {
+      return res.status(400).json({ error: "Apenas NF-e geradas podem ser resetadas" });
+    }
+
+    const responsePayload = (existing.responsePayload || {}) as any;
+    const documentKey = resolveDocumentKeyFromLog(existing);
+
+    // Protege NF-e autorizada pelo SEFAZ
+    if (responsePayload?.submit?.success || responsePayload?.authorized) {
+      return res.status(400).json({ error: "NF-e autorizada nao pode ser resetada. Use cancelamento." });
+    }
+
+    // Remove o log de generate
+    await db
+      .delete(sefazTransmissionLogs)
+      .where(and(eq(sefazTransmissionLogs.id, logId), eq(sefazTransmissionLogs.companyId, companyId)));
+
+    // Remove logs de submit/receipt associados à mesma chave
+    if (documentKey) {
+      const relatedLogs = await db
+        .select({ id: sefazTransmissionLogs.id, action: sefazTransmissionLogs.action, requestPayload: sefazTransmissionLogs.requestPayload, responsePayload: sefazTransmissionLogs.responsePayload })
+        .from(sefazTransmissionLogs)
+        .where(
+          and(
+            eq(sefazTransmissionLogs.companyId, companyId),
+            or(
+              eq(sefazTransmissionLogs.action, "submit"),
+              eq(sefazTransmissionLogs.action, "receipt"),
+            ),
+          ),
+        );
+
+      const keysToDelete = relatedLogs
+        .filter((log) => resolveDocumentKeyFromLog(log) === documentKey)
+        .map((log) => log.id);
+
+      for (const id of keysToDelete) {
+        await db
+          .delete(sefazTransmissionLogs)
+          .where(and(eq(sefazTransmissionLogs.id, id), eq(sefazTransmissionLogs.companyId, companyId)));
+      }
+    }
+
+    return res.json({ success: true, message: "NF-e resetada. Gere uma nova nota com a proxima numeracao." });
+  } catch (error) {
+    return res.status(400).json({
+      error: error instanceof Error ? error.message : "Erro ao resetar NF-e",
+    });
+  }
+});
+
 router.post(
   "/nfse/emit",
   requireAuth,

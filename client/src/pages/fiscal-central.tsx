@@ -161,6 +161,10 @@ export default function FiscalCentralPage() {
     open: boolean;
     doc: NFeHistoryRecord | null;
   }>({ open: false, doc: null });
+  const [nfeResetDialog, setNfeResetDialog] = useState<{
+    open: boolean;
+    doc: NFeHistoryRecord | null;
+  }>({ open: false, doc: null });
   const [nfeSearch, setNfeSearch] = useState("");
   const [nfeStatusFilter, setNfeStatusFilter] = useState("all");
   const [nfeDateFrom, setNfeDateFrom] = useState("");
@@ -926,6 +930,27 @@ export default function FiscalCentralPage() {
       toast({
         title: "Erro na inutilização",
         description: interpretInutilizacaoError(raw),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const resetNfeMutation = useMutation({
+    mutationFn: async (doc: NFeHistoryRecord) => {
+      const res = await fetch(`/api/fiscal/nfe/reset/${doc.id}`, { method: "POST" });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload?.error || "Falha ao resetar NF-e");
+      return payload;
+    },
+    onSuccess: (payload) => {
+      toast({ title: "NF-e resetada", description: payload?.message || "NF-e removida. Gere uma nova nota." });
+      setNfeResetDialog({ open: false, doc: null });
+      queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description: error instanceof Error ? error.message : "Falha ao resetar NF-e",
         variant: "destructive",
       });
     },
@@ -1799,6 +1824,15 @@ export default function FiscalCentralPage() {
                                     >
                                       Inutilizar numeração
                                     </DropdownMenuItem>
+                                    {(String(doc.status || "").toLowerCase() === "gerada" || String(doc.status || "").toLowerCase() === "processando") && (
+                                      <DropdownMenuItem
+                                        onClick={() => setNfeResetDialog({ open: true, doc })}
+                                        disabled={resetNfeMutation.isPending}
+                                        className="text-destructive focus:text-destructive"
+                                      >
+                                        Resetar NF-e
+                                      </DropdownMenuItem>
+                                    )}
                                     {String(doc.status || "").toLowerCase() === "rascunho" && (
                                       <DropdownMenuItem
                                         onClick={() => setNfeDraftDeleteDialog({ open: true, doc })}
@@ -2329,6 +2363,36 @@ export default function FiscalCentralPage() {
             >
               {deleteDraftMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={nfeResetDialog.open}
+        onOpenChange={(open) => setNfeResetDialog((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Resetar NF-e</DialogTitle>
+            <DialogDescription>
+              Esta ação remove a NF-e gerada do histórico para que uma nova nota possa ser gerada. A numeração utilizada será perdida. Esta ação é irreversível.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            NF-e: <strong>{nfeResetDialog.doc?.nfeNumber ? `#${nfeResetDialog.doc.nfeNumber}` : "—"}</strong>
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNfeResetDialog({ open: false, doc: null })}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={resetNfeMutation.isPending}
+              onClick={() => nfeResetDialog.doc && resetNfeMutation.mutate(nfeResetDialog.doc)}
+            >
+              {resetNfeMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Confirmar reset
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -790,9 +790,6 @@ export class NFEGenerator {
         <vBC>${vBC}</vBC>
         <vICMS>${vIcms}</vICMS>
         <vICMSDeson>${vIcmsDeson}</vICMSDeson>
-        <vFCPUFDest>${vFcpDifal}</vFCPUFDest>
-        <vICMSUFDest>${vIcmsUfDest}</vICMSUFDest>
-        <vICMSUFRemet>0.00</vICMSUFRemet>
         <vFCP>0.00</vFCP>
         <vBCST>0.00</vBCST>
         <vST>${vSt}</vST>
@@ -810,6 +807,9 @@ export class NFEGenerator {
         <vOutro>0.00</vOutro>
         <vNF>${vNF}</vNF>
         <vTotTrib>${vTotTrib}</vTotTrib>
+        ${totalDifal > 0 || totalFcpDifal > 0 ? `<vFCPUFDest>${vFcpDifal}</vFCPUFDest>
+        <vICMSUFDest>${vIcmsUfDest}</vICMSUFDest>
+        <vICMSUFRemet>0.00</vICMSUFRemet>` : ""}
       </ICMSTot>
     </total>
     <transp>
