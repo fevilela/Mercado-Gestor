@@ -145,15 +145,32 @@ const forceXmlTpAmb = (xmlContent: string, tpAmb: "1" | "2"): string => {
   return xmlContent;
 };
 
-// Corrige nomes de elementos ICMSSN gerados incorretamente por versoes antigas
-// do gerador. O XSD NF-e 4.00 define ICMSSN102 para CSOSN 102/103/300/400 e
-// ICMSSN202 para CSOSN 202/203 — os elementos ICMSSN400/300/103/203 nao existem.
-const fixIcmssnElementNames = (xmlContent: string): string => {
+// Corrige problemas de schema em XMLs gerados por versoes antigas do gerador:
+// 1. Nomes ICMSSN incorretos: ICMSSN400/300/103 → ICMSSN102; ICMSSN203 → ICMSSN202
+// 2. Ordem errada em <dest>: <IE> antes de <indIEDest> → inverte para XSD correto
+// 3. Ordem errada em <ICMSTot>: vFCPUFDest/vICMSUFDest/vICMSUFRemet devem vir logo
+//    apos vICMSDeson e antes de vFCP (XSD seq), nao apos vTotTrib
+const fixLegacyNfeXmlSchema = (xmlContent: string): string => {
   return String(xmlContent || "")
+    // ICMSSN element names
     .replace(/<ICMSSN(300|103|400)>/g, "<ICMSSN102>")
     .replace(/<\/ICMSSN(300|103|400)>/g, "</ICMSSN102>")
     .replace(/<ICMSSN203>/g, "<ICMSSN202>")
-    .replace(/<\/ICMSSN203>/g, "</ICMSSN202>");
+    .replace(/<\/ICMSSN203>/g, "</ICMSSN202>")
+    // Ordem <IE>/<indIEDest> no bloco <dest>: XSD exige indIEDest antes de IE
+    .replace(
+      /<IE>([^<]*)<\/IE><indIEDest>(\d)<\/indIEDest>/g,
+      "<indIEDest>$2</indIEDest><IE>$1</IE>",
+    )
+    // Ordem DIFAL em ICMSTot: move vFCPUFDest/vICMSUFDest/vICMSUFRemet para logo
+    // apos vICMSDeson (antes de vFCP) quando estiverem na posicao errada (apos vTotTrib)
+    .replace(
+      /(<vICMSDeson>[^<]*<\/vICMSDeson>)([\s\S]*?)(\s*<vFCPUFDest>[^<]*<\/vFCPUFDest>\s*<vICMSUFDest>[^<]*<\/vICMSUFDest>\s*<vICMSUFRemet>[^<]*<\/vICMSUFRemet>)(\s*<\/ICMSTot>)/g,
+      (_, desonTag, between, difalBlock, closingTag) =>
+        /^\s*$/.test(between)
+          ? _ // ja esta na posicao correta
+          : `${desonTag}${difalBlock}${between}${closingTag}`,
+    );
 };
 
 const normalizeXmlSerieTag = (xmlContent: string): string => {
@@ -4466,7 +4483,7 @@ router.post(
       // Corrige nomes de elementos ICMSSN gerados por versoes antigas do gerador
       // (ex.: <ICMSSN400> -> <ICMSSN102>). Invalida assinatura antiga, ok pois
       // re-assina logo adiante.
-      xmlContent = fixIcmssnElementNames(xmlContent);
+      xmlContent = fixLegacyNfeXmlSchema(xmlContent);
 
       const resolvedEnvironment = await resolveSefazEnvironment(companyId);
 
