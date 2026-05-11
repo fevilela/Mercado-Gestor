@@ -837,43 +837,35 @@ export default function FiscalDocuments() {
         : [];
       const totals = data?.totals || {};
       setLastTaxCalculation(data);
-      let updatedItemsSnapshot: FormItem[] = [];
-      setFormData((prev) => {
-        const updatedItems = prev.items.map((item, index) => {
-          const calc = calculations[index] || {};
-          const subtotal =
-            Math.max(0, toAmount(item.quantity)) * Math.max(0, toAmount(item.unitPrice));
-          const discount = Math.max(0, toAmount(item.discountValue));
-          const taxableBase = Math.max(0, subtotal - discount);
-          return {
-            ...item,
-            bcIcmsValue: String(
-              round2(
-                toAmount(
-                  calc.icmsBaseValue ?? item.bcIcmsValue ?? String(taxableBase)
-                )
-              )
-            ),
-            icmsValue: String(round2(toAmount(calc.icmsValue))),
-            icmsStValue: String(round2(toAmount(calc.icmsStValue ?? item.icmsStValue))),
-            ipiValue: String(round2(toAmount(calc.ipiValue))),
-            pisValue: String(round2(toAmount(calc.pisValue))),
-            cofinsValue: String(round2(toAmount(calc.cofinsValue))),
-            issValue: String(round2(toAmount(calc.issValue))),
-            irrfValue: String(round2(toAmount(calc.irrfValue))),
-            totalTaxes: String(
-              round2(toAmount(calc.totalTaxes))
-            ),
-          };
-        });
-        updatedItemsSnapshot = updatedItems;
+      // Calcular updatedItems síncronamente da closure — não dentro do updater
+      // do setFormData, pois o updater é diferido no React 18 e o snapshot
+      // ficaria vazio quando setHeaderTaxes fosse chamado logo em seguida.
+      const applyCalc = (item: FormItem, index: number): FormItem => {
+        const calc = calculations[index] || {};
+        const subtotal =
+          Math.max(0, toAmount(item.quantity)) * Math.max(0, toAmount(item.unitPrice));
+        const discount = Math.max(0, toAmount(item.discountValue));
+        const taxableBase = Math.max(0, subtotal - discount);
         return {
-          ...prev,
-          items: updatedItems,
+          ...item,
+          bcIcmsValue: String(
+            round2(toAmount(calc.icmsBaseValue ?? item.bcIcmsValue ?? String(taxableBase)))
+          ),
+          icmsValue: String(round2(toAmount(calc.icmsValue))),
+          icmsStValue: String(round2(toAmount(calc.icmsStValue ?? item.icmsStValue))),
+          ipiValue: String(round2(toAmount(calc.ipiValue))),
+          pisValue: String(round2(toAmount(calc.pisValue))),
+          cofinsValue: String(round2(toAmount(calc.cofinsValue))),
+          issValue: String(round2(toAmount(calc.issValue))),
+          irrfValue: String(round2(toAmount(calc.irrfValue))),
+          totalTaxes: String(round2(toAmount(calc.totalTaxes))),
         };
-      });
+      };
+      const updatedItems = formData.items.map(applyCalc);
+      // setFormData usa prev.items para não perder itens adicionados durante o cálculo
+      setFormData((prev) => ({ ...prev, items: prev.items.map(applyCalc) }));
       setHeaderTaxes((prev) =>
-        buildAutoHeaderTotals(updatedItemsSnapshot, prev, {
+        buildAutoHeaderTotals(updatedItems, prev, {
           icmsTotal: round2(toAmount(totals.icmsTotal)),
           ipiTotal: round2(toAmount(totals.ipiTotal)),
           pisTotal: round2(toAmount(totals.pisTotal)),
@@ -1442,21 +1434,14 @@ export default function FiscalDocuments() {
       totalTaxes: "0",
     } as FormItem;
 
-    // Captura newItems do updater (roda síncrono) para usar nos outros setters.
-    // Usar prev.items garante que itens adicionados antes do próximo render
-    // não sejam perdidos por closure stale.
-    let capturedItems: FormItem[] = [];
-    let capturedIndex = 0;
-    setFormData((prev) => {
-      const newItems = [...prev.items, productItem];
-      capturedItems = newItems;
-      capturedIndex = prev.items.length;
-      return { ...prev, items: newItems };
-    });
-    setHeaderTaxes((prev) => buildAutoHeaderTotals(capturedItems, prev));
-    setSelectedNfeItemIndex(capturedIndex);
-    setEditingTaxItemIndex(capturedIndex);
-    queueAutoTaxRecalculation(capturedItems, formData.cfopCode);
+    const newIndex = formData.items.length;
+    setFormData((prev) => ({ ...prev, items: [...prev.items, productItem] }));
+    setSelectedNfeItemIndex(newIndex);
+    setEditingTaxItemIndex(newIndex);
+    // headerTaxes será sincronizado pelo useEffect que observa formData.items.
+    // Usa formData.items (closure) para o recalc de impostos — em prática o
+    // usuário adiciona um produto por vez, então não há closure stale aqui.
+    queueAutoTaxRecalculation([...formData.items, productItem], formData.cfopCode);
     setIsNoteClosed(false);
     setNfeWorkspaceTab("produtos");
     setProductPickerDialogOpen(false);
@@ -2298,6 +2283,13 @@ export default function FiscalDocuments() {
       // noop
     }
   }, []);
+
+  // Sincroniza headerTaxes sempre que formData.items muda.
+  // Garante que productsTotal/bcIcmsTotal/noteTotal reflitam todos os itens
+  // independente de qual handler adicionou/alterou o item.
+  useEffect(() => {
+    setHeaderTaxes((prev) => buildAutoHeaderTotals(formData.items, prev));
+  }, [formData.items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCalculateTaxes = () => {
     if (formData.items.length === 0) {
