@@ -1401,57 +1401,55 @@ export default function FiscalDocuments() {
   };
 
   const handleAddProductFromPicker = (product: Product) => {
-    setFormData((prev) => {
-      const newIndex = prev.items.length;
-      const newItems = [
-        ...prev.items,
-        {
-          productId: product.id,
-          productName: product.name,
-          description: product.name,
-          quantity: "1",
-          unit: product.unit || "UN",
-          unitPrice: product.price,
-          ncm: product.ncm || "",
-          csosn: product.csosnCode || "101",
-          cstIcms: product.cstIcms || "00",
-          cstIpi: product.cstIpi || "00",
-          cstPisCofins: product.cstPisCofins || "00",
-          cfop: prev.cfopCode || "",
-          origin: product.origin || "nacional",
-          serviceCode: product.serviceCode || "",
-          cest: product.cest || "",
-          discountValue: "0",
-          bcIcmsValue: "0",
-          icmsAliquot: "18",
-          icmsReduction: "0",
-          icmsStAliquot: "0",
-          destinationIcmsAliquot: "18",
-          fcpAliquot: "0",
-          ipiAliquot: "0",
-          pisAliquot: "0",
-          cofinsAliquot: "0",
-          issAliquot: "0",
-          irrfAliquot: "0",
-          icmsValue: "0",
-          ipiValue: "0",
-          pisValue: "0",
-          cofinsValue: "0",
-          issValue: "0",
-          irrfValue: "0",
-          icmsStValue: "0",
-          cBenef: "",
-          motDesIcms: "",
-          icmsDesonValue: "0",
-          totalTaxes: "0",
-        } as FormItem,
-      ];
-      setHeaderTaxes((headerPrev) => buildAutoHeaderTotals(newItems, headerPrev));
-      setSelectedNfeItemIndex(newIndex);
-      setEditingTaxItemIndex(newIndex);
-      queueAutoTaxRecalculation(newItems, prev.cfopCode);
-      return { ...prev, items: newItems };
-    });
+    const newIndex = formData.items.length;
+    const newItems: FormItem[] = [
+      ...formData.items,
+      {
+        productId: product.id,
+        productName: product.name,
+        description: product.name,
+        quantity: "1",
+        unit: product.unit || "UN",
+        unitPrice: product.price,
+        ncm: product.ncm || "",
+        csosn: product.csosnCode || "101",
+        cstIcms: product.cstIcms || "00",
+        cstIpi: product.cstIpi || "00",
+        cstPisCofins: product.cstPisCofins || "00",
+        cfop: formData.cfopCode || "",
+        origin: product.origin || "nacional",
+        serviceCode: product.serviceCode || "",
+        cest: product.cest || "",
+        discountValue: "0",
+        bcIcmsValue: "0",
+        icmsAliquot: "18",
+        icmsReduction: "0",
+        icmsStAliquot: "0",
+        destinationIcmsAliquot: "18",
+        fcpAliquot: "0",
+        ipiAliquot: "0",
+        pisAliquot: "0",
+        cofinsAliquot: "0",
+        issAliquot: "0",
+        irrfAliquot: "0",
+        icmsValue: "0",
+        ipiValue: "0",
+        pisValue: "0",
+        cofinsValue: "0",
+        issValue: "0",
+        irrfValue: "0",
+        icmsStValue: "0",
+        cBenef: "",
+        motDesIcms: "",
+        icmsDesonValue: "0",
+        totalTaxes: "0",
+      } as FormItem,
+    ];
+    setFormData((prev) => ({ ...prev, items: newItems }));
+    setHeaderTaxes((prev) => buildAutoHeaderTotals(newItems, prev));
+    setSelectedNfeItemIndex(newIndex);
+    setEditingTaxItemIndex(newIndex);
+    queueAutoTaxRecalculation(newItems, formData.cfopCode);
     setIsNoteClosed(false);
     setNfeWorkspaceTab("produtos");
     setProductPickerDialogOpen(false);
@@ -2266,8 +2264,20 @@ export default function FiscalDocuments() {
       const raw = window.localStorage.getItem(NFE_DRAFT_STORAGE_KEY);
       if (!raw) return;
       const draft = JSON.parse(raw);
-      if (draft?.formData) setFormData(draft.formData);
-      if (draft?.headerTaxes) setHeaderTaxes(draft.headerTaxes);
+      if (draft?.formData) {
+        setFormData(draft.formData);
+        // Recomputar headerTaxes dos itens carregados para garantir totais corretos,
+        // ignorando o valor salvo que pode estar defasado.
+        if (Array.isArray(draft.formData.items)) {
+          setHeaderTaxes((prev) =>
+            buildAutoHeaderTotals(draft.formData.items, draft.headerTaxes ?? prev)
+          );
+        } else if (draft?.headerTaxes) {
+          setHeaderTaxes(draft.headerTaxes);
+        }
+      } else if (draft?.headerTaxes) {
+        setHeaderTaxes(draft.headerTaxes);
+      }
       if (draft?.nfeOps) setNfeOps(draft.nfeOps);
       if (draft?.nfeIdentification) setNfeIdentification(draft.nfeIdentification);
       if (draft?.nfeDestExtra) setNfeDestExtra(draft.nfeDestExtra);

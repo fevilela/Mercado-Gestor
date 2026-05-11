@@ -964,6 +964,7 @@ export default function FiscalCentralPage() {
       return payload;
     },
     onSuccess: () => {
+      try { window.localStorage.removeItem("mercado-gestor:nfe-draft:v1"); } catch { /* noop */ }
       toast({ title: "Rascunho excluído", description: "O rascunho foi removido com sucesso." });
       setNfeDraftDeleteDialog({ open: false, doc: null });
       queryClient.invalidateQueries({ queryKey: ["/api/fiscal/nfe/history"] });
