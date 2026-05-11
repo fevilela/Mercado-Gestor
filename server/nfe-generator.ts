@@ -90,18 +90,17 @@ const escapeXml = (value: string) =>
     .replace(/'/g, "&apos;");
 
 const formatDateTimeWithOffset = (date: Date) => {
-  const pad = (n: number) => String(Math.abs(Math.trunc(n))).padStart(2, "0");
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
-  const offsetMinutes = -date.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? "+" : "-";
-  const hh = pad(offsetMinutes / 60);
-  const mm = pad(offsetMinutes % 60);
-  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}${sign}${hh}:${mm}`;
+  // SEFAZ exige fuso horário do emitente. Servidores cloud rodam em UTC;
+  // forçar BRT (UTC-3) garante dhEmi no formato aceito pela SEFAZ BR.
+  const BRT_OFFSET_MS = -3 * 60 * 60 * 1000;
+  const brt = new Date(date.getTime() + BRT_OFFSET_MS);
+  const year = brt.getUTCFullYear();
+  const month = String(brt.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(brt.getUTCDate()).padStart(2, "0");
+  const hours = String(brt.getUTCHours()).padStart(2, "0");
+  const minutes = String(brt.getUTCMinutes()).padStart(2, "0");
+  const seconds = String(brt.getUTCSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}-03:00`;
 };
 
 const resolveCRT = (config: NFEConfig): "1" | "2" | "3" => {
@@ -499,8 +498,13 @@ export class NFEGenerator {
       requestedIndIEDest === "9"
         ? requestedIndIEDest
         : "9";
+    // CFOP 5927 e similares: dest é a própria empresa (mesmo CNPJ). Se o
+    // emitente tem IE, o dest também deve ser indIEDest=1 com a mesma IE.
+    const isSameCnpj = cnpjDest.length === 14 && cnpjDest === companyCnpj;
     const indIEDest =
-      cpfDest.length === 11 || (normalizedIndIEDest === "1" && !destIeDigits)
+      isSameCnpj && emitIE !== "ISENTO"
+        ? "1"
+        : cpfDest.length === 11 || (normalizedIndIEDest === "1" && !destIeDigits)
         ? "9"
         : normalizedIndIEDest;
 
@@ -726,7 +730,8 @@ export class NFEGenerator {
       cnpjDest.length === 14
         ? `<CNPJ>${cnpjDest}</CNPJ>`
         : `<CPF>${padNumber(cpfDest || "00000000000", 11)}</CPF>`;
-    const destIeXml = indIEDest === "1" && destIeDigits ? `<IE>${destIeDigits}</IE>` : "";
+    const effectiveDestIe = isSameCnpj && emitIE !== "ISENTO" ? emitIE : destIeDigits;
+    const destIeXml = indIEDest === "1" && effectiveDestIe ? `<IE>${effectiveDestIe}</IE>` : "";
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
