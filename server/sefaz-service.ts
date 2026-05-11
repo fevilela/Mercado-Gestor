@@ -120,6 +120,8 @@ const normalizeXmlForTransmission = (xmlContent: string): string => {
     .replace(/<\?xml[\s\S]*?\?>/i, "")
     // Evita cStat 588 (caracteres de edicao entre tags)
     .replace(/>\s+</g, "><")
+    // Evita cStat 225: SEFAZ rejeita espacos no inicio/fim de campos TString
+    .replace(/>([^<]+)</g, (_, text) => `>${text.trim()}<`)
     .trim();
 };
 
