@@ -159,7 +159,7 @@ const fixLegacyNfeXmlSchema = (xmlContent: string): string => {
     .replace(/<\/ICMSSN203>/g, "</ICMSSN202>")
     // Ordem <IE>/<indIEDest> no bloco <dest>: XSD exige indIEDest antes de IE
     .replace(
-      /<IE>([^<]*)<\/IE><indIEDest>(\d)<\/indIEDest>/g,
+      /<IE>([^<]*)<\/IE>\s*<indIEDest>([129])<\/indIEDest>/g,
       "<indIEDest>$2</indIEDest><IE>$1</IE>",
     )
     // Ordem DIFAL em ICMSTot: move vFCPUFDest/vICMSUFDest/vICMSUFRemet para logo
