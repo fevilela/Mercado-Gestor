@@ -788,8 +788,8 @@ export class NFEGenerator {
         <cPais>1058</cPais>
         <xPais>BRASIL</xPais>
       </enderDest>
-      ${destIeXml}
       <indIEDest>${indIEDest}</indIEDest>
+      ${destIeXml}
     </dest>${detXml}
     <total>
       <ICMSTot>
