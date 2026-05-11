@@ -158,6 +158,9 @@ const forceTpAmb = (xmlContent: string, tpAmb: "1" | "2"): string => {
 const hasSignature = (xmlContent: string): boolean =>
   /<\s*Signature\b/.test(xmlContent);
 
+const stripSignature = (xmlContent: string): string =>
+  xmlContent.replace(/<Signature\b[\s\S]*?<\/Signature>/i, "").trim();
+
 const extractInfNFeId = (xmlContent: string): string => {
   const match = String(xmlContent || "").match(/<infNFe[^>]*Id="([^"]+)"/i);
   return match?.[1] || "";
@@ -664,13 +667,15 @@ export class SefazService {
         );
       }
 
-      if (!alreadySigned) {
-        xmlBody = forceTpAmb(xmlBody, expectedTpAmb);
+      // Sempre re-assinar: garante que a assinatura cobre o conteúdo
+      // normalizado (trim, sem espacos). XMLs armazenados antes do trim
+      // teriam DigestValue calculada sobre conteúdo antigo — assinar
+      // aqui produz uma assinatura valida sobre o conteudo atual.
+      if (alreadySigned) {
+        xmlBody = stripSignature(xmlBody);
       }
-
-      const signedXml = alreadySigned
-        ? xmlBody
-        : await this.signNFe(xmlBody);
+      xmlBody = forceTpAmb(xmlBody, expectedTpAmb);
+      const signedXml = await this.signNFe(xmlBody);
       const submitDebug = await saveSubmitDebugXml({
         xmlContent: signedXml,
         docType: "nfe",
