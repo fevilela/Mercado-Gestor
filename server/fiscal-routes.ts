@@ -145,11 +145,15 @@ const forceXmlTpAmb = (xmlContent: string, tpAmb: "1" | "2"): string => {
   return xmlContent;
 };
 
+const pisCofinsOtherCstPattern =
+  "(49|50|51|52|53|54|55|56|60|61|62|63|64|65|66|67|70|71|72|73|74|75|98|99)";
+
 // Corrige problemas de schema em XMLs gerados por versoes antigas do gerador:
 // 1. Nomes ICMSSN incorretos: ICMSSN400/300/103 → ICMSSN102; ICMSSN203 → ICMSSN202
 // 2. Ordem errada em <dest>: <IE> antes de <indIEDest> → inverte para XSD correto
 // 3. Ordem errada em <ICMSTot>: vFCPUFDest/vICMSUFDest/vICMSUFRemet devem vir logo
 //    apos vICMSDeson e antes de vFCP (XSD seq), nao apos vTotTrib
+// 4. CST 49-99 de PIS/COFINS deve usar grupos Outr, nao NT.
 const fixLegacyNfeXmlSchema = (xmlContent: string): string => {
   return String(xmlContent || "")
     // ICMSSN element names
@@ -161,6 +165,20 @@ const fixLegacyNfeXmlSchema = (xmlContent: string): string => {
     .replace(
       /<IE>([^<]*)<\/IE>\s*<indIEDest>([129])<\/indIEDest>/g,
       "<indIEDest>$2</indIEDest><IE>$1</IE>",
+    )
+    .replace(
+      new RegExp(
+        `<PISNT>\\s*<CST>${pisCofinsOtherCstPattern}<\\/CST>\\s*<\\/PISNT>`,
+        "g",
+      ),
+      "<PISOutr><CST>$1</CST><vBC>0.00</vBC><pPIS>0.00</pPIS><vPIS>0.00</vPIS></PISOutr>",
+    )
+    .replace(
+      new RegExp(
+        `<COFINSNT>\\s*<CST>${pisCofinsOtherCstPattern}<\\/CST>\\s*<\\/COFINSNT>`,
+        "g",
+      ),
+      "<COFINSOutr><CST>$1</CST><vBC>0.00</vBC><pCOFINS>0.00</pCOFINS><vCOFINS>0.00</vCOFINS></COFINSOutr>",
     )
     // Ordem DIFAL em ICMSTot: move vFCPUFDest/vICMSUFDest/vICMSUFRemet para logo
     // apos vICMSDeson (antes de vFCP) quando estiverem na posicao errada (apos vTotTrib)
@@ -2482,6 +2500,7 @@ router.post("/nfe/reset/:id", requireAuth, async (req, res) => {
 
     const responsePayload = (existing.responsePayload || {}) as any;
     const documentKey = resolveDocumentKeyFromLog(existing);
+    const originalXml = String(responsePayload?.xml || "").trim();
 
     // Protege NF-e autorizada pelo SEFAZ
     if (responsePayload?.submit?.success || responsePayload?.authorized) {
@@ -2504,9 +2523,21 @@ router.post("/nfe/reset/:id", requireAuth, async (req, res) => {
           ),
         );
 
-      const keysToDelete = relatedLogs
-        .filter((log) => resolveDocumentKeyFromLog(log) === documentKey)
-        .map((log) => log.id);
+      const matchingLogs = relatedLogs.filter(
+        (log) => resolveDocumentKeyFromLog(log) === documentKey,
+      );
+      const hasAuthorizedSubmit = matchingLogs.some((log) => {
+        const payload = (log.responsePayload || {}) as any;
+        const status = String(payload?.status || payload?.cStat || "").trim();
+        return Boolean(payload?.success) || status === "100" || status === "150";
+      });
+      if (hasAuthorizedSubmit) {
+        return res.status(400).json({
+          error: "NF-e autorizada nao pode ser resetada. Use cancelamento.",
+        });
+      }
+
+      const keysToDelete = matchingLogs.map((log) => log.id);
 
       for (const id of keysToDelete) {
         await db
@@ -2515,7 +2546,47 @@ router.post("/nfe/reset/:id", requireAuth, async (req, res) => {
       }
     }
 
-    return res.json({ success: true, message: "Tentativas de envio removidas. A NF-e esta pronta para ser reenviada ao SEFAZ." });
+    let xmlUpdated = false;
+    if (originalXml) {
+      const resolvedEnvironment = await resolveSefazEnvironment(companyId);
+      const expectedTpAmb: "1" | "2" =
+        resolvedEnvironment === "producao" ? "1" : "2";
+      const unsignedXml = stripXmlSignature(originalXml);
+      const normalizedXml = forceXmlTpAmb(
+        fixLegacyNfeXmlSchema(normalizeXmlSerieTag(unsignedXml)),
+        expectedTpAmb,
+      );
+      xmlUpdated = normalizedXml !== originalXml;
+
+      await db
+        .update(sefazTransmissionLogs)
+        .set({
+          environment: resolvedEnvironment,
+          responsePayload: {
+            ...responsePayload,
+            xml: normalizedXml,
+            signed: false,
+            key: documentKey || responsePayload?.key,
+            resetSanitizedAt: new Date().toISOString(),
+            resetAppliedSchemaFixes: true,
+          },
+        })
+        .where(
+          and(
+            eq(sefazTransmissionLogs.id, logId),
+            eq(sefazTransmissionLogs.companyId, companyId),
+            eq(sefazTransmissionLogs.action, "generate"),
+          ),
+        );
+    }
+
+    return res.json({
+      success: true,
+      message: xmlUpdated
+        ? "Tentativas removidas e XML corrigido. A NF-e esta pronta para ser reenviada ao SEFAZ."
+        : "Tentativas de envio removidas. A NF-e esta pronta para ser reenviada ao SEFAZ.",
+      xmlUpdated,
+    });
   } catch (error) {
     return res.status(400).json({
       error: error instanceof Error ? error.message : "Erro ao resetar NF-e",

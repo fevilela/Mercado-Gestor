@@ -355,7 +355,34 @@ const buildPisXml = (params: {
   const cstInput = padNumber(params.cst || "07", 2);
   const aliquot = Math.max(0, toNumber(params.aliquot, 0));
   const cst = cstInput === "00" && aliquot <= 0 ? "07" : cstInput;
-  if ((cst === "01" || cst === "02") && aliquot > 0) {
+  const ntCsts = new Set(["04", "05", "06", "07", "08", "09"]);
+  const otherCsts = new Set([
+    "49",
+    "50",
+    "51",
+    "52",
+    "53",
+    "54",
+    "55",
+    "56",
+    "60",
+    "61",
+    "62",
+    "63",
+    "64",
+    "65",
+    "66",
+    "67",
+    "70",
+    "71",
+    "72",
+    "73",
+    "74",
+    "75",
+    "98",
+    "99",
+  ]);
+  if (cst === "01" || cst === "02") {
     return `<PIS>
           <PISAliq>
             <CST>${cst}</CST>
@@ -365,9 +392,20 @@ const buildPisXml = (params: {
           </PISAliq>
         </PIS>`;
   }
+  if (otherCsts.has(cst)) {
+    return `<PIS>
+          <PISOutr>
+            <CST>${cst}</CST>
+            <vBC>${asMoney(params.base)}</vBC>
+            <pPIS>${asMoney(aliquot)}</pPIS>
+            <vPIS>${asMoney(params.value)}</vPIS>
+          </PISOutr>
+        </PIS>`;
+  }
+  const ntCst = ntCsts.has(cst) ? cst : "07";
   return `<PIS>
           <PISNT>
-            <CST>${cst}</CST>
+            <CST>${ntCst}</CST>
           </PISNT>
         </PIS>`;
 };
@@ -381,7 +419,34 @@ const buildCofinsXml = (params: {
   const cstInput = padNumber(params.cst || "07", 2);
   const aliquot = Math.max(0, toNumber(params.aliquot, 0));
   const cst = cstInput === "00" && aliquot <= 0 ? "07" : cstInput;
-  if ((cst === "01" || cst === "02") && aliquot > 0) {
+  const ntCsts = new Set(["04", "05", "06", "07", "08", "09"]);
+  const otherCsts = new Set([
+    "49",
+    "50",
+    "51",
+    "52",
+    "53",
+    "54",
+    "55",
+    "56",
+    "60",
+    "61",
+    "62",
+    "63",
+    "64",
+    "65",
+    "66",
+    "67",
+    "70",
+    "71",
+    "72",
+    "73",
+    "74",
+    "75",
+    "98",
+    "99",
+  ]);
+  if (cst === "01" || cst === "02") {
     return `<COFINS>
           <COFINSAliq>
             <CST>${cst}</CST>
@@ -391,9 +456,20 @@ const buildCofinsXml = (params: {
           </COFINSAliq>
         </COFINS>`;
   }
+  if (otherCsts.has(cst)) {
+    return `<COFINS>
+          <COFINSOutr>
+            <CST>${cst}</CST>
+            <vBC>${asMoney(params.base)}</vBC>
+            <pCOFINS>${asMoney(aliquot)}</pCOFINS>
+            <vCOFINS>${asMoney(params.value)}</vCOFINS>
+          </COFINSOutr>
+        </COFINS>`;
+  }
+  const ntCst = ntCsts.has(cst) ? cst : "07";
   return `<COFINS>
           <COFINSNT>
-            <CST>${cst}</CST>
+            <CST>${ntCst}</CST>
           </COFINSNT>
         </COFINS>`;
 };
