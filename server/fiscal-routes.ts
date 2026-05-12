@@ -29,14 +29,19 @@ import {
 import { getIbgeMunicipioCode } from "./ibge-municipios";
 import { storage } from "./storage";
 import { db } from "./db";
-import { sefazTransmissionLogs, users } from "@shared/schema";
+import { inventoryMovements, products, sefazTransmissionLogs, users } from "@shared/schema";
+import {
+  computeStockConsumption,
+  resolveSaleUnitForProduct,
+  toNumber,
+} from "./product-operational";
 import {
   requireAuth,
   getCompanyId,
   requirePermission,
   requireValidFiscalCertificate,
 } from "./middleware";
-import { and, asc, desc, eq, or } from "drizzle-orm";
+import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import * as soap from "soap";
 import * as fs from "fs";
 import * as crypto from "crypto";
@@ -128,6 +133,121 @@ const extractAccessKey = (xmlContent: string): string => {
 const extractXmlTag = (xmlContent: string, tag: string): string => {
   const match = xmlContent.match(new RegExp(`<${tag}>([^<]+)</${tag}>`));
   return match?.[1] ?? "";
+};
+
+const extractNfeStockItems = (xmlContent: string) => {
+  const tpNF = extractXmlTag(xmlContent, "tpNF");
+  if (tpNF && tpNF !== "1") return [];
+
+  const detBlocks = String(xmlContent || "").match(/<det\b[\s\S]*?<\/det>/g) || [];
+  const items: Array<{ productId: number; quantity: number; unit?: string }> = [];
+
+  for (const det of detBlocks) {
+    const productCode = extractXmlTag(det, "cProd").replace(/\D/g, "");
+    const cfop = extractXmlTag(det, "CFOP").replace(/\D/g, "");
+    const quantity = toNumber(extractXmlTag(det, "qCom"), 0);
+    const unit = extractXmlTag(det, "uCom") || undefined;
+    const productId = Number(productCode);
+
+    if (!Number.isInteger(productId) || productId <= 0) continue;
+    if (cfop && !/^[567]/.test(cfop)) continue;
+    if (quantity <= 0) continue;
+
+    items.push({ productId, quantity, unit });
+  }
+
+  return items;
+};
+
+const decrementStockForAuthorizedNfe = async (params: {
+  companyId: number;
+  xmlContent: string;
+  accessKey: string;
+  referenceId: number | null;
+}) => {
+  const items = extractNfeStockItems(params.xmlContent);
+  if (!items.length || !params.accessKey) return { moved: false, items: 0 };
+
+  const movementNote = `NF-e ${params.accessKey}`;
+  const existingMovements = await db
+    .select({ id: inventoryMovements.id })
+    .from(inventoryMovements)
+    .where(
+      and(
+        eq(inventoryMovements.companyId, params.companyId),
+        eq(inventoryMovements.referenceType, "nfe"),
+        eq(inventoryMovements.notes, movementNote),
+      ),
+    )
+    .limit(1);
+
+  if (existingMovements.length > 0) return { moved: false, items: 0 };
+
+  const productsById = new Map<number, Awaited<ReturnType<typeof storage.getProduct>>>();
+  const movements: Array<{
+    productId: number;
+    stockDelta: number;
+    quantity: string;
+    unitId: null;
+    companyId: number;
+    type: string;
+    reason: string;
+    referenceId: number | null;
+    referenceType: string;
+    notes: string;
+    variationId: null;
+  }> = [];
+
+  for (const item of items) {
+    const product =
+      productsById.get(item.productId) ||
+      (await storage.getProduct(item.productId, params.companyId));
+    productsById.set(item.productId, product);
+    if (!product) continue;
+
+    const saleUnit = resolveSaleUnitForProduct(product, item.unit);
+    const computed = computeStockConsumption(product, item.quantity, saleUnit);
+    const stockQuantity = Math.max(0, toNumber(computed.stockQuantity, 0));
+    if (stockQuantity <= 0) continue;
+
+    movements.push({
+      productId: item.productId,
+      stockDelta: -stockQuantity,
+      companyId: params.companyId,
+      unitId: null,
+      type: "saida",
+      quantity: (-stockQuantity).toFixed(3),
+      reason: "nfe",
+      referenceId: params.referenceId,
+      referenceType: "nfe",
+      notes: movementNote,
+      variationId: null,
+    });
+  }
+
+  if (!movements.length) return { moved: false, items: 0 };
+
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select set_config('request.jwt.claims', ${JSON.stringify({ company_id: params.companyId })}, true)`,
+    );
+
+    for (const movement of movements) {
+      const { stockDelta, ...movementData } = movement;
+      await tx
+        .update(products)
+        .set({ stock: sql`${products.stock} + ${stockDelta}` })
+        .where(
+          and(
+            eq(products.id, movement.productId),
+            eq(products.companyId, params.companyId),
+          ),
+        );
+      await tx.insert(inventoryMovements).values(movementData);
+    }
+  });
+
+  return { moved: true, items: movements.length };
 };
 
 const stripXmlSignature = (xmlContent: string): string =>
@@ -4643,6 +4763,8 @@ router.post(
         responsePayload: result,
         success: result.success,
       });
+      const statusCode = String(result.status || "").trim();
+      const isAuthorized = statusCode === "100" || statusCode === "150";
       if (result.success) {
         const accessKey = result.key || extractAccessKey(signedXml);
         if (accessKey) {
@@ -4658,6 +4780,17 @@ router.post(
             authorizedAt,
             expiresAt,
           });
+          if (isAuthorized) {
+            await decrementStockForAuthorizedNfe({
+              companyId,
+              xmlContent: signedXml,
+              accessKey,
+              referenceId:
+                Number.isFinite(selectedLogId) && selectedLogId > 0
+                  ? selectedLogId
+                  : null,
+            });
+          }
         }
       }
       if (!result.success) {
@@ -4668,7 +4801,6 @@ router.post(
         });
       }
 
-      const statusCode = String(result.status || "").trim();
       const successMessage =
         statusCode === "100" || statusCode === "150"
           ? "NF-e autorizada pela SEFAZ"

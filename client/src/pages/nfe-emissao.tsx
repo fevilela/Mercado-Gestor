@@ -37,6 +37,7 @@ import Layout from "@/components/layout";
 
 interface NFEItem {
   id: string;
+  productId?: number;
   code: string;
   description: string;
   ncm: string;
@@ -140,6 +141,7 @@ export default function NFEEmissao() {
   const [productSearchOpen, setProductSearchOpen] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [currentItem, setCurrentItem] = useState<Partial<NFEItem>>({
+    productId: undefined,
     code: "",
     description: "",
     ncm: "28112090",
@@ -263,6 +265,7 @@ export default function NFEEmissao() {
     if (!selected) return;
     setCurrentItem((prev) => ({
       ...prev,
+      productId: selected.id,
       code: String(selected.ean || selected.id || ""),
       description: selected.name || "",
       ncm: String(selected.ncm || prev.ncm || "28112090"),
@@ -321,7 +324,7 @@ export default function NFEEmissao() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           items: items.map((item, index) => ({
-            productId: index + 1,
+            productId: item.productId || Number(String(item.code || "").replace(/\D/g, "")) || index + 1,
             description: item.description,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
@@ -393,6 +396,7 @@ export default function NFEEmissao() {
 
     const newItem: NFEItem = {
       id: Date.now().toString(),
+      productId: currentItem.productId,
       code: currentItem.code || "",
       description: currentItem.description || "",
       ncm: currentItem.ncm || "28112090",
@@ -412,6 +416,7 @@ export default function NFEEmissao() {
     setItems((prev) => [...prev, newItem]);
     setTaxCalculation(null);
     setCurrentItem({
+      productId: undefined,
       code: "",
       description: "",
       ncm: "28112090",
@@ -515,7 +520,11 @@ export default function NFEEmissao() {
       customerName,
       customerCNPJ: customerType === "pj" ? doc : undefined,
       customerCPF: customerType === "pf" ? doc : undefined,
-      items: items.map((item) => ({ ...item, productName: item.description })),
+      items: items.map((item, index) => ({
+        ...item,
+        productId: item.productId || Number(String(item.code || "").replace(/\D/g, "")) || index + 1,
+        productName: item.description,
+      })),
       cfop: items[0]?.cfop || "5102",
       paymentForm,
       paymentCondition,
