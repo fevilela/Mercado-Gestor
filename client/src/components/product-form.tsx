@@ -22,6 +22,11 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { toast } from "sonner";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import {
@@ -100,6 +105,13 @@ interface IngredientItemData {
 }
 
 type IngredientConsumptionUnit = "kg" | "g" | "un";
+
+const normalizeSearchText = (value: unknown) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 
 interface ProductFormProps {
   open: boolean;
@@ -257,6 +269,8 @@ export default function ProductForm({
   const [selectedKitProduct, setSelectedKitProduct] = useState<string>("");
   const [kitQuantity, setKitQuantity] = useState(1);
   const [selectedIngredientProduct, setSelectedIngredientProduct] = useState<string>("");
+  const [ingredientSearchOpen, setIngredientSearchOpen] = useState(false);
+  const [ingredientSearchTerm, setIngredientSearchTerm] = useState("");
   const [ingredientQuantity, setIngredientQuantity] = useState("1");
   const [ingredientConsumptionUnit, setIngredientConsumptionUnit] =
     useState<IngredientConsumptionUnit>("kg");
@@ -944,6 +958,16 @@ export default function ProductForm({
       p.isActive !== false &&
       !ingredientItemsList.some((item) => item.ingredientProductId === p.id)
   );
+  const selectedIngredient = allProducts.find(
+    (p: any) => p.id.toString() === selectedIngredientProduct
+  );
+  const filteredIngredients = availableIngredients.filter((product: any) => {
+    const search = normalizeSearchText(ingredientSearchTerm);
+    if (!search) return true;
+    return normalizeSearchText(
+      `${product.name} ${product.ean || ""} ${product.sku || ""} ${product.category || ""}`
+    ).includes(search);
+  });
 
   const handleGenerateInternalEan = () => {
     const existingEans = new Set<string>(
@@ -2028,24 +2052,62 @@ export default function ProductForm({
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_140px_120px_auto]">
                       <div className="space-y-2">
                         <Label>Ingrediente</Label>
-                        <Select
-                          value={selectedIngredientProduct}
-                          onValueChange={setSelectedIngredientProduct}
+                        <Popover
+                          open={ingredientSearchOpen}
+                          onOpenChange={setIngredientSearchOpen}
                         >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione um produto" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {availableIngredients.map((product: any) => (
-                              <SelectItem
-                                key={product.id}
-                                value={product.id.toString()}
-                              >
-                                {product.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="w-full justify-start font-normal"
+                            >
+                              <Search className="mr-2 h-4 w-4 text-muted-foreground" />
+                              <span className="truncate">
+                                {selectedIngredient?.name || "Pesquisar ingrediente"}
+                              </span>
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[420px] max-w-[95vw] p-2" align="start">
+                            <Input
+                              value={ingredientSearchTerm}
+                              onChange={(e) => setIngredientSearchTerm(e.target.value)}
+                              placeholder="Pesquisar por nome, EAN, SKU ou categoria"
+                              autoFocus
+                            />
+                            <div className="mt-2 max-h-64 overflow-y-auto rounded-md border">
+                              {filteredIngredients.length === 0 ? (
+                                <div className="px-3 py-2 text-sm text-muted-foreground">
+                                  Nenhum ingrediente encontrado.
+                                </div>
+                              ) : (
+                                filteredIngredients.map((product: any) => (
+                                  <button
+                                    key={product.id}
+                                    type="button"
+                                    className="block w-full px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                                    onClick={() => {
+                                      setSelectedIngredientProduct(product.id.toString());
+                                      setIngredientSearchOpen(false);
+                                      setIngredientSearchTerm("");
+                                    }}
+                                  >
+                                    <span className="block truncate font-medium">
+                                      {product.name}
+                                    </span>
+                                    {(product.ean || product.sku || product.category) && (
+                                      <span className="block truncate text-xs text-muted-foreground">
+                                        {[product.ean, product.sku, product.category]
+                                          .filter(Boolean)
+                                          .join(" · ")}
+                                      </span>
+                                    )}
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       </div>
 
                       <div className="space-y-2">
