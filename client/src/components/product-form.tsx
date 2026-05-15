@@ -96,8 +96,10 @@ interface IngredientItemData {
   ingredientProductId: number;
   ingredientProductName?: string;
   quantity: number;
-  consumptionUnit: "kg" | "g";
+  consumptionUnit: IngredientConsumptionUnit;
 }
+
+type IngredientConsumptionUnit = "kg" | "g" | "un";
 
 interface ProductFormProps {
   open: boolean;
@@ -256,7 +258,8 @@ export default function ProductForm({
   const [kitQuantity, setKitQuantity] = useState(1);
   const [selectedIngredientProduct, setSelectedIngredientProduct] = useState<string>("");
   const [ingredientQuantity, setIngredientQuantity] = useState("1");
-  const [ingredientConsumptionUnit, setIngredientConsumptionUnit] = useState<"kg" | "g">("kg");
+  const [ingredientConsumptionUnit, setIngredientConsumptionUnit] =
+    useState<IngredientConsumptionUnit>("kg");
   const [isLookingUpEan, setIsLookingUpEan] = useState(false);
   const [eanLookupError, setEanLookupError] = useState<string | null>(null);
   const submitLockRef = useRef(false);
@@ -621,7 +624,10 @@ export default function ProductForm({
       setIngredientItemsList(
         (editProduct.ingredients || []).map((item: any) => ({
           ...item,
-          consumptionUnit: item.consumptionUnit === "g" ? "g" : "kg",
+          consumptionUnit:
+            item.consumptionUnit === "g" || item.consumptionUnit === "un"
+              ? item.consumptionUnit
+              : "kg",
         }))
       );
     } else {
@@ -914,7 +920,7 @@ export default function ProductForm({
 
   const updateIngredientItemUnit = (
     ingredientProductId: number,
-    consumptionUnit: "kg" | "g"
+    consumptionUnit: IngredientConsumptionUnit
   ) => {
     setIngredientItemsList(
       ingredientItemsList.map((item) =>
@@ -940,10 +946,10 @@ export default function ProductForm({
   );
 
   const handleGenerateInternalEan = () => {
-    const existingEans = new Set(
+    const existingEans = new Set<string>(
       allProducts
         .map((product: any) => String(product?.ean || "").trim())
-        .filter(Boolean)
+        .filter((ean: string): ean is string => Boolean(ean))
     );
     const generatedEan = generateInternalEan13(existingEans);
     if (!generatedEan) {
@@ -2058,7 +2064,9 @@ export default function ProductForm({
                         <Select
                           value={ingredientConsumptionUnit}
                           onValueChange={(value) =>
-                            setIngredientConsumptionUnit(value as "kg" | "g")
+                            setIngredientConsumptionUnit(
+                              value as IngredientConsumptionUnit
+                            )
                           }
                         >
                           <SelectTrigger>
@@ -2067,6 +2075,7 @@ export default function ProductForm({
                           <SelectContent>
                             <SelectItem value="kg">kg</SelectItem>
                             <SelectItem value="g">g</SelectItem>
+                            <SelectItem value="un">unidade</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -2099,7 +2108,11 @@ export default function ProductForm({
                                 </p>
                                 <p className="text-sm text-muted-foreground">
                                   Baixa {Number(item.quantity || 0).toFixed(3)}{" "}
-                                  {item.consumptionUnit === "g" ? "g" : "kg"} por unidade
+                                  {item.consumptionUnit === "g"
+                                    ? "g"
+                                    : item.consumptionUnit === "un"
+                                      ? "unidade"
+                                      : "kg"} por unidade
                                   produzida
                                 </p>
                               </div>
@@ -2128,7 +2141,7 @@ export default function ProductForm({
                                   onValueChange={(value) =>
                                     updateIngredientItemUnit(
                                       item.ingredientProductId,
-                                      value as "kg" | "g"
+                                      value as IngredientConsumptionUnit
                                     )
                                   }
                                 >
@@ -2138,6 +2151,7 @@ export default function ProductForm({
                                   <SelectContent>
                                     <SelectItem value="kg">kg</SelectItem>
                                     <SelectItem value="g">g</SelectItem>
+                                    <SelectItem value="un">unidade</SelectItem>
                                   </SelectContent>
                                 </Select>
                                 <Button

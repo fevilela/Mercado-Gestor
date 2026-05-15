@@ -676,7 +676,7 @@ export async function registerRoutes(
   const ingredientItemSchema = z.object({
     ingredientProductId: z.number(),
     quantity: z.coerce.number().positive(),
-    consumptionUnit: z.enum(["kg", "g"]).optional().default("kg"),
+    consumptionUnit: z.enum(["kg", "g", "un"]).optional().default("kg"),
   });
 
   const createProductRequestSchema = z.object({
@@ -788,6 +788,47 @@ export async function registerRoutes(
       margin: normalizeDecimalValue(product?.margin, null),
     };
   };
+
+  const ensureProductIngredientsSchema = async () => {
+    await db.execute(sql`
+      ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS is_ingredient boolean DEFAULT false
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS product_ingredients (
+        id serial PRIMARY KEY,
+        product_id integer NOT NULL,
+        ingredient_product_id integer NOT NULL,
+        quantity numeric(12, 3) NOT NULL DEFAULT 1,
+        consumption_unit text NOT NULL DEFAULT 'kg',
+        sort_order integer DEFAULT 0,
+        created_at timestamp DEFAULT now()
+      )
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE product_ingredients
+      ADD COLUMN IF NOT EXISTS consumption_unit text NOT NULL DEFAULT 'kg'
+    `);
+
+    await db.execute(sql`
+      ALTER TABLE product_ingredients
+      ADD COLUMN IF NOT EXISTS sort_order integer DEFAULT 0
+    `);
+
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS product_ingredients_product_id_idx
+      ON product_ingredients (product_id)
+    `);
+
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS product_ingredients_ingredient_product_id_idx
+      ON product_ingredients (ingredient_product_id)
+    `);
+  };
+
+  await ensureProductIngredientsSchema();
 
   app.post(
     "/api/products",
