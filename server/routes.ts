@@ -2331,11 +2331,70 @@ export async function registerRoutes(
           });
         }
 
+        // Collect ingredient deductions for products with recipes
+        const ingredientDeductions: Array<{
+          productId: number;
+          productName: string;
+          quantity: number;
+          parentProductName: string;
+        }> = [];
+
+        for (const item of normalizedItems) {
+          const soldQty = toNumber(item.stockQuantity, 0);
+          const recipeItems = await db
+            .select()
+            .from(productIngredients)
+            .where(eq(productIngredients.productId, item.productId))
+            .orderBy(productIngredients.sortOrder, productIngredients.id);
+
+          for (const recipeItem of recipeItems) {
+            const consumedQuantity =
+              (recipeItem.consumptionUnit === "g"
+                ? toNumber(recipeItem.quantity, 0) / 1000
+                : toNumber(recipeItem.quantity, 0)) * soldQty;
+            if (consumedQuantity <= 0) continue;
+
+            const [ingredientProduct] = await db
+              .select()
+              .from(products)
+              .where(
+                and(
+                  eq(products.id, recipeItem.ingredientProductId),
+                  eq(products.companyId, companyId)
+                )
+              )
+              .limit(1);
+
+            if (!ingredientProduct) continue;
+
+            if (toNumber(ingredientProduct.stock, 0) < consumedQuantity) {
+              return res.status(400).json({
+                error: `Estoque insuficiente para o ingrediente ${ingredientProduct.name}`,
+              });
+            }
+
+            ingredientDeductions.push({
+              productId: ingredientProduct.id,
+              productName: ingredientProduct.name,
+              quantity: consumedQuantity,
+              parentProductName: item.productName,
+            });
+          }
+        }
+
         for (const item of normalizedItems) {
           await storage.updateProductStock(
             item.productId,
             companyId,
             -toNumber(item.stockQuantity, 0)
+          );
+        }
+
+        for (const deduction of ingredientDeductions) {
+          await storage.updateProductStock(
+            deduction.productId,
+            companyId,
+            -deduction.quantity
           );
         }
 
@@ -2383,6 +2442,21 @@ export async function registerRoutes(
             referenceId: newSale.id,
             referenceType: "sale",
             notes: null,
+            variationId: null,
+          });
+        }
+
+        for (const deduction of ingredientDeductions) {
+          await db.insert(inventoryMovements).values({
+            productId: deduction.productId,
+            companyId,
+            unitId: null,
+            type: "saida",
+            quantity: (-deduction.quantity).toFixed(3),
+            reason: "venda",
+            referenceId: newSale.id,
+            referenceType: "sale",
+            notes: `Baixa automática pela venda de ${deduction.parentProductName}`,
             variationId: null,
           });
         }
