@@ -17,5 +17,6 @@ if (!databaseUrl) {
 
 export const pool = new Pool({
   connectionString: databaseUrl,
+  family: 4, // força IPv4 — Render não suporta IPv6
 });
 export const db = drizzle(pool, { schema });
