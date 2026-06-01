@@ -1847,6 +1847,19 @@ router.post(
             );
           }
           const keyValidation = validateNfceKeyAgainstXml(xml);
+          console.info("[NFCe] key debug", {
+            nfceKeyUsed,
+            cUF: extractXmlTag(xml, "cUF"),
+            dhEmi: extractXmlTag(xml, "dhEmi"),
+            cnpj: extractXmlTag(xml, "CNPJ"),
+            mod: extractXmlTag(xml, "mod"),
+            serie: extractXmlTag(xml, "serie"),
+            nNF: extractXmlTag(xml, "nNF"),
+            tpEmis: extractXmlTag(xml, "tpEmis"),
+            cNF: extractXmlTag(xml, "cNF"),
+            cDV: extractXmlTag(xml, "cDV"),
+            keyOk: keyValidation.ok,
+          });
           if (!keyValidation.ok) {
             const details = (keyValidation as any).details
               ? ` | detalhes: ${JSON.stringify((keyValidation as any).details)}`
