@@ -622,6 +622,8 @@ const parseNfceAccessKey = (key: string) => {
   };
 };
 
+const BRAZIL_OFFSET_MS = -180 * 60_000; // America/Sao_Paulo = UTC-3
+
 const buildIssueDateFromKey = (
   keyInfo: { year: number; month: number },
   fallback: Date,
@@ -629,6 +631,7 @@ const buildIssueDateFromKey = (
   const issueDate = new Date(fallback);
   const day = issueDate.getDate();
   const daysInMonth = new Date(keyInfo.year, keyInfo.month, 0).getDate();
+  issueDate.setDate(1); // evita transbordamento ao trocar de mês
   issueDate.setFullYear(keyInfo.year);
   issueDate.setMonth(keyInfo.month - 1);
   issueDate.setDate(Math.min(day, daysInMonth));
@@ -1567,8 +1570,12 @@ router.post(
           }
           if (parsedKey && canReuseExistingKey) {
             const now = new Date();
-            const nowYear = now.getFullYear();
-            const nowMonth = now.getMonth() + 1;
+            // Compara usando horário de Brasília (UTC-3) — mesmo fuso usado na
+            // geração da chave e no dhEmi — para evitar reuso de chave com
+            // AAMM errado quando o servidor UTC está em mês diferente do Brasil.
+            const brazilNow = new Date(now.getTime() + BRAZIL_OFFSET_MS);
+            const nowYear = brazilNow.getUTCFullYear();
+            const nowMonth = brazilNow.getUTCMonth() + 1;
             const keyYear = Number(parsedKey.year);
             const keyMonth = Number(parsedKey.month);
             // Reenvio de NFC-e pendente: se a chave for do mesmo ano/mes atual,
