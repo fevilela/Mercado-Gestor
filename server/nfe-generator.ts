@@ -510,9 +510,11 @@ export class NFEGenerator {
     cNF: string;
     tpEmis?: string;
   }): string {
+    const BRT_OFFSET_MS = -3 * 60 * 60 * 1000;
     const date = new Date();
-    const aa = date.getFullYear().toString().slice(-2);
-    const mm = String(date.getMonth() + 1).padStart(2, "0");
+    const brt = new Date(date.getTime() + BRT_OFFSET_MS);
+    const aa = brt.getUTCFullYear().toString().slice(-2);
+    const mm = String(brt.getUTCMonth() + 1).padStart(2, "0");
     const cUF = padNumber(params.ufCode || "31", 2);
     const cnpj = padNumber(params.cnpj || "", 14);
     const serie = padNumber(params.series || "1", 3);
