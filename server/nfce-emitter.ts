@@ -155,8 +155,12 @@ export const generateNfceKey = (params: {
   tpEmis: string;
 }) => {
   const ufCode = UF_CODE[params.uf] || "35";
-  const yy = String(params.issueDate.getFullYear()).slice(2);
-  const mm = String(params.issueDate.getMonth() + 1).padStart(2, "0");
+  // Usa o mesmo fuso de formatNfceDateTime (America/Sao_Paulo = UTC-3)
+  // para garantir que AAMM da chave coincide com o dhEmi do XML.
+  const tzOffsetMs = getTimeZoneOffsetMinutes(params.issueDate, DEFAULT_NFCE_TIMEZONE) * 60_000;
+  const localDate = new Date(params.issueDate.getTime() + tzOffsetMs);
+  const yy = String(localDate.getUTCFullYear()).slice(2);
+  const mm = String(localDate.getUTCMonth() + 1).padStart(2, "0");
   const cnpj = params.cnpj.replace(/\D/g, "").padStart(14, "0");
   const model = "65";
   const serie = String(params.serie).padStart(3, "0");
